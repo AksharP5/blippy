@@ -21,3 +21,8 @@ target
 #.idea/
 
 .dev/
+
+
+# Added by cargo
+
+/target
