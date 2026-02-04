@@ -28,25 +28,15 @@ pub fn resolve_token<S: AuthSources>(sources: &S) -> Result<String> {
     Ok(token)
 }
 
-pub struct SystemAuth {
-    service: String,
-    host: String,
-}
+pub struct SystemAuth;
 
 impl SystemAuth {
     pub fn new() -> Self {
-        Self::for_host(DEFAULT_HOST)
-    }
-
-    pub fn for_host(host: &str) -> Self {
-        Self {
-            service: DEFAULT_SERVICE.to_string(),
-            host: host.to_string(),
-        }
+        Self
     }
 
     fn keyring_entry(&self) -> Result<keyring::Entry> {
-        let entry = keyring::Entry::new(&self.service, &self.host)
+        let entry = keyring::Entry::new(DEFAULT_SERVICE, DEFAULT_HOST)
             .with_context(|| "Failed to initialize keyring entry")?;
         Ok(entry)
     }
@@ -55,7 +45,7 @@ impl SystemAuth {
 impl AuthSources for SystemAuth {
     fn gh_token(&self) -> Result<Option<String>> {
         let output = Command::new("gh")
-            .args(["auth", "token", "--hostname", &self.host])
+            .args(["auth", "token", "--hostname", DEFAULT_HOST])
             .output();
 
         let output = match output {
@@ -90,7 +80,7 @@ impl AuthSources for SystemAuth {
     fn prompt_token(&self) -> Result<String> {
         let prompt = format!(
             "Paste a GitHub Personal Access Token for {}: ",
-            self.host
+            DEFAULT_HOST
         );
         let raw = rpassword::prompt_password(prompt)?;
         normalize_token(&raw).context("Token cannot be empty")
