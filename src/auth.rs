@@ -12,20 +12,56 @@ pub trait AuthSources {
 const DEFAULT_HOST: &str = "github.com";
 const DEFAULT_SERVICE: &str = "glyph";
 
-pub fn resolve_token<S: AuthSources>(sources: &S) -> Result<String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthMethod {
+    Gh,
+    Keyring,
+    Prompt,
+}
+
+impl AuthMethod {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Gh => "gh",
+            Self::Keyring => "keyring",
+            Self::Prompt => "prompt",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthToken {
+    pub value: String,
+    pub method: AuthMethod,
+}
+
+pub fn resolve_auth_token<S: AuthSources>(sources: &S) -> Result<AuthToken> {
     let token = sources.gh_token()?;
     if let Some(value) = token {
-        return Ok(value);
+        return Ok(AuthToken {
+            value,
+            method: AuthMethod::Gh,
+        });
     }
 
     let token = sources.keyring_token()?;
     if let Some(value) = token {
-        return Ok(value);
+        return Ok(AuthToken {
+            value,
+            method: AuthMethod::Keyring,
+        });
     }
 
     let token = sources.prompt_token()?;
     sources.store_token(&token)?;
-    Ok(token)
+    Ok(AuthToken {
+        value: token,
+        method: AuthMethod::Prompt,
+    })
+}
+
+pub fn resolve_token<S: AuthSources>(sources: &S) -> Result<String> {
+    Ok(resolve_auth_token(sources)?.value)
 }
 
 pub struct SystemAuth;
@@ -106,14 +142,15 @@ fn normalize_token(raw: &str) -> Option<String> {
 mod tests {
     use std::cell::RefCell;
 
-    use super::{resolve_token, AuthSources};
+    use super::{resolve_auth_token, AuthMethod, AuthSources};
 
     #[test]
     fn resolve_token_prefers_gh_token() {
         let sources = TestSources::new().with_gh("gh-token");
-        let token = resolve_token(&sources).expect("token resolves");
+        let token = resolve_auth_token(&sources).expect("token resolves");
 
-        assert_eq!(token, "gh-token");
+        assert_eq!(token.value, "gh-token");
+        assert_eq!(token.method, AuthMethod::Gh);
         assert_eq!(sources.calls(), vec!["gh"]);
         assert!(sources.stored().is_empty());
     }
@@ -121,9 +158,10 @@ mod tests {
     #[test]
     fn resolve_token_uses_keyring_when_gh_missing() {
         let sources = TestSources::new().with_keyring("keyring-token");
-        let token = resolve_token(&sources).expect("token resolves");
+        let token = resolve_auth_token(&sources).expect("token resolves");
 
-        assert_eq!(token, "keyring-token");
+        assert_eq!(token.value, "keyring-token");
+        assert_eq!(token.method, AuthMethod::Keyring);
         assert_eq!(sources.calls(), vec!["gh", "keyring"]);
         assert!(sources.stored().is_empty());
     }
@@ -131,9 +169,10 @@ mod tests {
     #[test]
     fn resolve_token_prompts_and_stores_when_missing() {
         let sources = TestSources::new().with_prompt("prompt-token");
-        let token = resolve_token(&sources).expect("token resolves");
+        let token = resolve_auth_token(&sources).expect("token resolves");
 
-        assert_eq!(token, "prompt-token");
+        assert_eq!(token.value, "prompt-token");
+        assert_eq!(token.method, AuthMethod::Prompt);
         assert_eq!(sources.calls(), vec!["gh", "keyring", "prompt", "store"]);
         assert_eq!(sources.stored(), vec!["prompt-token".to_string()]);
     }

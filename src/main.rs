@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod ui;
 
+use std::env;
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
 
@@ -14,15 +15,21 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::app::App;
-use crate::auth::{resolve_token, SystemAuth};
+use crate::auth::{resolve_auth_token, SystemAuth};
 use crate::config::Config;
 
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
 
+const AUTH_DEBUG_ENV: &str = "GLYPH_AUTH_DEBUG";
+
 fn main() -> Result<()> {
     let auth = SystemAuth::new();
-    let _token = resolve_token(&auth)?;
+    let auth_token = resolve_auth_token(&auth)?;
+    if env::var(AUTH_DEBUG_ENV).is_ok() {
+        eprintln!("Auth source: {}", auth_token.method.label());
+    }
+    let _token = auth_token.value;
 
     let mut terminal_guard = TerminalGuard::init()?;
     let config = Config::load()?;

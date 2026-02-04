@@ -46,6 +46,11 @@ gh auth status
 gh auth token --hostname github.com
 ```
 
+To see which auth source was used (development only):
+```bash
+GLYPH_AUTH_DEBUG=1 cargo run
+```
+
 To force the PAT prompt:
 - Temporarily log out of GitHub CLI: `gh auth logout`
 - Remove the keychain entry for `glyph` / `github.com` using your OS keychain UI
