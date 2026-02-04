@@ -1,4 +1,5 @@
 mod app;
+mod auth;
 mod config;
 mod ui;
 
@@ -13,12 +14,16 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::app::App;
+use crate::auth::{resolve_token, SystemAuth};
 use crate::config::Config;
 
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
 
 fn main() -> Result<()> {
+    let auth = SystemAuth::new();
+    let _token = resolve_token(&auth)?;
+
     let mut terminal_guard = TerminalGuard::init()?;
     let config = Config::load()?;
     let mut app = App::new(config);

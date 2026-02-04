@@ -1,0 +1,225 @@
+use anyhow::{Context, Result};
+use std::io;
+use std::process::Command;
+
+pub trait AuthSources {
+    fn gh_token(&self) -> Result<Option<String>>;
+    fn keyring_token(&self) -> Result<Option<String>>;
+    fn prompt_token(&self) -> Result<String>;
+    fn store_token(&self, token: &str) -> Result<()>;
+}
+
+const DEFAULT_HOST: &str = "github.com";
+const DEFAULT_SERVICE: &str = "glyph";
+
+pub fn resolve_token<S: AuthSources>(sources: &S) -> Result<String> {
+    let token = sources.gh_token()?;
+    if let Some(value) = token {
+        return Ok(value);
+    }
+
+    let token = sources.keyring_token()?;
+    if let Some(value) = token {
+        return Ok(value);
+    }
+
+    let token = sources.prompt_token()?;
+    sources.store_token(&token)?;
+    Ok(token)
+}
+
+pub struct SystemAuth {
+    service: String,
+    host: String,
+}
+
+impl SystemAuth {
+    pub fn new() -> Self {
+        Self::for_host(DEFAULT_HOST)
+    }
+
+    pub fn for_host(host: &str) -> Self {
+        Self {
+            service: DEFAULT_SERVICE.to_string(),
+            host: host.to_string(),
+        }
+    }
+
+    fn keyring_entry(&self) -> Result<keyring::Entry> {
+        let entry = keyring::Entry::new(&self.service, &self.host)
+            .with_context(|| "Failed to initialize keyring entry")?;
+        Ok(entry)
+    }
+}
+
+impl AuthSources for SystemAuth {
+    fn gh_token(&self) -> Result<Option<String>> {
+        let output = Command::new("gh")
+            .args(["auth", "token", "--hostname", &self.host])
+            .output();
+
+        let output = match output {
+            Ok(output) => output,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(normalize_token(&stdout))
+    }
+
+    fn keyring_token(&self) -> Result<Option<String>> {
+        let entry = self.keyring_entry()?;
+        let token = match entry.get_password() {
+            Ok(token) => token,
+            Err(error) => {
+                if matches!(error, keyring::Error::NoEntry) {
+                    return Ok(None);
+                }
+                return Err(error.into());
+            }
+        };
+
+        Ok(normalize_token(&token))
+    }
+
+    fn prompt_token(&self) -> Result<String> {
+        let prompt = format!(
+            "Paste a GitHub Personal Access Token for {}: ",
+            self.host
+        );
+        let raw = rpassword::prompt_password(prompt)?;
+        normalize_token(&raw).context("Token cannot be empty")
+    }
+
+    fn store_token(&self, token: &str) -> Result<()> {
+        let entry = self.keyring_entry()?;
+        entry.set_password(token)?;
+        Ok(())
+    }
+}
+
+fn normalize_token(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::{resolve_token, AuthSources};
+
+    #[test]
+    fn resolve_token_prefers_gh_token() {
+        let sources = TestSources::new().with_gh("gh-token");
+        let token = resolve_token(&sources).expect("token resolves");
+
+        assert_eq!(token, "gh-token");
+        assert_eq!(sources.calls(), vec!["gh"]);
+        assert!(sources.stored().is_empty());
+    }
+
+    #[test]
+    fn resolve_token_uses_keyring_when_gh_missing() {
+        let sources = TestSources::new().with_keyring("keyring-token");
+        let token = resolve_token(&sources).expect("token resolves");
+
+        assert_eq!(token, "keyring-token");
+        assert_eq!(sources.calls(), vec!["gh", "keyring"]);
+        assert!(sources.stored().is_empty());
+    }
+
+    #[test]
+    fn resolve_token_prompts_and_stores_when_missing() {
+        let sources = TestSources::new().with_prompt("prompt-token");
+        let token = resolve_token(&sources).expect("token resolves");
+
+        assert_eq!(token, "prompt-token");
+        assert_eq!(sources.calls(), vec!["gh", "keyring", "prompt", "store"]);
+        assert_eq!(sources.stored(), vec!["prompt-token".to_string()]);
+    }
+
+    #[test]
+    fn normalize_token_trims_and_rejects_empty() {
+        assert_eq!(super::normalize_token("  abc\n"), Some("abc".to_string()));
+        assert_eq!(super::normalize_token("  \n"), None);
+    }
+
+    struct TestSources {
+        gh: Option<String>,
+        keyring: Option<String>,
+        prompt: Option<String>,
+        calls: RefCell<Vec<&'static str>>,
+        stored: RefCell<Vec<String>>,
+    }
+
+    impl TestSources {
+        fn new() -> Self {
+            Self {
+                gh: None,
+                keyring: None,
+                prompt: None,
+                calls: RefCell::new(Vec::new()),
+                stored: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn with_gh(mut self, value: &str) -> Self {
+            self.gh = Some(value.to_string());
+            self
+        }
+
+        fn with_keyring(mut self, value: &str) -> Self {
+            self.keyring = Some(value.to_string());
+            self
+        }
+
+        fn with_prompt(mut self, value: &str) -> Self {
+            self.prompt = Some(value.to_string());
+            self
+        }
+
+        fn calls(&self) -> Vec<&'static str> {
+            self.calls.borrow().clone()
+        }
+
+        fn stored(&self) -> Vec<String> {
+            self.stored.borrow().clone()
+        }
+    }
+
+    impl AuthSources for TestSources {
+        fn gh_token(&self) -> anyhow::Result<Option<String>> {
+            self.calls.borrow_mut().push("gh");
+            Ok(self.gh.clone())
+        }
+
+        fn keyring_token(&self) -> anyhow::Result<Option<String>> {
+            self.calls.borrow_mut().push("keyring");
+            Ok(self.keyring.clone())
+        }
+
+        fn prompt_token(&self) -> anyhow::Result<String> {
+            self.calls.borrow_mut().push("prompt");
+            Ok(self
+                .prompt
+                .clone()
+                .unwrap_or_else(|| "prompt-token".to_string()))
+        }
+
+        fn store_token(&self, token: &str) -> anyhow::Result<()> {
+            self.calls.borrow_mut().push("store");
+            self.stored.borrow_mut().push(token.to_string());
+            Ok(())
+        }
+    }
+}
