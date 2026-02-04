@@ -3,7 +3,7 @@
 Maintainer-first TUI for triaging GitHub Issues and PRs.
 
 ## Requirements
-- Rust toolchain (edition 2024, Rust 1.93+ recommended)
+- Rust toolchain (Rust 1.93+ recommended)
 - GitHub CLI (optional, used for auth if available)
 - OS keychain available (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 
@@ -20,7 +20,7 @@ On startup, auth is resolved in this order:
 2. OS keychain (`service=glyph`, `account=github.com`)
 3. Prompt for PAT (input hidden), then store in keychain
 
-Tokens are never written to config or SQLite.
+Tokens are never written to config or db.
 
 ## Personal Access Token (PAT)
 If prompted for a PAT, create one in GitHub settings:
