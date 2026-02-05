@@ -284,6 +284,30 @@ pub fn list_local_repos(_conn: &Connection) -> Result<Vec<LocalRepoRow>> {
     Ok(repos)
 }
 
+pub fn get_repo_by_slug(_conn: &Connection, _owner: &str, _repo: &str) -> Result<Option<RepoRow>> {
+    let mut statement = _conn.prepare(
+        "
+        SELECT id, owner, name, updated_at, etag
+        FROM repos
+        WHERE owner = ?1 AND name = ?2
+        LIMIT 1
+        ",
+    )?;
+    let mut rows = statement.query([_owner, _repo])?;
+    let row = rows.next()?;
+    let row = match row {
+        Some(row) => row,
+        None => return Ok(None),
+    };
+    Ok(Some(RepoRow {
+        id: row.get(0)?,
+        owner: row.get(1)?,
+        name: row.get(2)?,
+        updated_at: row.get(3)?,
+        etag: row.get(4)?,
+    }))
+}
+
 fn index_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
     conn.execute(
         "DELETE FROM fts_content WHERE issue_id = ?1 AND comment_id IS NULL",
@@ -475,9 +499,9 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        comments_for_issue, delete_db_at, list_issues, list_local_repos, open_db_at,
-        search_issues, upsert_comment, upsert_issue, upsert_local_repo, upsert_repo, CommentRow,
-        IssueRow, LocalRepoRow, RepoRow,
+        comments_for_issue, delete_db_at, get_repo_by_slug, list_issues, list_local_repos,
+        open_db_at, search_issues, upsert_comment, upsert_issue, upsert_local_repo, upsert_repo,
+        CommentRow, IssueRow, LocalRepoRow, RepoRow,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -757,6 +781,29 @@ mod tests {
         let repos = list_local_repos(&conn).expect("list repos");
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].last_seen, Some("2024-01-06T00:00:00Z".to_string()));
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_repo_by_slug_returns_repo() {
+        let dir = unique_temp_dir("repo-slug");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = RepoRow {
+            id: 99,
+            owner: "acme".to_string(),
+            name: "glyph".to_string(),
+            updated_at: None,
+            etag: None,
+        };
+        upsert_repo(&conn, &repo).expect("insert repo");
+
+        let found = get_repo_by_slug(&conn, "acme", "glyph").expect("lookup");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, 99);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
