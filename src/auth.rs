@@ -7,6 +7,7 @@ pub trait AuthSources {
     fn keyring_token(&self) -> Result<Option<String>>;
     fn prompt_token(&self) -> Result<String>;
     fn store_token(&self, token: &str) -> Result<()>;
+    fn clear_token(&self) -> Result<bool>;
 }
 
 const DEFAULT_HOST: &str = "github.com";
@@ -33,6 +34,10 @@ impl AuthMethod {
 pub struct AuthToken {
     pub value: String,
     pub method: AuthMethod,
+}
+
+pub fn clear_auth_token<S: AuthSources>(sources: &S) -> Result<bool> {
+    sources.clear_token()
 }
 
 pub fn resolve_auth_token<S: AuthSources>(sources: &S) -> Result<AuthToken> {
@@ -127,6 +132,19 @@ impl AuthSources for SystemAuth {
         entry.set_password(token)?;
         Ok(())
     }
+
+    fn clear_token(&self) -> Result<bool> {
+        let entry = self.keyring_entry()?;
+        match entry.delete_password() {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                if matches!(error, keyring::Error::NoEntry) {
+                    return Ok(false);
+                }
+                Err(error.into())
+            }
+        }
+    }
 }
 
 fn normalize_token(raw: &str) -> Option<String> {
@@ -183,10 +201,20 @@ mod tests {
         assert_eq!(super::normalize_token("  \n"), None);
     }
 
+    #[test]
+    fn clear_auth_token_clears_stored_token() {
+        let sources = TestSources::new().with_clear(true);
+        let cleared = super::clear_auth_token(&sources).expect("clear succeeds");
+
+        assert!(cleared);
+        assert_eq!(sources.calls(), vec!["clear"]);
+    }
+
     struct TestSources {
         gh: Option<String>,
         keyring: Option<String>,
         prompt: Option<String>,
+        clear_result: bool,
         calls: RefCell<Vec<&'static str>>,
         stored: RefCell<Vec<String>>,
     }
@@ -197,6 +225,7 @@ mod tests {
                 gh: None,
                 keyring: None,
                 prompt: None,
+                clear_result: false,
                 calls: RefCell::new(Vec::new()),
                 stored: RefCell::new(Vec::new()),
             }
@@ -214,6 +243,11 @@ mod tests {
 
         fn with_prompt(mut self, value: &str) -> Self {
             self.prompt = Some(value.to_string());
+            self
+        }
+
+        fn with_clear(mut self, value: bool) -> Self {
+            self.clear_result = value;
             self
         }
 
@@ -249,6 +283,11 @@ mod tests {
             self.calls.borrow_mut().push("store");
             self.stored.borrow_mut().push(token.to_string());
             Ok(())
+        }
+
+        fn clear_token(&self) -> anyhow::Result<bool> {
+            self.calls.borrow_mut().push("clear");
+            Ok(self.clear_result)
         }
     }
 }

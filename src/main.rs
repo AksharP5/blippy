@@ -1,5 +1,6 @@
 mod app;
 mod auth;
+mod cli;
 mod config;
 mod ui;
 
@@ -15,7 +16,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::app::App;
-use crate::auth::{resolve_auth_token, SystemAuth};
+use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
+use crate::cli::{parse_args, CliCommand};
 use crate::config::Config;
 
 type TuiBackend = CrosstermBackend<Stdout>;
@@ -24,6 +26,11 @@ type Tui = Terminal<TuiBackend>;
 const AUTH_DEBUG_ENV: &str = "GLYPH_AUTH_DEBUG";
 
 fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    if let Some(command) = parse_args(&args)? {
+        return handle_command(command);
+    }
+
     let auth = SystemAuth::new();
     let auth_token = resolve_auth_token(&auth)?;
     if env::var(AUTH_DEBUG_ENV).is_ok() {
@@ -36,6 +43,24 @@ fn main() -> Result<()> {
     let mut app = App::new(config);
 
     run_app(terminal_guard.terminal_mut(), &mut app)?;
+    Ok(())
+}
+
+fn handle_command(command: CliCommand) -> Result<()> {
+    match command {
+        CliCommand::AuthReset => handle_auth_reset(),
+    }
+}
+
+fn handle_auth_reset() -> Result<()> {
+    let auth = SystemAuth::new();
+    let cleared = clear_auth_token(&auth)?;
+    if cleared {
+        println!("Auth token removed from keychain.");
+        return Ok(());
+    }
+
+    println!("No stored auth token found.");
     Ok(())
 }
 

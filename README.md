@@ -55,6 +55,11 @@ To force the PAT prompt:
 - Temporarily log out of GitHub CLI: `gh auth logout`
 - Remove the keychain entry for `glyph` / `github.com` using your OS keychain UI
 
+To reset stored auth from the CLI:
+```bash
+glyph auth reset
+```
+
 ## Tests
 ```bash
 cargo test
