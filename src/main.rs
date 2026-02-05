@@ -277,6 +277,7 @@ fn load_issues_for_slug(
         None => {
             app.set_issues(Vec::new());
             app.set_status("No cached issues yet. Syncing...".to_string());
+            app.request_sync();
             return Ok(());
         }
     };
