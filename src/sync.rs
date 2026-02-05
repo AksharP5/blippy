@@ -112,15 +112,6 @@ pub async fn sync_repo(
         };
         crate::store::upsert_issue(_conn, &row)?;
         stats.issues += 1;
-
-        let comments = _client
-            .list_comments(_owner, _repo, issue.number)
-            .await?;
-        for comment in comments {
-            let comment_row = map_comment_to_row(row.id, &comment);
-            crate::store::upsert_comment(_conn, &comment_row)?;
-            stats.comments += 1;
-        }
     }
 
     Ok(stats)
@@ -264,36 +255,22 @@ mod tests {
                 pull_request: Some(serde_json::json!({"url": "x"})),
             },
         ];
-        let mut comments_map = HashMap::new();
-        comments_map.insert(
-            1,
-            vec![ApiComment {
-                id: 50,
-                body: Some("hello".to_string()),
-                created_at: Some("2024-01-01T01:00:00Z".to_string()),
-                user: ApiUser {
-                    login: "dev".to_string(),
-                    user_type: None,
-                },
-            }],
-        );
-
         let client = FakeGitHub {
             repo,
             issues,
-            comments: comments_map,
+            comments: HashMap::new(),
         };
 
         let stats = sync_repo(&client, &conn, "acme", "glyph")
             .await
             .expect("sync");
         assert_eq!(stats.issues, 1);
-        assert_eq!(stats.comments, 1);
+        assert_eq!(stats.comments, 0);
 
         let rows = list_issues(&conn, 1).expect("list issues");
         assert_eq!(rows.len(), 1);
         let comments = comments_for_issue(&conn, 10).expect("comments");
-        assert_eq!(comments.len(), 1);
+        assert_eq!(comments.len(), 0);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
