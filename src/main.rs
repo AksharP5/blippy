@@ -270,19 +270,19 @@ fn load_issues_for_slug(
     owner: &str,
     repo: &str,
 ) -> Result<()> {
+    app.set_current_repo(owner, repo);
     let repo_row = get_repo_by_slug(conn, owner, repo)?;
     let repo_row = match repo_row {
         Some(repo_row) => repo_row,
         None => {
             app.set_issues(Vec::new());
-            app.set_status("No cached issues yet. Run `glyph sync`.");
+            app.set_status("No cached issues yet. Syncing...".to_string());
             return Ok(());
         }
     };
     let issues = list_issues(conn, repo_row.id)?;
     app.set_issues(issues);
     app.set_status(format!("{}/{}", owner, repo));
-    app.set_current_repo(owner, repo);
     Ok(())
 }
 
