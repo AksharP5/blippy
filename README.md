@@ -76,3 +76,6 @@ cargo test
 ## Navigation
 - Ctrl+G: open repo picker
 - Ctrl+R: rescan repos
+- j/k: move, gg/G: top/bottom, Enter: open
+- o: open in browser
+- b or Esc: back from issue detail

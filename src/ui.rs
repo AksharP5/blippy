@@ -136,16 +136,18 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
 fn help_text(app: &App) -> String {
     match app.view() {
         View::RepoPicker => {
-            "Ctrl+R rescan • j/k or ↑/↓ move • Enter/l select • q quit".to_string()
+            "Ctrl+R rescan • j/k move • gg/G top/bottom • Enter select • q quit".to_string()
         }
         View::RemoteChooser => {
-            "j/k or ↑/↓ move • Enter/l select • Ctrl+G repos • q quit".to_string()
+            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • q quit".to_string()
         }
         View::Issues => {
-            "j/k or ↑/↓ move • Enter/l open • Ctrl+G repos • q quit".to_string()
+            "j/k move • gg/G top/bottom • Enter open • o browser • Ctrl+G repos • q quit"
+                .to_string()
         }
         View::IssueDetail => {
-            "j/k or ↑/↓ move • Esc/h back • Ctrl+G repos • q quit".to_string()
+            "j/k move • gg/G top/bottom • b/Esc back • o browser • Ctrl+G repos • q quit"
+                .to_string()
         }
     }
 }

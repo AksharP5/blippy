@@ -260,7 +260,50 @@ fn handle_actions(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
             app.set_comment_syncing(false);
             app.request_comment_sync();
         }
+        AppAction::OpenInBrowser => {
+            if let Some(url) = issue_url(app) {
+                if let Err(error) = open_url(&url) {
+                    app.set_status(format!("Open failed: {}", error));
+                } else {
+                    app.set_status("Opened in browser".to_string());
+                }
+            } else {
+                app.set_status("No issue selected".to_string());
+            }
+        }
     }
+    Ok(())
+}
+
+fn issue_url(app: &App) -> Option<String> {
+    let owner = app.current_owner()?;
+    let repo = app.current_repo()?;
+    let issue_number = match app.view() {
+        View::IssueDetail => app.current_issue_number(),
+        View::Issues => app.issues().get(app.selected_issue()).map(|issue| issue.number),
+        _ => None,
+    }?;
+
+    Some(format!(
+        "https://github.com/{}/{}/issues/{}",
+        owner, repo, issue_number
+    ))
+}
+
+fn open_url(url: &str) -> Result<()> {
+    if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(url).status()?;
+        return Ok(());
+    }
+
+    if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .status()?;
+        return Ok(());
+    }
+
+    std::process::Command::new("xdg-open").arg(url).status()?;
     Ok(())
 }
 

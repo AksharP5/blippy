@@ -17,6 +17,7 @@ pub enum AppAction {
     PickRepo,
     PickRemote,
     PickIssue,
+    OpenInBrowser,
 }
 
 pub struct App {
@@ -43,6 +44,7 @@ pub struct App {
     current_repo: Option<String>,
     current_issue_id: Option<i64>,
     current_issue_number: Option<i64>,
+    pending_g: bool,
 }
 
 impl App {
@@ -71,6 +73,7 @@ impl App {
             current_repo: None,
             current_issue_id: None,
             current_issue_number: None,
+            pending_g: false,
         }
     }
 
@@ -144,12 +147,25 @@ impl App {
             return;
         }
 
+        if key.code != KeyCode::Char('g') {
+            self.pending_g = false;
+        }
+
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.view = View::RepoPicker;
             }
-            KeyCode::Char('h') if self.view == View::IssueDetail => {
+            KeyCode::Char('g') if key.modifiers.is_empty() => {
+                if self.pending_g {
+                    self.jump_top();
+                    self.pending_g = false;
+                } else {
+                    self.pending_g = true;
+                }
+            }
+            KeyCode::Char('G') => self.jump_bottom(),
+            KeyCode::Char('b') if self.view == View::IssueDetail => {
                 self.view = View::Issues;
             }
             KeyCode::Esc if self.view == View::IssueDetail => {
@@ -157,7 +173,10 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
-            KeyCode::Char('l') | KeyCode::Enter => self.activate_selection(),
+            KeyCode::Enter => self.activate_selection(),
+            KeyCode::Char('o') if matches!(self.view, View::Issues | View::IssueDetail) => {
+                self.action = Some(AppAction::OpenInBrowser);
+            }
             _ => {}
         }
     }
@@ -316,6 +335,40 @@ impl App {
                 self.action = Some(AppAction::PickIssue);
             }
             View::IssueDetail => {}
+        }
+    }
+
+    fn jump_top(&mut self) {
+        match self.view {
+            View::RepoPicker => self.selected_repo = 0,
+            View::RemoteChooser => self.selected_remote = 0,
+            View::Issues => self.selected_issue = 0,
+            View::IssueDetail => self.selected_comment = 0,
+        }
+    }
+
+    fn jump_bottom(&mut self) {
+        match self.view {
+            View::RepoPicker => {
+                if !self.repos.is_empty() {
+                    self.selected_repo = self.repos.len() - 1;
+                }
+            }
+            View::RemoteChooser => {
+                if !self.remotes.is_empty() {
+                    self.selected_remote = self.remotes.len() - 1;
+                }
+            }
+            View::Issues => {
+                if !self.issues.is_empty() {
+                    self.selected_issue = self.issues.len() - 1;
+                }
+            }
+            View::IssueDetail => {
+                if !self.comments.is_empty() {
+                    self.selected_comment = self.comments.len() - 1;
+                }
+            }
         }
     }
 }
