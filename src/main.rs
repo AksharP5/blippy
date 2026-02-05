@@ -2,6 +2,7 @@ mod app;
 mod auth;
 mod cli;
 mod config;
+mod store;
 mod ui;
 
 use std::env;
@@ -18,6 +19,7 @@ use ratatui::Terminal;
 use crate::app::App;
 use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
 use crate::cli::{parse_args, CliCommand};
+use crate::store::delete_db;
 use crate::config::Config;
 
 type TuiBackend = CrosstermBackend<Stdout>;
@@ -49,6 +51,7 @@ fn main() -> Result<()> {
 fn handle_command(command: CliCommand) -> Result<()> {
     match command {
         CliCommand::AuthReset => handle_auth_reset(),
+        CliCommand::CacheReset => handle_cache_reset(),
     }
 }
 
@@ -61,6 +64,17 @@ fn handle_auth_reset() -> Result<()> {
     }
 
     println!("No stored auth token found.");
+    Ok(())
+}
+
+fn handle_cache_reset() -> Result<()> {
+    let deleted = delete_db()?;
+    if deleted {
+        println!("Cache removed.");
+        return Ok(());
+    }
+
+    println!("No cache found.");
     Ok(())
 }
 
