@@ -2,19 +2,21 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::config::Config;
 use crate::git::RemoteInfo;
-use crate::store::{IssueRow, LocalRepoRow};
+use crate::store::{CommentRow, IssueRow, LocalRepoRow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     RepoPicker,
     RemoteChooser,
     Issues,
+    IssueDetail,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppAction {
     PickRepo,
     PickRemote,
+    PickIssue,
 }
 
 pub struct App {
@@ -24,17 +26,23 @@ pub struct App {
     repos: Vec<LocalRepoRow>,
     remotes: Vec<RemoteInfo>,
     issues: Vec<IssueRow>,
+    comments: Vec<CommentRow>,
     selected_repo: usize,
     selected_remote: usize,
     selected_issue: usize,
+    selected_comment: usize,
     status: String,
     scanning: bool,
     syncing: bool,
+    comment_syncing: bool,
+    comment_sync_requested: bool,
     sync_requested: bool,
     rescan_requested: bool,
     action: Option<AppAction>,
     current_owner: Option<String>,
     current_repo: Option<String>,
+    current_issue_id: Option<i64>,
+    current_issue_number: Option<i64>,
 }
 
 impl App {
@@ -46,17 +54,23 @@ impl App {
             repos: Vec::new(),
             remotes: Vec::new(),
             issues: Vec::new(),
+            comments: Vec::new(),
             selected_repo: 0,
             selected_remote: 0,
             selected_issue: 0,
+            selected_comment: 0,
             status: String::new(),
             scanning: false,
             syncing: false,
+            comment_syncing: false,
+            comment_sync_requested: false,
             sync_requested: false,
             rescan_requested: false,
             action: None,
             current_owner: None,
             current_repo: None,
+            current_issue_id: None,
+            current_issue_number: None,
         }
     }
 
@@ -76,6 +90,10 @@ impl App {
         &self.issues
     }
 
+    pub fn comments(&self) -> &[CommentRow] {
+        &self.comments
+    }
+
     pub fn selected_repo(&self) -> usize {
         self.selected_repo
     }
@@ -86,6 +104,10 @@ impl App {
 
     pub fn selected_issue(&self) -> usize {
         self.selected_issue
+    }
+
+    pub fn selected_comment(&self) -> usize {
+        self.selected_comment
     }
 
     pub fn status(&self) -> &str {
@@ -108,6 +130,10 @@ impl App {
         self.syncing
     }
 
+    pub fn comment_syncing(&self) -> bool {
+        self.comment_syncing
+    }
+
     pub fn on_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
             if self.view == View::RepoPicker {
@@ -122,6 +148,9 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.view = View::RepoPicker;
+            }
+            KeyCode::Esc if self.view == View::IssueDetail => {
+                self.view = View::Issues;
             }
             KeyCode::Up => self.move_selection_up(),
             KeyCode::Down => self.move_selection_down(),
@@ -153,6 +182,11 @@ impl App {
         self.selected_issue = 0;
     }
 
+    pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
+        self.comments = comments;
+        self.selected_comment = 0;
+    }
+
     pub fn set_status(&mut self, status: impl Into<String>) {
         self.status = status.into();
     }
@@ -163,6 +197,20 @@ impl App {
 
     pub fn set_syncing(&mut self, syncing: bool) {
         self.syncing = syncing;
+    }
+
+    pub fn set_comment_syncing(&mut self, syncing: bool) {
+        self.comment_syncing = syncing;
+    }
+
+    pub fn request_comment_sync(&mut self) {
+        self.comment_sync_requested = true;
+    }
+
+    pub fn take_comment_sync_request(&mut self) -> bool {
+        let requested = self.comment_sync_requested;
+        self.comment_sync_requested = false;
+        requested
     }
 
     pub fn request_sync(&mut self) {
@@ -178,6 +226,19 @@ impl App {
     pub fn set_current_repo(&mut self, owner: &str, repo: &str) {
         self.current_owner = Some(owner.to_string());
         self.current_repo = Some(repo.to_string());
+    }
+
+    pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
+        self.current_issue_id = Some(issue_id);
+        self.current_issue_number = Some(issue_number);
+    }
+
+    pub fn current_issue_id(&self) -> Option<i64> {
+        self.current_issue_id
+    }
+
+    pub fn current_issue_number(&self) -> Option<i64> {
+        self.current_issue_number
     }
 
     pub fn take_rescan_request(&mut self) -> bool {
@@ -207,6 +268,11 @@ impl App {
                     self.selected_issue -= 1;
                 }
             }
+            View::IssueDetail => {
+                if self.selected_comment > 0 {
+                    self.selected_comment -= 1;
+                }
+            }
         }
     }
 
@@ -227,6 +293,11 @@ impl App {
                     self.selected_issue += 1;
                 }
             }
+            View::IssueDetail => {
+                if self.selected_comment + 1 < self.comments.len() {
+                    self.selected_comment += 1;
+                }
+            }
         }
     }
 
@@ -238,7 +309,10 @@ impl App {
             View::RemoteChooser => {
                 self.action = Some(AppAction::PickRemote);
             }
-            View::Issues => {}
+            View::Issues => {
+                self.action = Some(AppAction::PickIssue);
+            }
+            View::IssueDetail => {}
         }
     }
 }

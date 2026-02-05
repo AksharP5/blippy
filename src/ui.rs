@@ -11,6 +11,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
         View::RepoPicker => draw_repo_picker(frame, app, area),
         View::RemoteChooser => draw_remote_chooser(frame, app, area),
         View::Issues => draw_issues(frame, app, area),
+        View::IssueDetail => draw_issue_detail(frame, app, area),
     }
 }
 
@@ -81,6 +82,34 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
             horizontal: 2,
         }),
         &mut list_state(app.selected_issue()),
+    );
+
+    draw_status(frame, app, area);
+}
+
+fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let title = app
+        .issues()
+        .get(app.selected_issue())
+        .map(|issue| issue.title.as_str())
+        .unwrap_or("Issue");
+    let block = Block::default().title(title).borders(Borders::ALL);
+    let items = if app.comments().is_empty() {
+        vec![ListItem::new("No comments cached yet.")]
+    } else {
+        app.comments()
+            .iter()
+            .map(|comment| ListItem::new(comment.body.as_str()))
+            .collect()
+    };
+    let list = List::new(items).block(block).highlight_symbol("> ");
+    frame.render_stateful_widget(
+        list,
+        area.inner(Margin {
+            vertical: 1,
+            horizontal: 2,
+        }),
+        &mut list_state(app.selected_comment()),
     );
 
     draw_status(frame, app, area);
