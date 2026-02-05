@@ -64,3 +64,7 @@ glyph auth reset
 ```bash
 cargo test
 ```
+
+## Cache
+- Cache lives in your OS user data directory as `glyph.db`
+- Reset cache: `glyph cache reset`
