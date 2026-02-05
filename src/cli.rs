@@ -4,6 +4,7 @@ use anyhow::Result;
 pub enum CliCommand {
     AuthReset,
     CacheReset,
+    Sync,
 }
 
 pub fn parse_args(_args: &[String]) -> Result<Option<CliCommand>> {
@@ -20,6 +21,10 @@ pub fn parse_args(_args: &[String]) -> Result<Option<CliCommand>> {
 
     if command == Some("cache") && subcommand == Some("reset") {
         return Ok(Some(CliCommand::CacheReset));
+    }
+
+    if command == Some("sync") {
+        return Ok(Some(CliCommand::Sync));
     }
 
     Ok(None)
@@ -58,5 +63,12 @@ mod tests {
 
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, Some(CliCommand::CacheReset));
+    }
+
+    #[test]
+    fn parse_args_returns_sync() {
+        let args = vec!["glyph".to_string(), "sync".to_string()];
+        let parsed = parse_args(&args).expect("parse succeeds");
+        assert_eq!(parsed, Some(CliCommand::Sync));
     }
 }

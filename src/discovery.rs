@@ -38,6 +38,22 @@ pub fn full_scan(_home: &Path) -> Result<Vec<DiscoveredRepo>> {
     scan_repos_in_dir(_home, usize::MAX, &excluded)
 }
 
+pub fn home_dir() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            return Some(PathBuf::from(home));
+        }
+    }
+
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        if !home.is_empty() {
+            return Some(PathBuf::from(home));
+        }
+    }
+
+    None
+}
+
 fn scan_repos_in_dir(_root: &Path, _max_depth: usize, _excluded: &HashSet<&'static str>) -> Result<Vec<DiscoveredRepo>> {
     let mut repos = Vec::new();
     if !_root.exists() {

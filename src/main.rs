@@ -10,6 +10,7 @@ mod sync;
 mod store;
 mod ui;
 
+use std::collections::HashSet;
 use std::env;
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -24,8 +25,13 @@ use ratatui::Terminal;
 use crate::app::App;
 use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
 use crate::cli::{parse_args, CliCommand};
-use crate::store::delete_db;
 use crate::config::Config;
+use crate::discovery::home_dir;
+use crate::git::list_github_remotes_at;
+use crate::github::GitHubClient;
+use crate::repo_index::index_repo_path;
+use crate::store::delete_db;
+use crate::sync::{sync_repo, SyncStats};
 
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
@@ -57,6 +63,7 @@ fn handle_command(command: CliCommand) -> Result<()> {
     match command {
         CliCommand::AuthReset => handle_auth_reset(),
         CliCommand::CacheReset => handle_cache_reset(),
+        CliCommand::Sync => handle_sync(),
     }
 }
 
@@ -80,6 +87,56 @@ fn handle_cache_reset() -> Result<()> {
     }
 
     println!("No cache found.");
+    Ok(())
+}
+
+fn handle_sync() -> Result<()> {
+    let auth = SystemAuth::new();
+    let auth_token = resolve_auth_token(&auth)?;
+    let client = GitHubClient::new(&auth_token.value)?;
+
+    let home = home_dir().unwrap_or(env::current_dir()?);
+    let repos = crate::discovery::full_scan(&home)?;
+    let conn = crate::store::open_db()?;
+
+    let mut indexed = 0usize;
+    for repo in &repos {
+        indexed += index_repo_path(&conn, &repo.path)?;
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    let mut seen = HashSet::new();
+    let mut total = SyncStats::default();
+    let start = Instant::now();
+
+    runtime.block_on(async {
+        for repo in &repos {
+            let remotes = list_github_remotes_at(&repo.path)?;
+            for remote in remotes {
+                let key = format!("{}/{}", remote.slug.owner, remote.slug.repo);
+                if !seen.insert(key) {
+                    continue;
+                }
+                let stats = sync_repo(&client, &conn, &remote.slug.owner, &remote.slug.repo).await?;
+                total.issues += stats.issues;
+                total.comments += stats.comments;
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    })?;
+
+    let duration = start.elapsed();
+    println!(
+        "Synced {} repos ({} remotes), {} issues, {} comments in {:.2?}",
+        seen.len(),
+        indexed,
+        total.issues,
+        total.comments,
+        duration
+    );
     Ok(())
 }
 
