@@ -39,6 +39,17 @@ pub struct CommentRow {
     pub created_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRepoRow {
+    pub path: String,
+    pub remote_name: String,
+    pub owner: String,
+    pub repo: String,
+    pub url: String,
+    pub last_seen: Option<String>,
+    pub last_scanned: Option<String>,
+}
+
 pub fn db_path() -> PathBuf {
     data_dir().join(APP_DIR_NAME).join(DB_FILE_NAME)
 }
@@ -219,6 +230,60 @@ pub fn search_issues(_conn: &Connection, _query: &str) -> Result<Vec<IssueRow>> 
     Ok(issues)
 }
 
+pub fn upsert_local_repo(_conn: &Connection, _repo: &LocalRepoRow) -> Result<()> {
+    _conn.execute(
+        "
+        INSERT INTO local_repos (
+            path, remote_name, owner, repo, url, last_seen, last_scanned
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(path, remote_name) DO UPDATE SET
+            owner = excluded.owner,
+            repo = excluded.repo,
+            url = excluded.url,
+            last_seen = excluded.last_seen,
+            last_scanned = excluded.last_scanned
+        ",
+        (
+            _repo.path.as_str(),
+            _repo.remote_name.as_str(),
+            _repo.owner.as_str(),
+            _repo.repo.as_str(),
+            _repo.url.as_str(),
+            _repo.last_seen.as_deref(),
+            _repo.last_scanned.as_deref(),
+        ),
+    )?;
+    Ok(())
+}
+
+pub fn list_local_repos(_conn: &Connection) -> Result<Vec<LocalRepoRow>> {
+    let mut statement = _conn.prepare(
+        "
+        SELECT path, remote_name, owner, repo, url, last_seen, last_scanned
+        FROM local_repos
+        ORDER BY last_seen DESC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(LocalRepoRow {
+            path: row.get(0)?,
+            remote_name: row.get(1)?,
+            owner: row.get(2)?,
+            repo: row.get(3)?,
+            url: row.get(4)?,
+            last_seen: row.get(5)?,
+            last_scanned: row.get(6)?,
+        })
+    })?;
+
+    let mut repos = Vec::new();
+    for row in rows {
+        repos.push(row?);
+    }
+    Ok(repos)
+}
+
 fn index_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
     conn.execute(
         "DELETE FROM fts_content WHERE issue_id = ?1 AND comment_id IS NULL",
@@ -391,6 +456,17 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
             body,
             author
         );
+
+        CREATE TABLE IF NOT EXISTS local_repos (
+            path TEXT NOT NULL,
+            remote_name TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            repo TEXT NOT NULL,
+            url TEXT NOT NULL,
+            last_seen TEXT,
+            last_scanned TEXT,
+            PRIMARY KEY (path, remote_name)
+        );
         ",
     )?;
     Ok(())
@@ -399,8 +475,9 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        comments_for_issue, delete_db_at, list_issues, open_db_at, search_issues, upsert_comment,
-        upsert_issue, upsert_repo, CommentRow, IssueRow, RepoRow,
+        comments_for_issue, delete_db_at, list_issues, list_local_repos, open_db_at,
+        search_issues, upsert_comment, upsert_issue, upsert_local_repo, upsert_repo, CommentRow,
+        IssueRow, LocalRepoRow, RepoRow,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -649,6 +726,37 @@ mod tests {
         assert_eq!(comments.len(), 2);
         assert_eq!(comments[0].body, "first");
         assert_eq!(comments[1].body, "second");
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_local_repo_inserts_and_updates() {
+        let dir = unique_temp_dir("local-repos");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = LocalRepoRow {
+            path: "/tmp/repo".to_string(),
+            remote_name: "origin".to_string(),
+            owner: "acme".to_string(),
+            repo: "glyph".to_string(),
+            url: "https://github.com/acme/glyph.git".to_string(),
+            last_seen: Some("2024-01-05T00:00:00Z".to_string()),
+            last_scanned: Some("2024-01-05T00:00:00Z".to_string()),
+        };
+        upsert_local_repo(&conn, &repo).expect("insert repo");
+
+        let updated = LocalRepoRow {
+            last_seen: Some("2024-01-06T00:00:00Z".to_string()),
+            ..repo
+        };
+        upsert_local_repo(&conn, &updated).expect("update repo");
+
+        let repos = list_local_repos(&conn).expect("list repos");
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].last_seen, Some("2024-01-06T00:00:00Z".to_string()));
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
