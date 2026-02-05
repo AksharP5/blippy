@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 
 use crate::github::{ApiComment, ApiIssue, ApiRepo, GitHubClient};
 use crate::store::{CommentRow, IssueRow, RepoRow};
@@ -7,6 +8,38 @@ use crate::store::{CommentRow, IssueRow, RepoRow};
 pub struct SyncStats {
     pub issues: usize,
     pub comments: usize,
+}
+
+#[async_trait]
+pub trait GitHubApi {
+    async fn get_repo(&self, owner: &str, repo: &str) -> Result<ApiRepo>;
+    async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>>;
+    async fn list_comments(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+    ) -> Result<Vec<ApiComment>>;
+}
+
+#[async_trait]
+impl GitHubApi for GitHubClient {
+    async fn get_repo(&self, owner: &str, repo: &str) -> Result<ApiRepo> {
+        self.get_repo(owner, repo).await
+    }
+
+    async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>> {
+        self.list_issues(owner, repo).await
+    }
+
+    async fn list_comments(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+    ) -> Result<Vec<ApiComment>> {
+        self.list_comments(owner, repo, issue_number).await
+    }
 }
 
 pub fn map_repo_to_row(_repo: &ApiRepo) -> RepoRow {
@@ -61,18 +94,48 @@ pub fn map_comment_to_row(_issue_id: i64, _comment: &ApiComment) -> CommentRow {
 }
 
 pub async fn sync_repo(
-    _client: &GitHubClient,
+    _client: &dyn GitHubApi,
     _conn: &rusqlite::Connection,
     _owner: &str,
     _repo: &str,
 ) -> Result<SyncStats> {
-    todo!("Sync issues and comments for repo");
+    let repo = _client.get_repo(_owner, _repo).await?;
+    let repo_row = map_repo_to_row(&repo);
+    crate::store::upsert_repo(_conn, &repo_row)?;
+
+    let mut stats = SyncStats::default();
+    let issues = _client.list_issues(_owner, _repo).await?;
+    for issue in issues {
+        let row = match map_issue_to_row(repo_row.id, &issue) {
+            Some(row) => row,
+            None => continue,
+        };
+        crate::store::upsert_issue(_conn, &row)?;
+        stats.issues += 1;
+
+        let comments = _client
+            .list_comments(_owner, _repo, issue.number)
+            .await?;
+        for comment in comments {
+            let comment_row = map_comment_to_row(row.id, &comment);
+            crate::store::upsert_comment(_conn, &comment_row)?;
+            stats.comments += 1;
+        }
+    }
+
+    Ok(stats)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{map_comment_to_row, map_issue_to_row, map_repo_to_row};
+    use super::{map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo, GitHubApi};
     use crate::github::{ApiComment, ApiIssue, ApiLabel, ApiRepo, ApiUser};
+    use crate::store::{comments_for_issue, list_issues, open_db_at};
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn map_repo_to_row_copies_owner_and_name() {
@@ -153,5 +216,137 @@ mod tests {
         assert_eq!(row.issue_id, 99);
         assert_eq!(row.author, "dev");
         assert_eq!(row.body, "hello");
+    }
+
+    #[tokio::test]
+    async fn sync_repo_inserts_issues_and_comments() {
+        let dir = unique_temp_dir("sync");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let issues = vec![
+            ApiIssue {
+                id: 10,
+                number: 1,
+                state: "open".to_string(),
+                title: "Issue".to_string(),
+                body: Some("body".to_string()),
+                updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+            ApiIssue {
+                id: 11,
+                number: 2,
+                state: "open".to_string(),
+                title: "PR".to_string(),
+                body: None,
+                updated_at: None,
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: Some(serde_json::json!({"url": "x"})),
+            },
+        ];
+        let mut comments_map = HashMap::new();
+        comments_map.insert(
+            1,
+            vec![ApiComment {
+                id: 50,
+                body: Some("hello".to_string()),
+                created_at: Some("2024-01-01T01:00:00Z".to_string()),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+            }],
+        );
+
+        let client = FakeGitHub {
+            repo,
+            issues,
+            comments: comments_map,
+        };
+
+        let stats = sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
+        assert_eq!(stats.issues, 1);
+        assert_eq!(stats.comments, 1);
+
+        let rows = list_issues(&conn, 1).expect("list issues");
+        assert_eq!(rows.len(), 1);
+        let comments = comments_for_issue(&conn, 10).expect("comments");
+        assert_eq!(comments.len(), 1);
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    struct FakeGitHub {
+        repo: ApiRepo,
+        issues: Vec<ApiIssue>,
+        comments: HashMap<i64, Vec<ApiComment>>,
+    }
+
+    #[async_trait]
+    impl GitHubApi for FakeGitHub {
+        async fn get_repo(&self, _owner: &str, _repo: &str) -> anyhow::Result<ApiRepo> {
+            Ok(ApiRepo {
+                id: self.repo.id,
+                name: self.repo.name.clone(),
+                owner: ApiUser {
+                    login: self.repo.owner.login.clone(),
+                    user_type: None,
+                },
+            })
+        }
+
+        async fn list_issues(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> anyhow::Result<Vec<ApiIssue>> {
+            Ok(self.issues.clone())
+        }
+
+        async fn list_comments(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            issue_number: i64,
+        ) -> anyhow::Result<Vec<ApiComment>> {
+            Ok(self
+                .comments
+                .get(&issue_number)
+                .cloned()
+                .unwrap_or_default())
+        }
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("glyph-sync-{}-{}", label, nanos));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
     }
 }

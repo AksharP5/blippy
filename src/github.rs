@@ -5,19 +5,19 @@ use serde::Deserialize;
 const API_BASE: &str = "https://api.github.com";
 const API_VERSION: &str = "2022-11-28";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiUser {
     pub login: String,
     #[serde(rename = "type")]
     pub user_type: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiLabel {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiIssue {
     pub id: i64,
     pub number: i64,
@@ -31,7 +31,7 @@ pub struct ApiIssue {
     pub pull_request: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiComment {
     pub id: i64,
     pub body: Option<String>,
@@ -39,7 +39,7 @@ pub struct ApiComment {
     pub user: ApiUser,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiRepo {
     pub id: i64,
     pub name: String,
