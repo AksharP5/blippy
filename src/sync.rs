@@ -90,6 +90,7 @@ pub fn map_comment_to_row(_issue_id: i64, _comment: &ApiComment) -> CommentRow {
         author: _comment.user.login.clone(),
         body: _comment.body.clone().unwrap_or_default(),
         created_at: _comment.created_at.clone(),
+        last_accessed_at: Some(crate::store::comment_now_epoch()),
     }
 }
 

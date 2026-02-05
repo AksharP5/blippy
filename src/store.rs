@@ -37,6 +37,7 @@ pub struct CommentRow {
     pub author: String,
     pub body: String,
     pub created_at: Option<String>,
+    pub last_accessed_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,13 +124,14 @@ pub fn upsert_issue(_conn: &Connection, _issue: &IssueRow) -> Result<()> {
 pub fn upsert_comment(_conn: &Connection, _comment: &CommentRow) -> Result<()> {
     _conn.execute(
         "
-        INSERT INTO comments (id, issue_id, author, author_type, body, created_at)
-        VALUES (?1, ?2, ?3, NULL, ?4, ?5)
+        INSERT INTO comments (id, issue_id, author, author_type, body, created_at, last_accessed_at)
+        VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)
         ON CONFLICT(id) DO UPDATE SET
             issue_id = excluded.issue_id,
             author = excluded.author,
             body = excluded.body,
-            created_at = excluded.created_at
+            created_at = excluded.created_at,
+            last_accessed_at = excluded.last_accessed_at
         ",
         (
             _comment.id,
@@ -137,6 +139,7 @@ pub fn upsert_comment(_conn: &Connection, _comment: &CommentRow) -> Result<()> {
             _comment.author.as_str(),
             _comment.body.as_str(),
             _comment.created_at.as_deref(),
+            _comment.last_accessed_at,
         ),
     )?;
 
@@ -180,7 +183,7 @@ pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
 pub fn comments_for_issue(_conn: &Connection, _issue_id: i64) -> Result<Vec<CommentRow>> {
     let mut statement = _conn.prepare(
         "
-        SELECT id, issue_id, author, body, created_at
+        SELECT id, issue_id, author, body, created_at, last_accessed_at
         FROM comments
         WHERE issue_id = ?1
         ORDER BY created_at ASC
@@ -194,6 +197,7 @@ pub fn comments_for_issue(_conn: &Connection, _issue_id: i64) -> Result<Vec<Comm
             author: row.get(2)?,
             body: row.get(3)?,
             created_at: row.get(4)?,
+            last_accessed_at: row.get(5)?,
         })
     })?;
 
@@ -306,6 +310,49 @@ pub fn get_repo_by_slug(_conn: &Connection, _owner: &str, _repo: &str) -> Result
         updated_at: row.get(3)?,
         etag: row.get(4)?,
     }))
+}
+
+pub fn touch_comments_for_issue(_conn: &Connection, _issue_id: i64, _timestamp: i64) -> Result<()> {
+    _conn.execute(
+        "UPDATE comments SET last_accessed_at = ?1 WHERE issue_id = ?2",
+        (_timestamp, _issue_id),
+    )?;
+    Ok(())
+}
+
+pub fn prune_comments(_conn: &Connection, _ttl_seconds: i64, _max_count: i64) -> Result<()> {
+    let cutoff = comment_now_epoch() - _ttl_seconds;
+    _conn.execute(
+        "DELETE FROM comments WHERE last_accessed_at IS NOT NULL AND last_accessed_at < ?1",
+        [cutoff],
+    )?;
+
+    let total: i64 = _conn.query_row("SELECT COUNT(*) FROM comments", [], |row| row.get(0))?;
+    if total <= _max_count {
+        return Ok(());
+    }
+
+    let to_delete = total - _max_count;
+    _conn.execute(
+        "
+        DELETE FROM comments
+        WHERE id IN (
+            SELECT id FROM comments
+            ORDER BY last_accessed_at ASC NULLS FIRST
+            LIMIT ?1
+        )
+        ",
+        [to_delete],
+    )?;
+    Ok(())
+}
+
+pub fn comment_now_epoch() -> i64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    now as i64
 }
 
 fn index_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
@@ -470,6 +517,7 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
             author_type TEXT,
             body TEXT NOT NULL,
             created_at TEXT,
+            last_accessed_at INTEGER,
             FOREIGN KEY(issue_id) REFERENCES issues(id) ON DELETE CASCADE
         );
 
@@ -493,6 +541,27 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
         );
         ",
     )?;
+    add_comment_accessed_column(_conn)?;
+    Ok(())
+}
+
+fn add_comment_accessed_column(conn: &Connection) -> Result<()> {
+    let mut statement = conn.prepare("PRAGMA table_info(comments)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == "last_accessed_at" {
+            return Ok(());
+        }
+    }
+
+    let result = conn.execute("ALTER TABLE comments ADD COLUMN last_accessed_at INTEGER", []);
+    if let Err(error) = result {
+        let message = error.to_string();
+        if message.contains("duplicate column") {
+            return Ok(());
+        }
+        return Err(error.into());
+    }
     Ok(())
 }
 
@@ -637,6 +706,7 @@ mod tests {
             author: "dev".to_string(),
             body: "First".to_string(),
             created_at: Some("2024-01-02T01:00:00Z".to_string()),
+            last_accessed_at: Some(1),
         };
         upsert_comment(&conn, &comment).expect("insert comment");
 
@@ -689,6 +759,7 @@ mod tests {
             author: "dev".to_string(),
             body: "needle".to_string(),
             created_at: Some("2024-01-03T01:00:00Z".to_string()),
+            last_accessed_at: Some(1),
         };
         upsert_comment(&conn, &comment).expect("insert comment");
 
@@ -735,6 +806,7 @@ mod tests {
             author: "dev".to_string(),
             body: "first".to_string(),
             created_at: Some("2024-01-04T01:00:00Z".to_string()),
+            last_accessed_at: Some(1),
         };
         let second = CommentRow {
             id: 502,
@@ -742,6 +814,7 @@ mod tests {
             author: "dev".to_string(),
             body: "second".to_string(),
             created_at: Some("2024-01-04T02:00:00Z".to_string()),
+            last_accessed_at: Some(1),
         };
         upsert_comment(&conn, &second).expect("insert comment 2");
         upsert_comment(&conn, &first).expect("insert comment 1");
