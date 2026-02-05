@@ -72,3 +72,7 @@ cargo test
 ## Sync
 - Run `glyph sync` to scan local repos and refresh issues from GitHub
 - Run inside a repo for the fastest path
+
+## Navigation
+- Ctrl+G: open repo picker
+- Ctrl+R: rescan repos
