@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod discovery;
 mod git;
+mod repo_index;
 mod store;
 mod ui;
 

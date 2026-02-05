@@ -401,7 +401,7 @@ fn delete_db_at(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn open_db_at(path: &Path) -> Result<Connection> {
+pub(crate) fn open_db_at(path: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

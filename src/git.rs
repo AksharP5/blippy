@@ -109,7 +109,7 @@ fn repo_root_at(_path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
     Ok(Some(std::path::PathBuf::from(trimmed)))
 }
 
-fn list_github_remotes_at(_path: &std::path::Path) -> Result<Vec<RemoteInfo>> {
+pub fn list_github_remotes_at(_path: &std::path::Path) -> Result<Vec<RemoteInfo>> {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(_path)
