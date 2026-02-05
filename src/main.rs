@@ -293,7 +293,13 @@ fn maybe_start_scan(app: &App, event_tx: Sender<AppEvent>) -> Result<()> {
         return Ok(());
     }
 
-    start_scan(event_tx, ScanMode::Initial)
+    let mode = if app.repos().is_empty() {
+        ScanMode::QuickAndFull
+    } else {
+        ScanMode::QuickOnly
+    };
+
+    start_scan(event_tx, mode)
 }
 
 fn maybe_start_rescan(app: &mut App, event_tx: Sender<AppEvent>) -> Result<()> {
@@ -301,7 +307,7 @@ fn maybe_start_rescan(app: &mut App, event_tx: Sender<AppEvent>) -> Result<()> {
         return Ok(());
     }
 
-    start_scan(event_tx, ScanMode::Full)
+    start_scan(event_tx, ScanMode::FullOnly)
 }
 
 fn start_scan(event_tx: Sender<AppEvent>, mode: ScanMode) -> Result<()> {
@@ -313,7 +319,7 @@ fn start_scan(event_tx: Sender<AppEvent>, mode: ScanMode) -> Result<()> {
             Err(_) => return,
         };
 
-        if mode == ScanMode::Initial {
+        if matches!(mode, ScanMode::QuickOnly | ScanMode::QuickAndFull) {
             let quick = quick_scan(&cwd, 4, 2).unwrap_or_default();
             for repo in &quick {
                 let _ = index_repo_path(&conn, &repo.path);
@@ -321,11 +327,14 @@ fn start_scan(event_tx: Sender<AppEvent>, mode: ScanMode) -> Result<()> {
             let _ = event_tx.send(AppEvent::ReposUpdated);
         }
 
-        let full = crate::discovery::full_scan(&home).unwrap_or_default();
-        for repo in &full {
-            let _ = index_repo_path(&conn, &repo.path);
+        if matches!(mode, ScanMode::FullOnly | ScanMode::QuickAndFull) {
+            let full = crate::discovery::full_scan(&home).unwrap_or_default();
+            for repo in &full {
+                let _ = index_repo_path(&conn, &repo.path);
+            }
+            let _ = event_tx.send(AppEvent::ReposUpdated);
         }
-        let _ = event_tx.send(AppEvent::ReposUpdated);
+
         let _ = event_tx.send(AppEvent::ScanFinished);
     });
 
@@ -367,8 +376,9 @@ fn handle_events(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScanMode {
-    Initial,
-    Full,
+    QuickOnly,
+    QuickAndFull,
+    FullOnly,
 }
 
 #[derive(Debug, Clone)]
