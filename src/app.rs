@@ -149,12 +149,15 @@ impl App {
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.view = View::RepoPicker;
             }
+            KeyCode::Char('h') if self.view == View::IssueDetail => {
+                self.view = View::Issues;
+            }
             KeyCode::Esc if self.view == View::IssueDetail => {
                 self.view = View::Issues;
             }
-            KeyCode::Up => self.move_selection_up(),
-            KeyCode::Down => self.move_selection_down(),
-            KeyCode::Enter => self.activate_selection(),
+            KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
+            KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
+            KeyCode::Char('l') | KeyCode::Enter => self.activate_selection(),
             _ => {}
         }
     }

@@ -117,11 +117,12 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
 
 fn draw_status(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let status = app.status();
-    if status.is_empty() {
-        return;
-    }
-
-    let text = Text::from(Line::from(status));
+    let help = help_text(app);
+    let text = if status.is_empty() {
+        Text::from(Line::from(help))
+    } else {
+        Text::from(vec![Line::from(status), Line::from(help)])
+    };
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
         .block(Block::default());
@@ -130,6 +131,23 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
         horizontal: 2,
     });
     frame.render_widget(paragraph, status_area);
+}
+
+fn help_text(app: &App) -> String {
+    match app.view() {
+        View::RepoPicker => {
+            "Ctrl+R rescan • j/k or ↑/↓ move • Enter/l select • q quit".to_string()
+        }
+        View::RemoteChooser => {
+            "j/k or ↑/↓ move • Enter/l select • Ctrl+G repos • q quit".to_string()
+        }
+        View::Issues => {
+            "j/k or ↑/↓ move • Enter/l open • Ctrl+G repos • q quit".to_string()
+        }
+        View::IssueDetail => {
+            "j/k or ↑/↓ move • Esc/h back • Ctrl+G repos • q quit".to_string()
+        }
+    }
 }
 
 fn list_state(selected: usize) -> ListState {
