@@ -70,8 +70,8 @@ cargo test
 - Reset cache: `glyph cache reset`
 
 ## Sync
-- Run `glyph sync` to scan local repos and refresh issues from GitHub
-- Run inside a repo for the fastest path
+- Run `glyph sync` to scan local repos and cache GitHub remotes
+- Issues are fetched when you open a repo in the TUI
 
 ## Navigation
 - Ctrl+G: open repo picker
