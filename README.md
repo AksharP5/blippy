@@ -78,4 +78,13 @@ cargo test
 - Ctrl+R: rescan repos
 - j/k: move, gg/G: top/bottom, Enter: open
 - o: open in browser
+- dd: close issue with preset
 - b or Esc: back from issue detail
+
+## Comment Defaults
+Configure close/comment presets in `config.toml`:
+```toml
+[[comment_defaults]]
+name = "close_default"
+body = "Closing this issue as resolved."
+```

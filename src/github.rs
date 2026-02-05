@@ -133,4 +133,45 @@ impl GitHubClient {
         }
         Ok(comments)
     }
+
+    pub async fn create_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+        body: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/comments",
+            API_BASE, owner, repo, issue_number
+        );
+        self.client
+            .post(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"body": body}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn close_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            API_BASE, owner, repo, issue_number
+        );
+        self.client
+            .patch(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"state": "closed"}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
 }

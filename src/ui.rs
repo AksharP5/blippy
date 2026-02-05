@@ -12,6 +12,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
         View::RemoteChooser => draw_remote_chooser(frame, app, area),
         View::Issues => draw_issues(frame, app, area),
         View::IssueDetail => draw_issue_detail(frame, app, area),
+        View::CommentPresetPicker => draw_preset_picker(frame, app, area),
+        View::CommentPresetName => draw_preset_name(frame, app, area),
+        View::CommentEditor => draw_comment_editor(frame, app, area),
     }
 }
 
@@ -47,7 +50,7 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         .remotes()
         .iter()
         .map(|remote| {
-            let label = format!("{} → {}/{}", remote.name, remote.slug.owner, remote.slug.repo);
+            let label = format!("{} -> {}/{}", remote.name, remote.slug.owner, remote.slug.repo);
             ListItem::new(label)
         })
         .collect::<Vec<ListItem>>();
@@ -115,6 +118,51 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
     draw_status(frame, app, area);
 }
 
+fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let block = Block::default().title("Close Issue").borders(Borders::ALL);
+    let mut items = Vec::new();
+    items.push(ListItem::new("Close without comment"));
+    items.push(ListItem::new("Custom message..."));
+    for preset in app.comment_defaults() {
+        items.push(ListItem::new(preset.name.as_str()));
+    }
+    items.push(ListItem::new("Add preset..."));
+
+    let list = List::new(items).block(block).highlight_symbol("> ");
+    frame.render_stateful_widget(
+        list,
+        area.inner(Margin {
+            vertical: 1,
+            horizontal: 2,
+        }),
+        &mut list_state(app.selected_preset()),
+    );
+
+    draw_status(frame, app, area);
+}
+
+fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let block = Block::default().title("Preset Name").borders(Borders::ALL);
+    let text = app.editor().name();
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, area.inner(Margin { vertical: 1, horizontal: 2 }));
+
+    draw_status(frame, app, area);
+}
+
+fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let block = Block::default().title("Comment").borders(Borders::ALL);
+    let text = app.editor().text();
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, area.inner(Margin { vertical: 1, horizontal: 2 }));
+
+    draw_status(frame, app, area);
+}
+
 fn draw_status(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let status = app.status();
     let help = help_text(app);
@@ -144,12 +192,21 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::Issues => {
-            "j/k or ↑/↓ move • gg/G top/bottom • Enter open • o browser • Ctrl+G repos • q quit"
+            "j/k or ↑/↓ move • gg/G top/bottom • Enter open • dd close • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
             "j/k or ↑/↓ move • gg/G top/bottom • b/Esc back • o browser • Ctrl+G repos • q quit"
                 .to_string()
+        }
+        View::CommentPresetPicker => {
+            "j/k move • gg/G top/bottom • Enter select • Esc cancel • q quit".to_string()
+        }
+        View::CommentPresetName => {
+            "Type name • Enter next • Esc cancel".to_string()
+        }
+        View::CommentEditor => {
+            "Type message • Ctrl+Enter submit • Esc cancel".to_string()
         }
     }
 }

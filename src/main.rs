@@ -23,7 +23,7 @@ use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::app::{App, AppAction, View};
+use crate::app::{App, AppAction, PresetSelection, View};
 use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
 use crate::cli::{parse_args, CliCommand};
 use crate::config::Config;
@@ -180,7 +180,7 @@ fn run_app(
             _ => {}
         }
 
-        handle_actions(app, conn)?;
+        handle_actions(app, conn, token, event_tx.clone())?;
         maybe_start_issue_poll(app, &mut last_issue_poll);
         maybe_start_repo_sync(app, token, event_tx.clone())?;
         maybe_start_comment_poll(app, token, event_tx.clone(), &mut last_comment_poll)?;
@@ -224,7 +224,12 @@ fn initialize_app(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
-fn handle_actions(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
+fn handle_actions(
+    app: &mut App,
+    conn: &rusqlite::Connection,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
     let action = match app.take_action() {
         Some(action) => action,
         None => return Ok(()),
@@ -271,8 +276,102 @@ fn handle_actions(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
                 app.set_status("No issue selected".to_string());
             }
         }
+        AppAction::CloseIssue => {
+            app.set_selected_preset(0);
+            app.set_view(View::CommentPresetPicker);
+        }
+        AppAction::PickPreset => handle_preset_selection(app, conn, token, event_tx)?,
+        AppAction::SubmitComment => {
+            let comment = app.editor().text().to_string();
+            close_issue_with_comment(app, token, Some(comment), event_tx.clone())?;
+        }
+        AppAction::SavePreset => {
+            save_preset_from_editor(app)?;
+            app.set_view(View::CommentPresetPicker);
+        }
     }
     Ok(())
+}
+
+fn handle_preset_selection(
+    app: &mut App,
+    _conn: &rusqlite::Connection,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    match app.preset_selection() {
+        PresetSelection::CloseWithoutComment => {
+            close_issue_with_comment(app, token, None, event_tx)?;
+        }
+        PresetSelection::CustomMessage => {
+            app.editor_mut().reset_for_close();
+            app.set_view(View::CommentEditor);
+        }
+        PresetSelection::Preset(index) => {
+            let body = app
+                .comment_defaults()
+                .get(index)
+                .map(|preset| preset.body.clone());
+            if body.is_none() {
+                app.set_status("Preset not found".to_string());
+                return Ok(());
+            }
+            close_issue_with_comment(app, token, body, event_tx)?;
+        }
+        PresetSelection::AddPreset => {
+            app.editor_mut().reset_for_preset_name();
+            app.set_view(View::CommentPresetName);
+        }
+    }
+    Ok(())
+}
+
+fn save_preset_from_editor(app: &mut App) -> Result<()> {
+    let name = app.editor().name().trim().to_string();
+    if name.is_empty() {
+        app.set_status("Preset name required".to_string());
+        return Ok(());
+    }
+    let body = app.editor().text().to_string();
+    if body.trim().is_empty() {
+        app.set_status("Preset body required".to_string());
+        return Ok(());
+    }
+
+    app.add_comment_default(crate::config::CommentDefault { name, body });
+    app.save_config()?;
+    app.set_status("Preset saved".to_string());
+    Ok(())
+}
+
+fn close_issue_with_comment(
+    app: &mut App,
+    token: &str,
+    body: Option<String>,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    let (owner, repo, issue_number) = match (app.current_owner(), app.current_repo(), issue_number(app)) {
+        (Some(owner), Some(repo), Some(issue_number)) => {
+            (owner.to_string(), repo.to_string(), issue_number)
+        }
+        _ => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_close_issue(owner, repo, issue_number, token.to_string(), body, event_tx);
+    app.set_view(View::Issues);
+    app.set_status("Closing issue...".to_string());
+    Ok(())
+}
+
+fn issue_number(app: &App) -> Option<i64> {
+    match app.view() {
+        View::IssueDetail => app.current_issue_number(),
+        View::Issues => app.issues().get(app.selected_issue()).map(|issue| issue.number),
+        _ => None,
+    }
 }
 
 fn issue_url(app: &App) -> Option<String> {
@@ -441,6 +540,10 @@ fn handle_events(
                     app.set_status(format!("Comments unavailable: {}", message));
                 }
             }
+            AppEvent::IssueClosed { issue_number, message } => {
+                app.set_status(format!("#{} {}", issue_number, message));
+                app.request_sync();
+            }
         }
     }
     Ok(())
@@ -460,6 +563,7 @@ enum AppEvent {
     SyncFinished { owner: String, repo: String, stats: SyncStats },
     CommentsUpdated { issue_id: i64, count: usize },
     CommentsFailed { issue_id: i64, message: String },
+    IssueClosed { issue_number: i64, message: String },
 }
 
 fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
@@ -631,6 +735,80 @@ fn start_comment_sync(
         let _ = prune_comments(&conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
 
         let _ = event_tx.send(AppEvent::CommentsUpdated { issue_id, count });
+    });
+}
+
+fn start_close_issue(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    token: String,
+    body: Option<String>,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueClosed {
+                    issue_number,
+                    message: format!("close failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueClosed {
+                    issue_number,
+                    message: format!("close failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            let mut comment_error = None;
+            if let Some(body) = body {
+                if let Err(error) = client
+                    .create_comment(&owner, &repo, issue_number, &body)
+                    .await
+                {
+                    comment_error = Some(error.to_string());
+                }
+            }
+
+            if let Err(error) = client.close_issue(&owner, &repo, issue_number).await {
+                return Err(error);
+            }
+
+            Ok(comment_error)
+        });
+
+        match result {
+            Ok(Some(comment_error)) => {
+                let _ = event_tx.send(AppEvent::IssueClosed {
+                    issue_number,
+                    message: format!("closed (comment failed: {})", comment_error),
+                });
+            }
+            Ok(None) => {
+                let _ = event_tx.send(AppEvent::IssueClosed {
+                    issue_number,
+                    message: "closed".to_string(),
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueClosed {
+                    issue_number,
+                    message: format!("close failed: {}", error),
+                });
+            }
+        }
     });
 }
 
