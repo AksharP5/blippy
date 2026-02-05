@@ -68,3 +68,7 @@ cargo test
 ## Cache
 - Cache lives in your OS user data directory as `glyph.db`
 - Reset cache: `glyph cache reset`
+
+## Sync
+- Run `glyph sync` to scan local repos and refresh issues from GitHub
+- Run inside a repo for the fastest path
