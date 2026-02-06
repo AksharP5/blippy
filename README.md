@@ -76,10 +76,12 @@ cargo test
 ## Navigation
 - Ctrl+G: open repo picker
 - Ctrl+R: rescan repos
-- j/k: move, gg/G: top/bottom, Enter: open
+- j/k or arrow keys: move, gg/G: top/bottom, Enter: open
+- r: refresh issues/comments
 - o: open in browser
 - dd: close issue with preset
-- b or Esc: back from issue detail
+- c: open full comments from issue detail
+- b or Esc: back from issue detail/comments
 
 ## Comment Defaults
 Configure close/comment presets in `config.toml`:

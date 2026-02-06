@@ -78,6 +78,7 @@ pub fn map_issue_to_row(_repo_id: i64, _issue: &ApiIssue) -> Option<IssueRow> {
         body: _issue.body.clone().unwrap_or_default(),
         labels,
         assignees,
+        comments_count: _issue.comments,
         updated_at: _issue.updated_at.clone(),
         is_pr: false,
     })
@@ -153,6 +154,7 @@ mod tests {
             state: "open".to_string(),
             title: "PR".to_string(),
             body: Some("body".to_string()),
+            comments: 0,
             updated_at: None,
             labels: Vec::new(),
             assignees: Vec::new(),
@@ -174,6 +176,7 @@ mod tests {
             state: "open".to_string(),
             title: "Issue".to_string(),
             body: Some("body".to_string()),
+            comments: 3,
             updated_at: Some("2024-01-01T00:00:00Z".to_string()),
             labels: vec![ApiLabel {
                 name: "bug".to_string(),
@@ -191,6 +194,7 @@ mod tests {
         let row = map_issue_to_row(1, &issue).expect("row");
         assert_eq!(row.labels, "bug");
         assert_eq!(row.assignees, "dev");
+        assert_eq!(row.comments_count, 3);
     }
 
     #[test]
@@ -231,6 +235,7 @@ mod tests {
                 state: "open".to_string(),
                 title: "Issue".to_string(),
                 body: Some("body".to_string()),
+                comments: 1,
                 updated_at: Some("2024-01-01T00:00:00Z".to_string()),
                 labels: Vec::new(),
                 assignees: Vec::new(),
@@ -246,6 +251,7 @@ mod tests {
                 state: "open".to_string(),
                 title: "PR".to_string(),
                 body: None,
+                comments: 0,
                 updated_at: None,
                 labels: Vec::new(),
                 assignees: Vec::new(),

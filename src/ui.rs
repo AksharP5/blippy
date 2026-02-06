@@ -12,6 +12,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
         View::RemoteChooser => draw_remote_chooser(frame, app, area),
         View::Issues => draw_issues(frame, app, area),
         View::IssueDetail => draw_issue_detail(frame, app, area),
+        View::IssueComments => draw_issue_comments(frame, app, area),
         View::CommentPresetPicker => draw_preset_picker(frame, app, area),
         View::CommentPresetName => draw_preset_name(frame, app, area),
         View::CommentEditor => draw_comment_editor(frame, app, area),
@@ -77,7 +78,19 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     } else {
         app.issues()
             .iter()
-            .map(|issue| ListItem::new(issue.title.as_str()))
+            .map(|issue| {
+                let assignees = if issue.assignees.is_empty() {
+                    "unassigned"
+                } else {
+                    issue.assignees.as_str()
+                };
+                let line1 = format!("#{} [{}] {}", issue.number, issue.state, issue.title);
+                let line2 = format!(
+                    "assignees: {} | comments: {}",
+                    assignees, issue.comments_count
+                );
+                ListItem::new(vec![Line::from(line1), Line::from(line2)])
+            })
             .collect()
     };
     let list = List::new(items).block(block).highlight_symbol("> ");
@@ -95,18 +108,65 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
 
 fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let title = app
-        .issues()
-        .get(app.selected_issue())
-        .map(|issue| issue.title.as_str())
-        .unwrap_or("Issue");
+    let selected = app.issues().get(app.selected_issue());
+    let title = selected
+        .map(|issue| format!("#{} {}", issue.number, issue.title))
+        .unwrap_or_else(|| "Issue".to_string());
     let block = Block::default().title(title).borders(Borders::ALL);
+    let body = selected.map(|issue| issue.body.as_str()).unwrap_or("");
+    let assignees = selected
+        .map(|issue| {
+            if issue.assignees.is_empty() {
+                "unassigned".to_string()
+            } else {
+                issue.assignees.clone()
+            }
+        })
+        .unwrap_or_else(|| "unassigned".to_string());
+    let comment_count = selected.map(|issue| issue.comments_count).unwrap_or(0);
+    let mut lines = Vec::new();
+    lines.push(Line::from(format!(
+        "assignees: {} | comments: {}",
+        assignees, comment_count
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(body));
+    lines.push(Line::from(""));
+    lines.push(Line::from("Recent comments:"));
+
+    if app.comments().is_empty() {
+        lines.push(Line::from("No comments cached yet."));
+    } else {
+        let start = app.comments().len().saturating_sub(3);
+        for comment in &app.comments()[start..] {
+            lines.push(Line::from(format!("- {}", comment.author)));
+            lines.push(Line::from(comment.body.as_str()));
+            lines.push(Line::from(""));
+        }
+    }
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
+
+    draw_status(frame, app, footer);
+}
+
+fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
+    let block = Block::default().title("Comments").borders(Borders::ALL);
     let items = if app.comments().is_empty() {
         vec![ListItem::new("No comments cached yet.")]
     } else {
         app.comments()
             .iter()
-            .map(|comment| ListItem::new(comment.body.as_str()))
+            .map(|comment| {
+                ListItem::new(vec![
+                    Line::from(format!("{}", comment.author)),
+                    Line::from(comment.body.as_str()),
+                ])
+            })
             .collect()
     };
     let list = List::new(items).block(block).highlight_symbol("> ");
@@ -207,7 +267,11 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::IssueDetail => {
-            "j/k or ↑/↓ move • gg/G top/bottom • b/Esc back • r refresh • o browser • Ctrl+G repos • q quit"
+            "c all comments • b/Esc back • r refresh • o browser • Ctrl+G repos • q quit"
+                .to_string()
+        }
+        View::IssueComments => {
+            "j/k or ↑/↓ move • gg/G top/bottom • b/Esc back • r refresh • o browser • q quit"
                 .to_string()
         }
         View::CommentPresetPicker => {

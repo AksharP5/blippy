@@ -11,6 +11,7 @@ pub enum View {
     RemoteChooser,
     Issues,
     IssueDetail,
+    IssueComments,
     CommentPresetPicker,
     CommentPresetName,
     CommentEditor,
@@ -218,7 +219,10 @@ impl App {
                 self.request_sync();
                 self.status = "Syncing...".to_string();
             }
-            KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::IssueDetail => {
+            KeyCode::Char('r')
+                if key.modifiers.is_empty()
+                    && matches!(self.view, View::IssueDetail | View::IssueComments) =>
+            {
                 self.request_comment_sync();
                 self.status = "Syncing comments...".to_string();
             }
@@ -243,11 +247,20 @@ impl App {
                 }
             }
             KeyCode::Char('G') => self.jump_bottom(),
+            KeyCode::Char('c') if self.view == View::IssueDetail => {
+                self.view = View::IssueComments;
+            }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
                 self.view = View::Issues;
             }
+            KeyCode::Char('b') if self.view == View::IssueComments => {
+                self.view = View::IssueDetail;
+            }
             KeyCode::Esc if self.view == View::IssueDetail => {
                 self.view = View::Issues;
+            }
+            KeyCode::Esc if self.view == View::IssueComments => {
+                self.view = View::IssueDetail;
             }
             KeyCode::Esc if self.view == View::CommentPresetPicker => {
                 self.view = View::Issues;
@@ -255,7 +268,9 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
             KeyCode::Enter => self.activate_selection(),
-            KeyCode::Char('o') if matches!(self.view, View::Issues | View::IssueDetail) => {
+            KeyCode::Char('o')
+                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
                 self.action = Some(AppAction::OpenInBrowser);
             }
             _ => {}
@@ -397,7 +412,8 @@ impl App {
                     self.selected_issue -= 1;
                 }
             }
-            View::IssueDetail => {
+            View::IssueDetail => {}
+            View::IssueComments => {
                 if self.selected_comment > 0 {
                     self.selected_comment -= 1;
                 }
@@ -428,7 +444,8 @@ impl App {
                     self.selected_issue += 1;
                 }
             }
-            View::IssueDetail => {
+            View::IssueDetail => {}
+            View::IssueComments => {
                 if self.selected_comment + 1 < self.comments.len() {
                     self.selected_comment += 1;
                 }
@@ -454,7 +471,10 @@ impl App {
             View::Issues => {
                 self.action = Some(AppAction::PickIssue);
             }
-            View::IssueDetail => {}
+            View::IssueDetail => {
+                self.view = View::IssueComments;
+            }
+            View::IssueComments => {}
             View::CommentPresetPicker => {
                 self.action = Some(AppAction::PickPreset);
             }
@@ -467,7 +487,8 @@ impl App {
             View::RepoPicker => self.selected_repo = 0,
             View::RemoteChooser => self.selected_remote = 0,
             View::Issues => self.selected_issue = 0,
-            View::IssueDetail => self.selected_comment = 0,
+            View::IssueDetail => {}
+            View::IssueComments => self.selected_comment = 0,
             View::CommentPresetPicker => self.preset_choice = 0,
             View::CommentPresetName | View::CommentEditor => {}
         }
@@ -490,7 +511,8 @@ impl App {
                     self.selected_issue = self.issues.len() - 1;
                 }
             }
-            View::IssueDetail => {
+            View::IssueDetail => {}
+            View::IssueComments => {
                 if !self.comments.is_empty() {
                     self.selected_comment = self.comments.len() - 1;
                 }
@@ -640,6 +662,7 @@ mod tests {
             body: "Body".to_string(),
             labels: String::new(),
             assignees: String::new(),
+            comments_count: 0,
             updated_at: None,
             is_pr: false,
         }]);

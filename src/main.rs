@@ -152,7 +152,7 @@ fn run_app(
 
     loop {
         if app.view() != last_view {
-            if last_view == View::IssueDetail {
+            if matches!(last_view, View::IssueDetail | View::IssueComments) {
                 app.set_comment_syncing(false);
             }
             last_view = app.view();
@@ -368,7 +368,7 @@ fn close_issue_with_comment(
 
 fn issue_number(app: &App) -> Option<i64> {
     match app.view() {
-        View::IssueDetail => app.current_issue_number(),
+        View::IssueDetail | View::IssueComments => app.current_issue_number(),
         View::Issues => app.issues().get(app.selected_issue()).map(|issue| issue.number),
         _ => None,
     }
@@ -378,7 +378,7 @@ fn issue_url(app: &App) -> Option<String> {
     let owner = app.current_owner()?;
     let repo = app.current_repo()?;
     let issue_number = match app.view() {
-        View::IssueDetail => app.current_issue_number(),
+        View::IssueDetail | View::IssueComments => app.current_issue_number(),
         View::Issues => app.issues().get(app.selected_issue()).map(|issue| issue.number),
         _ => None,
     }?;
@@ -609,7 +609,7 @@ fn maybe_start_comment_poll(
     event_tx: Sender<AppEvent>,
     last_poll: &mut Instant,
 ) -> Result<()> {
-    if app.view() != View::IssueDetail {
+    if !matches!(app.view(), View::IssueDetail | View::IssueComments) {
         return Ok(());
     }
 

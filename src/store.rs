@@ -26,6 +26,7 @@ pub struct IssueRow {
     pub body: String,
     pub labels: String,
     pub assignees: String,
+    pub comments_count: i64,
     pub updated_at: Option<String>,
     pub is_pr: bool,
 }
@@ -89,9 +90,9 @@ pub fn upsert_issue(_conn: &Connection, _issue: &IssueRow) -> Result<()> {
     _conn.execute(
         "
         INSERT INTO issues (
-            id, repo_id, number, state, title, body, labels, assignees, updated_at, is_pr
+            id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         ON CONFLICT(id) DO UPDATE SET
             repo_id = excluded.repo_id,
             number = excluded.number,
@@ -100,6 +101,7 @@ pub fn upsert_issue(_conn: &Connection, _issue: &IssueRow) -> Result<()> {
             body = excluded.body,
             labels = excluded.labels,
             assignees = excluded.assignees,
+            comments_count = excluded.comments_count,
             updated_at = excluded.updated_at,
             is_pr = excluded.is_pr
         ",
@@ -112,6 +114,7 @@ pub fn upsert_issue(_conn: &Connection, _issue: &IssueRow) -> Result<()> {
             _issue.body.as_str(),
             _issue.labels.as_str(),
             _issue.assignees.as_str(),
+            _issue.comments_count,
             _issue.updated_at.as_deref(),
             if _issue.is_pr { 1 } else { 0 },
         ),
@@ -150,7 +153,7 @@ pub fn upsert_comment(_conn: &Connection, _comment: &CommentRow) -> Result<()> {
 pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
     let mut statement = _conn.prepare(
         "
-        SELECT id, repo_id, number, state, title, body, labels, assignees, updated_at, is_pr
+        SELECT id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
         FROM issues
         WHERE repo_id = ?1
         ORDER BY updated_at DESC
@@ -158,7 +161,7 @@ pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
     )?;
 
     let rows = statement.query_map([_repo_id], |row| {
-        let is_pr_value: i64 = row.get(9)?;
+        let is_pr_value: i64 = row.get(10)?;
         Ok(IssueRow {
             id: row.get(0)?,
             repo_id: row.get(1)?,
@@ -168,7 +171,8 @@ pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
             body: row.get(5)?,
             labels: row.get(6)?,
             assignees: row.get(7)?,
-            updated_at: row.get(8)?,
+            comments_count: row.get(8)?,
+            updated_at: row.get(9)?,
             is_pr: is_pr_value != 0,
         })
     })?;
@@ -399,7 +403,7 @@ fn fetch_issues_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<IssueRow>> 
         .join(",");
     let sql = format!(
         "
-        SELECT id, repo_id, number, state, title, body, labels, assignees, updated_at, is_pr
+        SELECT id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
         FROM issues
         WHERE id IN ({})
         ORDER BY updated_at DESC
@@ -409,7 +413,7 @@ fn fetch_issues_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<IssueRow>> 
 
     let mut statement = conn.prepare(&sql)?;
     let rows = statement.query_map(rusqlite::params_from_iter(ids), |row| {
-        let is_pr_value: i64 = row.get(9)?;
+        let is_pr_value: i64 = row.get(10)?;
         Ok(IssueRow {
             id: row.get(0)?,
             repo_id: row.get(1)?,
@@ -419,7 +423,8 @@ fn fetch_issues_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<IssueRow>> 
             body: row.get(5)?,
             labels: row.get(6)?,
             assignees: row.get(7)?,
-            updated_at: row.get(8)?,
+            comments_count: row.get(8)?,
+            updated_at: row.get(9)?,
             is_pr: is_pr_value != 0,
         })
     })?;
@@ -505,6 +510,7 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
             body TEXT NOT NULL,
             labels TEXT NOT NULL DEFAULT '',
             assignees TEXT NOT NULL DEFAULT '',
+            comments_count INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT,
             is_pr INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(repo_id) REFERENCES repos(id) ON DELETE CASCADE
@@ -542,6 +548,7 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
         ",
     )?;
     add_comment_accessed_column(_conn)?;
+    add_issue_comments_count_column(_conn)?;
     Ok(())
 }
 
@@ -555,6 +562,29 @@ fn add_comment_accessed_column(conn: &Connection) -> Result<()> {
     }
 
     let result = conn.execute("ALTER TABLE comments ADD COLUMN last_accessed_at INTEGER", []);
+    if let Err(error) = result {
+        let message = error.to_string();
+        if message.contains("duplicate column") {
+            return Ok(());
+        }
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+fn add_issue_comments_count_column(conn: &Connection) -> Result<()> {
+    let mut statement = conn.prepare("PRAGMA table_info(issues)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == "comments_count" {
+            return Ok(());
+        }
+    }
+
+    let result = conn.execute(
+        "ALTER TABLE issues ADD COLUMN comments_count INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
     if let Err(error) = result {
         let message = error.to_string();
         if message.contains("duplicate column") {
@@ -650,6 +680,7 @@ mod tests {
             body: "Body".to_string(),
             labels: "".to_string(),
             assignees: "".to_string(),
+            comments_count: 0,
             updated_at: Some("2024-01-01T00:00:00Z".to_string()),
             is_pr: false,
         };
@@ -695,6 +726,7 @@ mod tests {
             body: "Body".to_string(),
             labels: "".to_string(),
             assignees: "".to_string(),
+            comments_count: 0,
             updated_at: Some("2024-01-02T00:00:00Z".to_string()),
             is_pr: false,
         };
@@ -748,6 +780,7 @@ mod tests {
             body: "Issue body".to_string(),
             labels: "".to_string(),
             assignees: "".to_string(),
+            comments_count: 0,
             updated_at: Some("2024-01-03T00:00:00Z".to_string()),
             is_pr: false,
         };
@@ -795,6 +828,7 @@ mod tests {
             body: "Body".to_string(),
             labels: "".to_string(),
             assignees: "".to_string(),
+            comments_count: 0,
             updated_at: Some("2024-01-04T00:00:00Z".to_string()),
             is_pr: false,
         };

@@ -24,6 +24,7 @@ pub struct ApiIssue {
     pub state: String,
     pub title: String,
     pub body: Option<String>,
+    pub comments: i64,
     pub updated_at: Option<String>,
     pub labels: Vec<ApiLabel>,
     pub assignees: Vec<ApiUser>,
