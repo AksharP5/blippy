@@ -1,5 +1,6 @@
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
-use ratatui::text::{Line, Text};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
@@ -72,6 +73,11 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
 
 fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
+        .split(main);
+
     let block = Block::default().title("Issues").borders(Borders::ALL);
     let items = if app.issues().is_empty() {
         vec![ListItem::new("No cached issues yet. Run `glyph sync`.")]
@@ -84,23 +90,71 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
                 } else {
                     issue.assignees.as_str()
                 };
-                let line1 = format!("#{} [{}] {}", issue.number, issue.state, issue.title);
-                let line2 = format!(
-                    "assignees: {} | comments: {}",
+                let line1 = Line::from(vec![
+                    Span::styled(
+                        format!("#{} ", issue.number),
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("[{}] ", issue.state),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(issue.title.as_str()),
+                ]);
+                let line2 = Line::from(format!(
+                    "assignees: {}  comments: {}",
                     assignees, issue.comments_count
-                );
-                ListItem::new(vec![Line::from(line1), Line::from(line2)])
+                ));
+                ListItem::new(vec![line1, line2])
             })
             .collect()
     };
     let list = List::new(items).block(block).highlight_symbol("> ");
     frame.render_stateful_widget(
         list,
-        main.inner(Margin {
+        panes[0].inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
         &mut list_state(app.selected_issue()),
+    );
+
+    let preview_block = Block::default()
+        .title("Issue Preview")
+        .borders(Borders::ALL);
+    let preview = match app.issues().get(app.selected_issue()) {
+        Some(issue) => {
+            let assignees = if issue.assignees.is_empty() {
+                "unassigned"
+            } else {
+                issue.assignees.as_str()
+            };
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("#{}", issue.number),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!("  {}", issue.state)),
+            ]));
+            lines.push(Line::from(format!("assignees: {}", assignees)));
+            lines.push(Line::from(format!("comments: {}", issue.comments_count)));
+            lines.push(Line::from(""));
+            lines.push(Line::from(issue.body.as_str()));
+            Text::from(lines)
+        }
+        None => Text::from("Select an issue to preview."),
+    };
+
+    let preview_widget = Paragraph::new(preview)
+        .block(preview_block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(
+        preview_widget,
+        panes[1].inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        }),
     );
 
     draw_status(frame, app, footer);

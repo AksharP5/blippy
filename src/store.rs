@@ -316,6 +316,14 @@ pub fn get_repo_by_slug(_conn: &Connection, _owner: &str, _repo: &str) -> Result
     }))
 }
 
+pub fn update_issue_comments_count(_conn: &Connection, _issue_id: i64, _count: i64) -> Result<()> {
+    _conn.execute(
+        "UPDATE issues SET comments_count = ?1 WHERE id = ?2",
+        (_count, _issue_id),
+    )?;
+    Ok(())
+}
+
 pub fn touch_comments_for_issue(_conn: &Connection, _issue_id: i64, _timestamp: i64) -> Result<()> {
     _conn.execute(
         "UPDATE comments SET last_accessed_at = ?1 WHERE issue_id = ?2",

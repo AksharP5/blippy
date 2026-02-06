@@ -35,7 +35,7 @@ use crate::store::delete_db;
 use crate::sync::{sync_repo, SyncStats};
 use crate::store::{
     comment_now_epoch, comments_for_issue, get_repo_by_slug, list_issues, list_local_repos,
-    prune_comments, touch_comments_for_issue,
+    prune_comments, touch_comments_for_issue, update_issue_comments_count,
 };
 
 type TuiBackend = CrosstermBackend<Stdout>;
@@ -527,6 +527,14 @@ fn handle_events(
                     app.set_status(format!("Synced {} issues", stats.issues));
                 }
             }
+            AppEvent::SyncFailed { owner, repo, message } => {
+                app.set_syncing(false);
+                if app.current_owner() == Some(owner.as_str())
+                    && app.current_repo() == Some(repo.as_str())
+                {
+                    app.set_status(format!("Sync failed: {}", message));
+                }
+            }
             AppEvent::CommentsUpdated { issue_id, count } => {
                 app.set_comment_syncing(false);
                 if app.current_issue_id() == Some(issue_id) {
@@ -561,6 +569,7 @@ enum AppEvent {
     ReposUpdated,
     ScanFinished,
     SyncFinished { owner: String, repo: String, stats: SyncStats },
+    SyncFailed { owner: String, repo: String, message: String },
     CommentsUpdated { issue_id: i64, count: usize },
     CommentsFailed { issue_id: i64, message: String },
     IssueClosed { issue_number: i64, message: String },
@@ -645,24 +654,52 @@ fn start_repo_sync(owner: String, repo: String, token: String, event_tx: Sender<
     thread::spawn(move || {
         let conn = match crate::store::open_db() {
             Ok(conn) => conn,
-            Err(_) => return,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::SyncFailed {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    message: error.to_string(),
+                });
+                return;
+            }
         };
         let client = match GitHubClient::new(&token) {
             Ok(client) => client,
-            Err(_) => return,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::SyncFailed {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    message: error.to_string(),
+                });
+                return;
+            }
         };
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
             Ok(runtime) => runtime,
-            Err(_) => return,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::SyncFailed {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    message: error.to_string(),
+                });
+                return;
+            }
         };
 
         let result = runtime.block_on(async { sync_repo(&client, &conn, &owner, &repo).await });
         let stats = match result {
             Ok(stats) => stats,
-            Err(_) => return,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::SyncFailed {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    message: error.to_string(),
+                });
+                return;
+            }
         };
         let _ = event_tx.send(AppEvent::SyncFinished { owner, repo, stats });
     });
@@ -731,6 +768,7 @@ fn start_comment_sync(
             let _ = crate::store::upsert_comment(&conn, &row);
             count += 1;
         }
+        let _ = update_issue_comments_count(&conn, issue_id, count as i64);
         let _ = touch_comments_for_issue(&conn, issue_id, now);
         let _ = prune_comments(&conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
 
