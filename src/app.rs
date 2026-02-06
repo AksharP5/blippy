@@ -214,6 +214,14 @@ impl App {
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.view = View::RepoPicker;
             }
+            KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.request_sync();
+                self.status = "Syncing...".to_string();
+            }
+            KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::IssueDetail => {
+                self.request_comment_sync();
+                self.status = "Syncing comments...".to_string();
+            }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
                 if self.pending_g {
                     self.jump_top();
@@ -223,6 +231,10 @@ impl App {
                 }
             }
             KeyCode::Char('d') if key.modifiers.is_empty() && self.view == View::Issues => {
+                if self.issues.is_empty() {
+                    self.pending_d = false;
+                    return;
+                }
                 if self.pending_d {
                     self.action = Some(AppAction::CloseIssue);
                     self.pending_d = false;
@@ -608,12 +620,25 @@ impl CommentEditorState {
 mod tests {
     use super::{App, AppAction, View};
     use crate::config::Config;
+    use crate::store::IssueRow;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
     fn dd_triggers_close_issue_action() {
         let mut app = App::new(Config::default());
         app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 1,
+            state: "open".to_string(),
+            title: "Test".to_string(),
+            body: "Body".to_string(),
+            labels: String::new(),
+            assignees: String::new(),
+            updated_at: None,
+            is_pr: false,
+        }]);
 
         app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
         app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));

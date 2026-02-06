@@ -192,11 +192,11 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::Issues => {
-            "j/k or ↑/↓ move • gg/G top/bottom • Enter open • dd close • o browser • Ctrl+G repos • q quit"
+            "j/k or ↑/↓ move • gg/G top/bottom • Enter open • dd close • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "j/k or ↑/↓ move • gg/G top/bottom • b/Esc back • o browser • Ctrl+G repos • q quit"
+            "j/k or ↑/↓ move • gg/G top/bottom • b/Esc back • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::CommentPresetPicker => {
