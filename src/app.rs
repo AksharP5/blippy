@@ -50,6 +50,7 @@ pub struct App {
     selected_issue: usize,
     selected_comment: usize,
     issue_detail_scroll: u16,
+    issue_comments_scroll: u16,
     status: String,
     scanning: bool,
     syncing: bool,
@@ -83,6 +84,7 @@ impl App {
             selected_issue: 0,
             selected_comment: 0,
             issue_detail_scroll: 0,
+            issue_comments_scroll: u16::MAX,
             status: String::new(),
             scanning: false,
             syncing: false,
@@ -144,6 +146,10 @@ impl App {
 
     pub fn issue_detail_scroll(&self) -> u16 {
         self.issue_detail_scroll
+    }
+
+    pub fn issue_comments_scroll(&self) -> u16 {
+        self.issue_comments_scroll
     }
 
     pub fn selected_preset(&self) -> usize {
@@ -254,6 +260,7 @@ impl App {
             }
             KeyCode::Char('G') => self.jump_bottom(),
             KeyCode::Char('c') if self.view == View::IssueDetail => {
+                self.reset_issue_comments_scroll();
                 self.view = View::IssueComments;
             }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
@@ -310,13 +317,19 @@ impl App {
         self.comments = comments;
         if self.comments.is_empty() {
             self.selected_comment = 0;
+            self.issue_comments_scroll = 0;
             return;
         }
         self.selected_comment = self.comments.len() - 1;
+        self.issue_comments_scroll = u16::MAX;
     }
 
     pub fn reset_issue_detail_scroll(&mut self) {
         self.issue_detail_scroll = 0;
+    }
+
+    pub fn reset_issue_comments_scroll(&mut self) {
+        self.issue_comments_scroll = u16::MAX;
     }
 
     pub fn set_comment_defaults(&mut self, defaults: Vec<CommentDefault>) {
@@ -426,9 +439,7 @@ impl App {
                 self.issue_detail_scroll = self.issue_detail_scroll.saturating_sub(1);
             }
             View::IssueComments => {
-                if self.selected_comment > 0 {
-                    self.selected_comment -= 1;
-                }
+                self.issue_comments_scroll = self.issue_comments_scroll.saturating_sub(1);
             }
             View::CommentPresetPicker => {
                 if self.preset_choice > 0 {
@@ -460,9 +471,7 @@ impl App {
                 self.issue_detail_scroll = self.issue_detail_scroll.saturating_add(1);
             }
             View::IssueComments => {
-                if self.selected_comment + 1 < self.comments.len() {
-                    self.selected_comment += 1;
-                }
+                self.issue_comments_scroll = self.issue_comments_scroll.saturating_add(1);
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -486,6 +495,7 @@ impl App {
                 self.action = Some(AppAction::PickIssue);
             }
             View::IssueDetail => {
+                self.reset_issue_comments_scroll();
                 self.view = View::IssueComments;
             }
             View::IssueComments => {}
@@ -502,7 +512,7 @@ impl App {
             View::RemoteChooser => self.selected_remote = 0,
             View::Issues => self.selected_issue = 0,
             View::IssueDetail => self.issue_detail_scroll = 0,
-            View::IssueComments => self.selected_comment = 0,
+            View::IssueComments => self.issue_comments_scroll = 0,
             View::CommentPresetPicker => self.preset_choice = 0,
             View::CommentPresetName | View::CommentEditor => {}
         }
@@ -529,9 +539,7 @@ impl App {
                 self.issue_detail_scroll = u16::MAX;
             }
             View::IssueComments => {
-                if !self.comments.is_empty() {
-                    self.selected_comment = self.comments.len() - 1;
-                }
+                self.issue_comments_scroll = u16::MAX;
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();

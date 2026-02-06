@@ -254,41 +254,37 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
 fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let block = panel_block("Comments");
-    let items = if app.comments().is_empty() {
-        vec![ListItem::new("No comments cached yet.")]
+    let mut lines = Vec::new();
+    if app.comments().is_empty() {
+        lines.push(Line::from("No comments cached yet."));
     } else {
-        app.comments()
-            .iter()
-            .map(|comment| {
-                let mut lines = Vec::new();
-                lines.push(Line::from(Span::styled(
-                    comment.author.as_str(),
-                    Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
-                )));
-                let rendered = markdown::render(comment.body.as_str());
-                if rendered.lines.is_empty() {
-                    lines.push(Line::from(""));
-                } else {
-                    for line in rendered.lines {
-                        lines.push(line);
-                    }
-                }
+        for (index, comment) in app.comments().iter().enumerate() {
+            lines.push(Line::from(Span::styled(
+                format!("{}  {}", index + 1, comment.author),
+                Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            )));
+            let rendered = markdown::render(comment.body.as_str());
+            if rendered.lines.is_empty() {
                 lines.push(Line::from(""));
-                ListItem::new(lines)
-            })
-            .collect()
-    };
-    let list = List::new(items)
+            } else {
+                for line in rendered.lines {
+                    lines.push(line);
+                }
+            }
+            lines.push(Line::from(""));
+        }
+    }
+
+    let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .highlight_symbol("▸ ")
-        .highlight_style(Style::default().bg(SELECT_BG));
-    frame.render_stateful_widget(
-        list,
+        .wrap(Wrap { trim: false })
+        .scroll((app.issue_comments_scroll(), 0));
+    frame.render_widget(
+        paragraph,
         main.inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
-        &mut list_state(app.selected_comment()),
     );
 
     draw_status(frame, app, footer);
