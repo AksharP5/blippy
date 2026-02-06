@@ -7,6 +7,11 @@ use ratatui::Frame;
 use crate::app::{App, View};
 use crate::markdown;
 
+const GITHUB_BLUE: Color = Color::Rgb(88, 166, 255);
+const GITHUB_GREEN: Color = Color::Rgb(63, 185, 80);
+const PANEL_BORDER: Color = Color::Rgb(48, 54, 61);
+const SELECT_BG: Color = Color::Rgb(30, 41, 59);
+
 pub fn draw(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
     match app.view() {
@@ -23,7 +28,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 
 fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = Block::default().title("Repos").borders(Borders::ALL);
+    let block = panel_block("Repositories");
     let items = if app.repos().is_empty() {
         vec![ListItem::new("No repos found. Run `glyph sync` or press Ctrl+R to rescan.")]
     } else {
@@ -35,7 +40,10 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
             })
             .collect()
     };
-    let list = List::new(items).block(block).highlight_symbol("> ");
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▸ ")
+        .highlight_style(Style::default().bg(SELECT_BG));
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -50,7 +58,7 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
 
 fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = Block::default().title("Choose Remote").borders(Borders::ALL);
+    let block = panel_block("Choose Remote");
     let items = app
         .remotes()
         .iter()
@@ -59,7 +67,10 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
             ListItem::new(label)
         })
         .collect::<Vec<ListItem>>();
-    let list = List::new(items).block(block).highlight_symbol("> ");
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▸ ")
+        .highlight_style(Style::default().bg(SELECT_BG));
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -79,7 +90,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
         .split(main);
 
-    let block = Block::default().title("Issues").borders(Borders::ALL);
+    let block = panel_block("Issues");
     let items = if app.issues().is_empty() {
         vec![ListItem::new("No cached issues yet. Run `glyph sync`.")]
     } else {
@@ -94,11 +105,11 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
                 let line1 = Line::from(vec![
                     Span::styled(
                         format!("#{} ", issue.number),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!("[{}] ", issue.state),
-                        Style::default().fg(Color::Green),
+                        Style::default().fg(GITHUB_GREEN),
                     ),
                     Span::raw(issue.title.as_str()),
                 ]);
@@ -110,7 +121,10 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
             })
             .collect()
     };
-    let list = List::new(items).block(block).highlight_symbol("> ");
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▸ ")
+        .highlight_style(Style::default().bg(SELECT_BG));
     frame.render_stateful_widget(
         list,
         panes[0].inner(Margin {
@@ -120,9 +134,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
         &mut list_state(app.selected_issue()),
     );
 
-    let preview_block = Block::default()
-        .title("Issue Preview")
-        .borders(Borders::ALL);
+    let preview_block = panel_block("Issue Preview");
     let preview = match app.issues().get(app.selected_issue()) {
         Some(issue) => {
             let assignees = if issue.assignees.is_empty() {
@@ -134,14 +146,21 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("#{}", issue.number),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!("  {}", issue.state)),
             ]));
             lines.push(Line::from(format!("assignees: {}", assignees)));
             lines.push(Line::from(format!("comments: {}", issue.comments_count)));
             lines.push(Line::from(""));
-            lines.push(Line::from(issue.body.as_str()));
+
+            let rendered = markdown::render(issue.body.as_str());
+            let preview_lines = rendered.lines.into_iter().take(18).collect::<Vec<Line<'static>>>();
+            if preview_lines.is_empty() {
+                lines.push(Line::from("No description."));
+            } else {
+                lines.extend(preview_lines);
+            }
             Text::from(lines)
         }
         None => Text::from("Select an issue to preview."),
@@ -167,7 +186,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
     let title = selected
         .map(|issue| format!("#{} {}", issue.number, issue.title))
         .unwrap_or_else(|| "Issue".to_string());
-    let block = Block::default().title(title).borders(Borders::ALL);
+    let block = panel_block(&title);
     let body = selected.map(|issue| issue.body.as_str()).unwrap_or("");
     let assignees = selected
         .map(|issue| {
@@ -194,7 +213,10 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from("Recent comments:"));
+    lines.push(Line::from(Span::styled(
+        "Recent comments",
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
 
     if app.comments().is_empty() {
         lines.push(Line::from("No comments cached yet."));
@@ -205,7 +227,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
                 Span::styled("- ", Style::default().fg(Color::Gray)),
                 Span::styled(
                     comment.author.as_str(),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                 ),
             ]));
             let rendered_comment = markdown::render(comment.body.as_str());
@@ -231,7 +253,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
 
 fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = Block::default().title("Comments").borders(Borders::ALL);
+    let block = panel_block("Comments");
     let items = if app.comments().is_empty() {
         vec![ListItem::new("No comments cached yet.")]
     } else {
@@ -241,7 +263,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
                 let mut lines = Vec::new();
                 lines.push(Line::from(Span::styled(
                     comment.author.as_str(),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                 )));
                 let rendered = markdown::render(comment.body.as_str());
                 if rendered.lines.is_empty() {
@@ -256,7 +278,10 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
             })
             .collect()
     };
-    let list = List::new(items).block(block).highlight_symbol("> ");
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▸ ")
+        .highlight_style(Style::default().bg(SELECT_BG));
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -271,7 +296,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
 
 fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = Block::default().title("Close Issue").borders(Borders::ALL);
+    let block = panel_block("Close Issue");
     let mut items = Vec::new();
     items.push(ListItem::new("Close without comment"));
     items.push(ListItem::new("Custom message..."));
@@ -280,7 +305,10 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
     }
     items.push(ListItem::new("Add preset..."));
 
-    let list = List::new(items).block(block).highlight_symbol("> ");
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▸ ")
+        .highlight_style(Style::default().bg(SELECT_BG));
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -295,7 +323,7 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
 
 fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = Block::default().title("Preset Name").borders(Borders::ALL);
+    let block = panel_block("Preset Name");
     let text = app.editor().name();
     let paragraph = Paragraph::new(text)
         .block(block)
@@ -307,7 +335,7 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
 
 fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = Block::default().title("Comment").borders(Borders::ALL);
+    let block = panel_block("Comment");
     let text = app.editor().text();
     let paragraph = Paragraph::new(text)
         .block(block)
@@ -327,8 +355,21 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
-        .block(Block::default());
+        .style(Style::default().fg(Color::Rgb(139, 148, 158)))
+        .block(Block::default().border_style(Style::default().fg(PANEL_BORDER)));
     frame.render_widget(paragraph, area.inner(Margin { vertical: 0, horizontal: 2 }));
+}
+
+fn panel_block(title: &str) -> Block<'_> {
+    Block::default()
+        .title(Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(GITHUB_BLUE)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(PANEL_BORDER))
 }
 
 fn split_area(area: Rect) -> (Rect, Rect) {
