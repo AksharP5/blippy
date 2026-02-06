@@ -424,7 +424,10 @@ fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Resul
         }
     };
 
-    if issue_state.as_deref() == Some("open") {
+    if issue_state
+        .as_deref()
+        .is_some_and(|state| state.eq_ignore_ascii_case("open"))
+    {
         app.set_status("Issue is already open".to_string());
         return Ok(());
     }
@@ -624,7 +627,11 @@ fn handle_events(
                     && app.current_repo() == Some(repo.as_str())
                 {
                     load_issues_for_slug(app, conn, &owner, &repo)?;
-                    app.set_status(format!("Synced {} issues", stats.issues));
+                    let (open_count, closed_count) = app.issue_counts();
+                    app.set_status(format!(
+                        "Synced {} issues (open: {}, closed: {})",
+                        stats.issues, open_count, closed_count
+                    ));
                 }
             }
             AppEvent::SyncFailed { owner, repo, message } => {
@@ -703,7 +710,7 @@ fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>)
 }
 
 fn maybe_start_issue_poll(app: &mut App, last_poll: &mut Instant) {
-    if app.view() != View::Issues {
+    if !matches!(app.view(), View::Issues | View::IssueDetail | View::IssueComments) {
         return;
     }
 

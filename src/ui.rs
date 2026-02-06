@@ -105,7 +105,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([Constraint::Length(4), Constraint::Min(0)])
         .split(main);
     let panes = Layout::default()
         .direction(Direction::Horizontal)
@@ -115,12 +115,19 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let visible_issues = app.issues_for_view();
     let (open_count, closed_count) = app.issue_counts();
     let query = app.issue_query().trim();
-    let query_label = if query.is_empty() { "none" } else { query };
+    let query_label = if app.issue_search_mode() {
+        query.to_string()
+    } else if query.is_empty() {
+        "none".to_string()
+    } else {
+        query.to_string()
+    };
+    let query_display = ellipsize(query_label.as_str(), 64);
     let header_text = Text::from(vec![
         issue_tabs_line(app.issue_filter(), open_count, closed_count),
         Line::from(vec![
             Span::styled("search: ", Style::default().fg(GITHUB_MUTED)),
-            Span::raw(ellipsize(query_label, 64)),
+            Span::raw(query_display.clone()),
         ]),
     ]);
     let header_block = Block::default()
@@ -128,15 +135,30 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(PANEL_BORDER))
         .style(Style::default().bg(GITHUB_PANEL));
+    let header_area = sections[0].inner(Margin {
+        vertical: 0,
+        horizontal: 2,
+    });
     frame.render_widget(
         Paragraph::new(header_text)
             .block(header_block)
             .style(Style::default().fg(Color::White)),
-        sections[0].inner(Margin {
-            vertical: 0,
-            horizontal: 2,
-        }),
+        header_area,
     );
+    if app.issue_search_mode() {
+        let content = header_area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        if content.width > 0 && content.height > 1 {
+            let cursor_x = content
+                .x
+                .saturating_add((8 + query_display.chars().count()) as u16)
+                .min(content.x.saturating_add(content.width.saturating_sub(1)));
+            let cursor_y = content.y.saturating_add(1);
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
 
     let list_focused = app.focus() == Focus::IssuesList;
     let preview_focused = app.focus() == Focus::IssuesPreview;
@@ -544,13 +566,29 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
 
 fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
+    let input_area = main.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     let block = panel_block("Preset Name");
     let text = app.editor().name();
     let paragraph = Paragraph::new(text)
         .block(block)
         .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
+    frame.render_widget(paragraph, input_area);
+
+    let text_area = input_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if text_area.width > 0 {
+        let cursor_x = text_area
+            .x
+            .saturating_add(app.editor().name().chars().count() as u16)
+            .min(text_area.x.saturating_add(text_area.width.saturating_sub(1)));
+        frame.set_cursor_position((cursor_x, text_area.y));
+    }
 
     draw_status(frame, app, footer);
 }
@@ -667,11 +705,11 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • m comment • u reopen • c all comments • b/Esc back • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • m comment • u reopen • b/Esc back • r refresh • o browser • q quit"
+            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::CommentPresetPicker => {
@@ -773,7 +811,7 @@ fn filter_tab(label: &str, count: usize, active: bool, color: Color) -> Span<'st
 }
 
 fn issue_state_color(state: &str) -> Color {
-    if state == "closed" {
+    if state.eq_ignore_ascii_case("closed") {
         return GITHUB_RED;
     }
     GITHUB_GREEN

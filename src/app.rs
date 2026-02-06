@@ -87,9 +87,9 @@ impl IssueFilter {
 
     fn matches(self, issue: &IssueRow) -> bool {
         if self == Self::Open {
-            return issue.state == "open";
+            return issue.state.eq_ignore_ascii_case("open");
         }
-        issue.state == "closed"
+        issue.state.eq_ignore_ascii_case("closed")
     }
 }
 
@@ -248,12 +248,12 @@ impl App {
         let open = self
             .issues
             .iter()
-            .filter(|issue| issue.state == "open")
+            .filter(|issue| issue.state.eq_ignore_ascii_case("open"))
             .count();
         let closed = self
             .issues
             .iter()
-            .filter(|issue| issue.state == "closed")
+            .filter(|issue| issue.state.eq_ignore_ascii_case("closed"))
             .count();
         (open, closed)
     }
@@ -413,7 +413,8 @@ impl App {
                     && matches!(self.view, View::IssueDetail | View::IssueComments) =>
             {
                 self.request_comment_sync();
-                self.status = "Syncing comments...".to_string();
+                self.request_sync();
+                self.status = "Syncing issue and comments...".to_string();
             }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
                 if self.pending_g {
@@ -423,15 +424,21 @@ impl App {
                     self.pending_g = true;
                 }
             }
-            KeyCode::Char('d') if key.modifiers.is_empty() && self.view == View::Issues => {
-                if self.filtered_issue_indices.is_empty() {
+            KeyCode::Char('d')
+                if key.modifiers.is_empty()
+                    && matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
+                let has_issue = if self.view == View::Issues {
+                    !self.filtered_issue_indices.is_empty()
+                } else {
+                    self.current_issue_id.is_some() && self.current_issue_number.is_some()
+                };
+                if !has_issue {
                     self.pending_d = false;
+                    self.status = "No issue selected".to_string();
                     return;
                 }
-                if self
-                    .selected_issue_row()
-                    .is_some_and(|issue| issue.state == "closed")
-                {
+                if self.current_view_issue_is_closed() {
                     self.pending_d = false;
                     self.status = "Issue already closed".to_string();
                     return;
@@ -920,6 +927,17 @@ impl App {
         offsets
     }
 
+    fn current_view_issue_is_closed(&self) -> bool {
+        if self.view == View::Issues {
+            return self
+                .selected_issue_row()
+                .is_some_and(|issue| issue.state.eq_ignore_ascii_case("closed"));
+        }
+
+        self.current_issue_row()
+            .is_some_and(|issue| issue.state.eq_ignore_ascii_case("closed"))
+    }
+
     fn rebuild_issue_filter(&mut self) {
         let query = self.issue_query.trim().to_ascii_lowercase();
         self.filtered_issue_indices = self
@@ -1200,6 +1218,31 @@ mod tests {
             updated_at: None,
             is_pr: false,
         }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::CloseIssue));
+    }
+
+    #[test]
+    fn dd_triggers_close_issue_action_in_detail_view() {
+        let mut app = App::new(Config::default());
+        app.set_issues(vec![IssueRow {
+            id: 42,
+            repo_id: 1,
+            number: 7,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+        app.set_current_issue(42, 7);
+        app.set_view(View::IssueDetail);
 
         app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
         app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
