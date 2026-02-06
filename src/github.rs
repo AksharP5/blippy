@@ -90,7 +90,7 @@ impl GitHubClient {
                 .client
                 .get(url)
                 .bearer_auth(&self.token)
-                .query(&[("state", "open"), ("per_page", "100"), ("page", &page.to_string())])
+                .query(&[("state", "all"), ("per_page", "100"), ("page", &page.to_string())])
                 .send()
                 .await?
                 .error_for_status()?;
@@ -170,6 +170,26 @@ impl GitHubClient {
             .patch(url)
             .bearer_auth(&self.token)
             .json(&serde_json::json!({"state": "closed"}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn reopen_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            API_BASE, owner, repo, issue_number
+        );
+        self.client
+            .patch(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"state": "open"}))
             .send()
             .await?
             .error_for_status()?;

@@ -1,19 +1,25 @@
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, View};
+use crate::app::{App, EditorMode, Focus, IssueFilter, View};
 use crate::markdown;
 
 const GITHUB_BLUE: Color = Color::Rgb(88, 166, 255);
 const GITHUB_GREEN: Color = Color::Rgb(63, 185, 80);
+const GITHUB_RED: Color = Color::Rgb(248, 81, 73);
+const GITHUB_BG: Color = Color::Rgb(13, 17, 23);
+const GITHUB_PANEL: Color = Color::Rgb(22, 27, 34);
+const GITHUB_MUTED: Color = Color::Rgb(139, 148, 158);
 const PANEL_BORDER: Color = Color::Rgb(48, 54, 61);
-const SELECT_BG: Color = Color::Rgb(30, 41, 59);
+const SELECT_BG: Color = Color::Rgb(33, 58, 89);
+const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
-pub fn draw(frame: &mut Frame<'_>, app: &App) {
+pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
+    frame.render_widget(Block::default().style(Style::default().bg(GITHUB_BG)), area);
     match app.view() {
         View::RepoPicker => draw_repo_picker(frame, app, area),
         View::RemoteChooser => draw_remote_chooser(frame, app, area),
@@ -41,9 +47,15 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
             .collect()
     };
     let list = List::new(items)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
-        .highlight_style(Style::default().bg(SELECT_BG));
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -68,9 +80,15 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         })
         .collect::<Vec<ListItem>>();
     let list = List::new(items)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
-        .highlight_style(Style::default().bg(SELECT_BG));
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -83,24 +101,65 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
     draw_status(frame, app, footer);
 }
 
-fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(main);
     let panes = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
-        .split(main);
+        .split(sections[1]);
 
-    let block = panel_block("Issues");
-    let items = if app.issues().is_empty() {
-        vec![ListItem::new("No cached issues yet. Run `glyph sync`.")]
+    let visible_issues = app.issues_for_view();
+    let (open_count, closed_count) = app.issue_counts();
+    let query = app.issue_query().trim();
+    let query_label = if query.is_empty() { "none" } else { query };
+    let header_text = Text::from(vec![
+        issue_tabs_line(app.issue_filter(), open_count, closed_count),
+        Line::from(vec![
+            Span::styled("search: ", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(ellipsize(query_label, 64)),
+        ]),
+    ]);
+    let header_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(PANEL_BORDER))
+        .style(Style::default().bg(GITHUB_PANEL));
+    frame.render_widget(
+        Paragraph::new(header_text)
+            .block(header_block)
+            .style(Style::default().fg(Color::White)),
+        sections[0].inner(Margin {
+            vertical: 0,
+            horizontal: 2,
+        }),
+    );
+
+    let list_focused = app.focus() == Focus::IssuesList;
+    let preview_focused = app.focus() == Focus::IssuesPreview;
+    let block = panel_block_with_border("Issue list", focus_border(list_focused));
+    let items = if visible_issues.is_empty() {
+        if app.issues().is_empty() {
+            vec![ListItem::new("No cached issues yet. Run `glyph sync`.")]
+        } else {
+            vec![ListItem::new("No issues match current filter. Press `f` to switch.")]
+        }
     } else {
-        app.issues()
+        visible_issues
             .iter()
             .map(|issue| {
                 let assignees = if issue.assignees.is_empty() {
                     "unassigned"
                 } else {
                     issue.assignees.as_str()
+                };
+                let labels = if issue.labels.is_empty() {
+                    "none"
+                } else {
+                    issue.labels.as_str()
                 };
                 let line1 = Line::from(vec![
                     Span::styled(
@@ -109,38 +168,50 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
                     ),
                     Span::styled(
                         format!("[{}] ", issue.state),
-                        Style::default().fg(GITHUB_GREEN),
+                        Style::default().fg(issue_state_color(issue.state.as_str())),
                     ),
-                    Span::raw(issue.title.as_str()),
+                    Span::raw(issue.title.clone()),
                 ]);
                 let line2 = Line::from(format!(
-                    "assignees: {}  comments: {}",
-                    assignees, issue.comments_count
+                    "assignees: {}  comments: {}  labels: {}",
+                    assignees,
+                    issue.comments_count,
+                    ellipsize(labels, 26)
                 ));
                 ListItem::new(vec![line1, line2])
             })
             .collect()
     };
     let list = List::new(items)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
-        .highlight_style(Style::default().bg(SELECT_BG));
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(
         list,
         panes[0].inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
-        &mut list_state(app.selected_issue()),
+        &mut list_state(selected_for_list(app.selected_issue(), visible_issues.len())),
     );
 
-    let preview_block = panel_block("Issue Preview");
-    let preview = match app.issues().get(app.selected_issue()) {
+    let (preview_title, preview_lines) = match app.selected_issue_row() {
         Some(issue) => {
             let assignees = if issue.assignees.is_empty() {
-                "unassigned"
+                "unassigned".to_string()
             } else {
-                issue.assignees.as_str()
+                issue.assignees.clone()
+            };
+            let labels = if issue.labels.is_empty() {
+                "none".to_string()
+            } else {
+                issue.labels.clone()
             };
             let mut lines = Vec::new();
             lines.push(Line::from(vec![
@@ -148,133 +219,269 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
                     format!("#{}", issue.number),
                     Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(format!("  {}", issue.state)),
+                Span::styled(
+                    format!("  {}", issue.state),
+                    Style::default().fg(issue_state_color(issue.state.as_str())),
+                ),
             ]));
             lines.push(Line::from(format!("assignees: {}", assignees)));
             lines.push(Line::from(format!("comments: {}", issue.comments_count)));
+            lines.push(Line::from(format!(
+                "labels: {}",
+                ellipsize(labels.as_str(), 80)
+            )));
+            if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
+                lines.push(Line::from(format!("updated: {}", updated)));
+            }
             lines.push(Line::from(""));
 
             let rendered = markdown::render(issue.body.as_str());
-            let preview_lines = rendered.lines.into_iter().take(18).collect::<Vec<Line<'static>>>();
-            if preview_lines.is_empty() {
+            if rendered.lines.is_empty() {
                 lines.push(Line::from("No description."));
             } else {
-                lines.extend(preview_lines);
+                lines.extend(rendered.lines);
             }
-            Text::from(lines)
+            ("Issue Preview".to_string(), lines)
         }
-        None => Text::from("Select an issue to preview."),
+        None => (
+            "Issue Preview".to_string(),
+            vec![Line::from("Select an issue to preview.")],
+        ),
     };
 
-    let preview_widget = Paragraph::new(preview)
+    let preview_area = panes[1].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let viewport_height = preview_area.height.saturating_sub(2) as usize;
+    let max_scroll = preview_lines.len().saturating_sub(viewport_height) as u16;
+    app.set_issues_preview_max_scroll(max_scroll);
+    let scroll = app.issues_preview_scroll();
+    let preview_block = panel_block_with_border(&preview_title, focus_border(preview_focused));
+    let preview_widget = Paragraph::new(Text::from(preview_lines))
         .block(preview_block)
-        .wrap(Wrap { trim: false });
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(preview_widget, preview_area);
+
+    draw_status(frame, app, footer);
+}
+
+fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(main);
+    let content_area = sections[1].inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
+    let body_focused = app.focus() == Focus::IssueBody;
+    let comments_focused = app.focus() == Focus::IssueRecentComments;
+    let (issue_title, issue_state, body, assignees, labels, comment_count, updated_at) =
+        match app.current_issue_row() {
+            Some(issue) => (
+                format!("#{} {}", issue.number, issue.title),
+                issue.state.clone(),
+                issue.body.clone(),
+                if issue.assignees.is_empty() {
+                    "unassigned".to_string()
+                } else {
+                issue.assignees.clone()
+            },
+            if issue.labels.is_empty() {
+                "none".to_string()
+            } else {
+                issue.labels.clone()
+            },
+            issue.comments_count,
+            issue.updated_at.clone(),
+        ),
+            None => (
+                String::new(),
+                String::new(),
+                String::new(),
+                "unassigned".to_string(),
+                "none".to_string(),
+                0,
+                None,
+            ),
+        };
+
+    let header_text = if issue_title.is_empty() {
+        Text::from(Line::from("Issue detail"))
+    } else {
+        Text::from(vec![Line::from(vec![
+            Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(issue_state.clone(), Style::default().fg(issue_state_color(issue_state.as_str())).add_modifier(Modifier::BOLD)),
+        ])])
+    };
+    let header_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(PANEL_BORDER))
+        .style(Style::default().bg(GITHUB_PANEL));
     frame.render_widget(
-        preview_widget,
-        panes[1].inner(Margin {
-            vertical: 1,
-            horizontal: 1,
+        Paragraph::new(header_text)
+            .block(header_block)
+            .style(Style::default().fg(Color::White)),
+        sections[0].inner(Margin {
+            vertical: 0,
+            horizontal: 2,
         }),
     );
 
-    draw_status(frame, app, footer);
-}
-
-fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
-    let (main, footer) = split_area(area);
-    let content_area = main.inner(Margin {
-        vertical: 1,
-        horizontal: 2,
-    });
-    let selected = app.issues().get(app.selected_issue());
-    let title = selected
-        .map(|issue| format!("#{} {}", issue.number, issue.title))
-        .unwrap_or_else(|| "Issue".to_string());
-    let block = panel_block(&title);
-    let body = selected.map(|issue| issue.body.as_str()).unwrap_or("");
-    let assignees = selected
-        .map(|issue| {
-            if issue.assignees.is_empty() {
-                "unassigned".to_string()
-            } else {
-                issue.assignees.clone()
-            }
-        })
-        .unwrap_or_else(|| "unassigned".to_string());
-    let comment_count = selected.map(|issue| issue.comments_count).unwrap_or(0);
-    let mut lines = Vec::new();
-    lines.push(Line::from(format!(
-        "assignees: {} | comments: {}",
-        assignees, comment_count
+    let mut body_lines = Vec::new();
+    if issue_title.is_empty() {
+        body_lines.push(Line::from("No issue selected."));
+    } else {
+        body_lines.push(Line::from(Span::styled(
+            issue_title,
+            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        )));
+    }
+    body_lines.push(Line::from(format!(
+        "assignees: {} | comments: {} | labels: {}",
+        assignees,
+        comment_count,
+        ellipsize(labels.as_str(), 44)
     )));
-    lines.push(Line::from(""));
-    let rendered_body = markdown::render(body);
+    if let Some(updated) = format_datetime(updated_at.as_deref()) {
+        body_lines.push(Line::from(format!("updated: {}", updated)));
+    }
+    body_lines.push(Line::from(""));
+    let rendered_body = markdown::render(body.as_str());
     if rendered_body.lines.is_empty() {
-        lines.push(Line::from("No description."));
+        body_lines.push(Line::from("No description."));
     } else {
         for line in rendered_body.lines {
-            lines.push(line);
+            body_lines.push(line);
         }
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Recent comments",
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
 
+    let mut comment_lines = Vec::new();
     if app.comments().is_empty() {
-        lines.push(Line::from("No comments cached yet."));
+        comment_lines.push(Line::from("No comments cached yet."));
     } else {
         let start = app.comments().len().saturating_sub(3);
-        for comment in &app.comments()[start..] {
-            lines.push(Line::from(vec![
-                Span::styled("- ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    comment.author.as_str(),
-                    Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
-                ),
-            ]));
+        for (index, comment) in app.comments()[start..].iter().enumerate() {
+            comment_lines.push(comment_header(
+                start + index + 1,
+                comment.author.as_str(),
+                comment.created_at.as_deref(),
+            ));
             let rendered_comment = markdown::render(comment.body.as_str());
             if rendered_comment.lines.is_empty() {
-                lines.push(Line::from(""));
+                comment_lines.push(Line::from(""));
             } else {
                 for line in rendered_comment.lines {
-                    lines.push(line);
+                    comment_lines.push(line);
                 }
             }
-            lines.push(Line::from(""));
+            comment_lines.push(Line::from(""));
         }
     }
 
-    let viewport_height = content_area.height.saturating_sub(2) as usize;
-    let max_scroll = lines.len().saturating_sub(viewport_height) as u16;
-    let scroll = app.issue_detail_scroll().min(max_scroll);
+    let min_body_height = 6u16;
+    let mut comments_height =
+        RECENT_COMMENTS_HEIGHT.min(content_area.height.saturating_sub(min_body_height));
+    if comments_height < 3 {
+        comments_height = content_area.height.min(3);
+    }
+    let panes = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(comments_height)])
+        .split(content_area);
 
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(block)
+    let viewport_height = panes[0].height.saturating_sub(2) as usize;
+    let max_scroll = body_lines.len().saturating_sub(viewport_height) as u16;
+    app.set_issue_detail_max_scroll(max_scroll);
+    let scroll = app.issue_detail_scroll();
+
+    let body_block = panel_block_with_border("Issue description", focus_border(body_focused));
+    let body_paragraph = Paragraph::new(Text::from(body_lines))
+        .block(body_block)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
-    frame.render_widget(paragraph, content_area);
+    frame.render_widget(body_paragraph, panes[0]);
+
+    let comments_viewport = panes[1].height.saturating_sub(2) as usize;
+    let comments_max_scroll = comment_lines.len().saturating_sub(comments_viewport) as u16;
+    app.set_issue_recent_comments_max_scroll(comments_max_scroll);
+    let comments_scroll = app.issue_recent_comments_scroll();
+    let comments_border = if comments_focused {
+        GITHUB_BLUE
+    } else {
+        GITHUB_GREEN
+    };
+    let comments_title = format!("Recent comments ({})", app.comments().len());
+    let comment_block = Block::default()
+        .title(Line::from(Span::styled(
+            comments_title,
+            Style::default()
+                .fg(GITHUB_GREEN)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(comments_border));
+    let comment_paragraph = Paragraph::new(Text::from(comment_lines))
+        .block(comment_block)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .wrap(Wrap { trim: false })
+        .scroll((comments_scroll, 0));
+    frame.render_widget(comment_paragraph, panes[1]);
 
     draw_status(frame, app, footer);
 }
 
-fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let content_area = main.inner(Margin {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(main);
+    let content_area = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
-    let block = panel_block("Comments");
+    let title = match app.current_issue_row() {
+        Some(issue) => format!("Comments #{}", issue.number),
+        None => "Comments (n/p jump)".to_string(),
+    };
+    let header = Text::from(vec![
+        Line::from(Span::styled(title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("jump comments with n/p", Style::default().fg(GITHUB_MUTED))),
+    ]);
+    let header_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(PANEL_BORDER))
+        .style(Style::default().bg(GITHUB_PANEL));
+    frame.render_widget(
+        Paragraph::new(header)
+            .block(header_block)
+            .style(Style::default().fg(Color::White)),
+        sections[0].inner(Margin {
+            vertical: 0,
+            horizontal: 2,
+        }),
+    );
+
+    let block = panel_block(&title);
     let mut lines = Vec::new();
     if app.comments().is_empty() {
         lines.push(Line::from("No comments cached yet."));
     } else {
         for (index, comment) in app.comments().iter().enumerate() {
-            lines.push(Line::from(Span::styled(
-                format!("{}  {}", index + 1, comment.author),
-                Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
-            )));
+            lines.push(comment_header(
+                index + 1,
+                comment.author.as_str(),
+                comment.created_at.as_deref(),
+            ));
             let rendered = markdown::render(comment.body.as_str());
             if rendered.lines.is_empty() {
                 lines.push(Line::from(""));
@@ -289,10 +496,12 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
 
     let viewport_height = content_area.height.saturating_sub(2) as usize;
     let max_scroll = lines.len().saturating_sub(viewport_height) as u16;
-    let scroll = app.issue_comments_scroll().min(max_scroll);
+    app.set_issue_comments_max_scroll(max_scroll);
+    let scroll = app.issue_comments_scroll();
 
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(paragraph, content_area);
@@ -312,9 +521,15 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
     items.push(ListItem::new("Add preset..."));
 
     let list = List::new(items)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
-        .highlight_style(Style::default().bg(SELECT_BG));
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(
         list,
         main.inner(Margin {
@@ -333,6 +548,7 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
     let text = app.editor().name();
     let paragraph = Paragraph::new(text)
         .block(block)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
 
@@ -341,32 +557,68 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
 
 fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = panel_block("Comment");
+    let title = match app.editor_mode() {
+        EditorMode::CloseIssue => "Close Issue Comment",
+        EditorMode::AddComment => "Add Issue Comment",
+        EditorMode::AddPreset => "Preset Body",
+    };
+    let editor_area = main.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
+    let block = panel_block(title);
     let text = app.editor().text();
     let paragraph = Paragraph::new(text)
         .block(block)
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
+    frame.render_widget(paragraph, editor_area);
+
+    let text_area = editor_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if text_area.width > 0 && text_area.height > 0 {
+        let (row, col) = editor_cursor_position(app.editor().text());
+        let cursor_y = text_area
+            .y
+            .saturating_add(row.min(text_area.height.saturating_sub(1)));
+        let cursor_x = text_area
+            .x
+            .saturating_add(col.min(text_area.width.saturating_sub(1)));
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 
     draw_status(frame, app, footer);
 }
 
 fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let status = app.status();
+    let context = status_context(app);
     let help = help_text(app);
-    let text = if status.is_empty() {
-        Text::from(Line::from(help))
-    } else {
-        Text::from(vec![Line::from(status), Line::from(help)])
-    };
+    let mut lines = Vec::new();
+    if !status.is_empty() {
+        lines.push(Line::from(status));
+    }
+    lines.push(Line::from(context));
+    lines.push(Line::from(help));
+    let text = Text::from(lines);
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
-        .style(Style::default().fg(Color::Rgb(139, 148, 158)))
-        .block(Block::default().border_style(Style::default().fg(PANEL_BORDER)));
+        .style(Style::default().fg(GITHUB_MUTED).bg(GITHUB_BG))
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(PANEL_BORDER)),
+        );
     frame.render_widget(paragraph, area.inner(Margin { vertical: 0, horizontal: 2 }));
 }
 
 fn panel_block(title: &str) -> Block<'_> {
+    panel_block_with_border(title, PANEL_BORDER)
+}
+
+fn panel_block_with_border(title: &str, border: Color) -> Block<'_> {
     Block::default()
         .title(Line::from(Span::styled(
             title.to_string(),
@@ -375,13 +627,23 @@ fn panel_block(title: &str) -> Block<'_> {
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(PANEL_BORDER))
+        .border_type(BorderType::Rounded)
+        .style(Style::default().bg(GITHUB_PANEL).fg(Color::White))
+        .border_style(Style::default().fg(border))
+}
+
+fn focus_border(focused: bool) -> Color {
+    if focused {
+        GITHUB_BLUE
+    } else {
+        PANEL_BORDER
+    }
 }
 
 fn split_area(area: Rect) -> (Rect, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .constraints([Constraint::Min(3), Constraint::Length(4)])
         .split(area);
     (chunks[0], chunks[1])
 }
@@ -397,15 +659,19 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::Issues => {
-            "j/k or ↑/↓ move • gg/G top/bottom • Enter open • dd close • r refresh • o browser • Ctrl+G repos • q quit"
+            if app.issue_search_mode() {
+                return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
+                    .to_string();
+            }
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "c all comments • b/Esc back • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • m comment • u reopen • c all comments • b/Esc back • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ move • gg/G top/bottom • b/Esc back • r refresh • o browser • q quit"
+            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • m comment • u reopen • b/Esc back • r refresh • o browser • q quit"
                 .to_string()
         }
         View::CommentPresetPicker => {
@@ -415,13 +681,150 @@ fn help_text(app: &App) -> String {
             "Type name • Enter next • Esc cancel".to_string()
         }
         View::CommentEditor => {
-            "Type message • Ctrl+Enter submit • Esc cancel".to_string()
+            if app.editor_mode() == EditorMode::AddPreset {
+                return "Type preset body • Enter save • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
+                    .to_string();
+            }
+            "Type message • Enter submit • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
+                .to_string()
         }
     }
+}
+
+fn status_context(app: &App) -> String {
+    let repo = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => format!("{}/{}", owner, repo),
+        _ => "no repo selected".to_string(),
+    };
+    let focus = match app.view() {
+        View::Issues | View::IssueDetail => match app.focus() {
+            Focus::IssuesList => "issues list",
+            Focus::IssuesPreview => "issue preview",
+            Focus::IssueBody => "issue description",
+            Focus::IssueRecentComments => "recent comments",
+        },
+        _ => "n/a",
+    };
+    let sync = if app.syncing() {
+        "syncing"
+    } else if app.comment_syncing() {
+        "syncing comments"
+    } else if app.scanning() {
+        "scanning"
+    } else {
+        "idle"
+    };
+    if app.view() == View::Issues {
+        let query = app.issue_query().trim();
+        let query = if query.is_empty() {
+            "none".to_string()
+        } else {
+            ellipsize(query, 24)
+        };
+        let mode = if app.issue_search_mode() { "search" } else { "browse" };
+        return format!(
+            "repo: {}  |  focus: {}  |  mode: {}  |  query: {}  |  status: {}",
+            repo, focus, mode, query, sync
+        );
+    }
+    format!("repo: {}  |  focus: {}  |  status: {}", repo, focus, sync)
 }
 
 fn list_state(selected: usize) -> ListState {
     let mut state = ListState::default();
     state.select(Some(selected));
     state
+}
+
+fn selected_for_list(selected: usize, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    selected.min(len - 1)
+}
+
+fn issue_tabs_line(filter: IssueFilter, open_count: usize, closed_count: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+    spans.push(filter_tab("1 Open", open_count, filter == IssueFilter::Open, GITHUB_GREEN));
+    spans.push(Span::raw("  "));
+    spans.push(filter_tab(
+        "2 Closed",
+        closed_count,
+        filter == IssueFilter::Closed,
+        GITHUB_RED,
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled("([ ] cycle)", Style::default().fg(GITHUB_MUTED)));
+    Line::from(spans)
+}
+
+fn filter_tab(label: &str, count: usize, active: bool, color: Color) -> Span<'static> {
+    let text = format!("{} ({})", label, count);
+    if active {
+        return Span::styled(
+            text,
+            Style::default()
+                .fg(Color::Black)
+                .bg(color)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+    Span::styled(text, Style::default().fg(color))
+}
+
+fn issue_state_color(state: &str) -> Color {
+    if state == "closed" {
+        return GITHUB_RED;
+    }
+    GITHUB_GREEN
+}
+
+fn ellipsize(input: &str, max: usize) -> String {
+    if input.chars().count() <= max {
+        return input.to_string();
+    }
+    let head = input.chars().take(max.saturating_sub(3)).collect::<String>();
+    format!("{}...", head)
+}
+
+fn comment_header(index: usize, author: &str, created_at: Option<&str>) -> Line<'static> {
+    let mut spans = Vec::new();
+    spans.push(Span::styled(
+        format!("{}  {}", index, author),
+        Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+    ));
+    if let Some(date) = format_comment_date(created_at) {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(date, Style::default().fg(Color::Gray)));
+    }
+    Line::from(spans)
+}
+
+fn format_comment_date(created_at: Option<&str>) -> Option<String> {
+    format_datetime(created_at)
+}
+
+fn format_datetime(value: Option<&str>) -> Option<String> {
+    let raw = value?;
+    if raw.len() >= 16 {
+        return Some(raw[0..16].replace('T', " "));
+    }
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.to_string())
+}
+
+fn editor_cursor_position(text: &str) -> (u16, u16) {
+    let mut row = 0u16;
+    let mut col = 0u16;
+    for ch in text.chars() {
+        if ch == '\n' {
+            row = row.saturating_add(1);
+            col = 0;
+            continue;
+        }
+        col = col.saturating_add(1);
+    }
+    (row, col)
 }

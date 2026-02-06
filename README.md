@@ -76,12 +76,29 @@ cargo test
 ## Navigation
 - Ctrl+G: open repo picker
 - Ctrl+R: rescan repos
-- j/k or arrow keys: move, gg/G: top/bottom, Enter: open
+- Ctrl+h/j/k/l: switch focus between panes (issues list/preview, issue description/recent comments)
+- j/k or arrow keys: move or scroll focused pane
+- Ctrl+u / Ctrl+d: page up/down in focused pane
+- gg/G: jump top/bottom in focused pane
+- f: cycle issue filter (open/closed)
+- 1/2: switch issue tab (open/closed), or use `[` and `]`
+- /: search issues by number/title/body/labels/assignees (Enter keep, Esc clear)
+- m: add comment to selected issue
+- u: reopen selected closed issue
+- Enter: open selected issue
 - r: refresh issues/comments
 - o: open in browser
 - dd: close issue with preset
 - c: open full comments from issue detail
+- n/p: jump next/previous comment in full comments view
 - b or Esc: back from issue detail/comments
+- comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
+
+Search supports simple GitHub-like qualifiers:
+- `is:open` or `is:closed`
+- `label:bug`
+- `assignee:alex`
+- `#123` for exact issue number
 
 ## Comment Defaults
 Configure close/comment presets in `config.toml`:

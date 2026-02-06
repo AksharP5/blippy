@@ -256,7 +256,7 @@ fn handle_actions(
             app.request_sync();
         }
         AppAction::PickIssue => {
-            let (issue_id, issue_number) = match app.issues().get(app.selected_issue()) {
+            let (issue_id, issue_number) = match app.selected_issue_row() {
                 Some(issue) => (issue.id, issue.number),
                 None => return Ok(()),
             };
@@ -278,9 +278,30 @@ fn handle_actions(
                 app.set_status("No issue selected".to_string());
             }
         }
+        AppAction::AddIssueComment => {
+            let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
+                Some(issue) => issue,
+                None => {
+                    app.set_status("No issue selected".to_string());
+                    return Ok(());
+                }
+            };
+            app.set_current_issue(issue_id, issue_number);
+            app.open_issue_comment_editor(app.view());
+        }
+        AppAction::SubmitIssueComment => {
+            let comment = app.editor().text().to_string();
+            post_issue_comment(app, token, comment, event_tx.clone())?;
+        }
         AppAction::CloseIssue => {
+            if let Some((issue_id, issue_number, _)) = selected_issue_for_action(app) {
+                app.set_current_issue(issue_id, issue_number);
+            }
             app.set_selected_preset(0);
             app.set_view(View::CommentPresetPicker);
+        }
+        AppAction::ReopenIssue => {
+            reopen_issue(app, token, event_tx.clone())?;
         }
         AppAction::PickPreset => handle_preset_selection(app, conn, token, event_tx)?,
         AppAction::SubmitComment => {
@@ -306,8 +327,7 @@ fn handle_preset_selection(
             close_issue_with_comment(app, token, None, event_tx)?;
         }
         PresetSelection::CustomMessage => {
-            app.editor_mut().reset_for_close();
-            app.set_view(View::CommentEditor);
+            app.open_close_comment_editor();
         }
         PresetSelection::Preset(index) => {
             let body = app
@@ -368,10 +388,88 @@ fn close_issue_with_comment(
     Ok(())
 }
 
+fn post_issue_comment(
+    app: &mut App,
+    token: &str,
+    body: String,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    if body.trim().is_empty() {
+        app.set_status("Comment cannot be empty".to_string());
+        return Ok(());
+    }
+
+    let (owner, repo, issue_number) = match (app.current_owner(), app.current_repo(), issue_number(app)) {
+        (Some(owner), Some(repo), Some(issue_number)) => {
+            (owner.to_string(), repo.to_string(), issue_number)
+        }
+        _ => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_add_comment(owner, repo, issue_number, token.to_string(), body, event_tx);
+    app.set_view(app.editor_cancel_view());
+    app.set_status("Posting comment...".to_string());
+    Ok(())
+}
+
+fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
+    let (issue_id, issue_number, issue_state) = match selected_issue_for_action(app) {
+        Some(issue) => issue,
+        None => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+
+    if issue_state.as_deref() == Some("open") {
+        app.set_status("Issue is already open".to_string());
+        return Ok(());
+    }
+
+    app.set_current_issue(issue_id, issue_number);
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_reopen_issue(owner, repo, issue_number, token.to_string(), event_tx);
+    app.set_status("Reopening issue...".to_string());
+    Ok(())
+}
+
+fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<String>)> {
+    if app.view() == View::Issues {
+        return app
+            .selected_issue_row()
+            .map(|issue| (issue.id, issue.number, Some(issue.state.clone())));
+    }
+
+    if matches!(app.view(), View::IssueDetail | View::IssueComments) {
+        if let Some(issue) = app.current_issue_row() {
+            return Some((issue.id, issue.number, Some(issue.state.clone())));
+        }
+        if let (Some(issue_id), Some(issue_number)) = (app.current_issue_id(), app.current_issue_number()) {
+            return Some((issue_id, issue_number, None));
+        }
+    }
+
+    None
+}
+
 fn issue_number(app: &App) -> Option<i64> {
     match app.view() {
-        View::IssueDetail | View::IssueComments => app.current_issue_number(),
-        View::Issues => app.issues().get(app.selected_issue()).map(|issue| issue.number),
+        View::IssueDetail
+        | View::IssueComments
+        | View::CommentPresetPicker
+        | View::CommentPresetName
+        | View::CommentEditor => app.current_issue_number(),
+        View::Issues => app.selected_issue_row().map(|issue| issue.number),
         _ => None,
     }
 }
@@ -381,7 +479,7 @@ fn issue_url(app: &App) -> Option<String> {
     let repo = app.current_repo()?;
     let issue_number = match app.view() {
         View::IssueDetail | View::IssueComments => app.current_issue_number(),
-        View::Issues => app.issues().get(app.selected_issue()).map(|issue| issue.number),
+        View::Issues => app.selected_issue_row().map(|issue| issue.number),
         _ => None,
     }?;
 
@@ -550,9 +648,12 @@ fn handle_events(
                     app.set_status(format!("Comments unavailable: {}", message));
                 }
             }
-            AppEvent::IssueClosed { issue_number, message } => {
+            AppEvent::IssueUpdated { issue_number, message } => {
                 app.set_status(format!("#{} {}", issue_number, message));
                 app.request_sync();
+                if app.current_issue_number() == Some(issue_number) {
+                    app.request_comment_sync();
+                }
             }
         }
     }
@@ -574,7 +675,7 @@ enum AppEvent {
     SyncFailed { owner: String, repo: String, message: String },
     CommentsUpdated { issue_id: i64, count: usize },
     CommentsFailed { issue_id: i64, message: String },
-    IssueClosed { issue_number: i64, message: String },
+    IssueUpdated { issue_number: i64, message: String },
 }
 
 fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
@@ -778,6 +879,113 @@ fn start_comment_sync(
     });
 }
 
+fn start_add_comment(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    token: String,
+    body: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .create_comment(&owner, &repo, issue_number, &body)
+                .await
+        });
+
+        match result {
+            Ok(()) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: "commented".to_string(),
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment failed: {}", error),
+                });
+            }
+        }
+    });
+}
+
+fn start_reopen_issue(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("reopen failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("reopen failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async { client.reopen_issue(&owner, &repo, issue_number).await });
+
+        match result {
+            Ok(()) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: "reopened".to_string(),
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("reopen failed: {}", error),
+                });
+            }
+        }
+    });
+}
+
 fn start_close_issue(
     owner: String,
     repo: String,
@@ -790,7 +998,7 @@ fn start_close_issue(
         let client = match GitHubClient::new(&token) {
             Ok(client) => client,
             Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueClosed {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
                     message: format!("close failed: {}", error),
                 });
@@ -803,7 +1011,7 @@ fn start_close_issue(
         {
             Ok(runtime) => runtime,
             Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueClosed {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
                     message: format!("close failed: {}", error),
                 });
@@ -831,19 +1039,19 @@ fn start_close_issue(
 
         match result {
             Ok(Some(comment_error)) => {
-                let _ = event_tx.send(AppEvent::IssueClosed {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
                     message: format!("closed (comment failed: {})", comment_error),
                 });
             }
             Ok(None) => {
-                let _ = event_tx.send(AppEvent::IssueClosed {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
                     message: "closed".to_string(),
                 });
             }
             Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueClosed {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
                     message: format!("close failed: {}", error),
                 });

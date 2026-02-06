@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use anyhow::Result;
 use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
+use crate::markdown;
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,9 @@ pub enum AppAction {
     PickIssue,
     OpenInBrowser,
     CloseIssue,
+    ReopenIssue,
+    AddIssueComment,
+    SubmitIssueComment,
     PickPreset,
     SavePreset,
     SubmitComment,
@@ -37,10 +41,63 @@ pub enum PresetSelection {
     AddPreset,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    IssuesList,
+    IssuesPreview,
+    IssueBody,
+    IssueRecentComments,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueFilter {
+    Open,
+    Closed,
+}
+
+impl IssueFilter {
+    fn next(self) -> Self {
+        match self {
+            Self::Open => Self::Closed,
+            Self::Closed => Self::Open,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            Self::Open => Self::Closed,
+            Self::Closed => Self::Open,
+        }
+    }
+
+    fn from_key(ch: char) -> Option<Self> {
+        match ch {
+            '1' => Some(Self::Open),
+            '2' => Some(Self::Closed),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Open => "OPEN",
+            Self::Closed => "CLOSED",
+        }
+    }
+
+    fn matches(self, issue: &IssueRow) -> bool {
+        if self == Self::Open {
+            return issue.state == "open";
+        }
+        issue.state == "closed"
+    }
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
     view: View,
+    focus: Focus,
     repos: Vec<LocalRepoRow>,
     remotes: Vec<RemoteInfo>,
     issues: Vec<IssueRow>,
@@ -49,8 +106,18 @@ pub struct App {
     selected_remote: usize,
     selected_issue: usize,
     selected_comment: usize,
+    issue_filter: IssueFilter,
+    issue_query: String,
+    issue_search_mode: bool,
+    filtered_issue_indices: Vec<usize>,
     issue_detail_scroll: u16,
+    issue_detail_max_scroll: u16,
+    issues_preview_scroll: u16,
+    issues_preview_max_scroll: u16,
     issue_comments_scroll: u16,
+    issue_comments_max_scroll: u16,
+    issue_recent_comments_scroll: u16,
+    issue_recent_comments_max_scroll: u16,
     status: String,
     scanning: bool,
     syncing: bool,
@@ -66,6 +133,7 @@ pub struct App {
     pending_g: bool,
     pending_d: bool,
     comment_editor: CommentEditorState,
+    editor_cancel_view: View,
     preset_choice: usize,
 }
 
@@ -75,6 +143,7 @@ impl App {
             should_quit: false,
             config,
             view: View::RepoPicker,
+            focus: Focus::IssuesList,
             repos: Vec::new(),
             remotes: Vec::new(),
             issues: Vec::new(),
@@ -83,8 +152,18 @@ impl App {
             selected_remote: 0,
             selected_issue: 0,
             selected_comment: 0,
+            issue_filter: IssueFilter::Open,
+            issue_query: String::new(),
+            issue_search_mode: false,
+            filtered_issue_indices: Vec::new(),
             issue_detail_scroll: 0,
-            issue_comments_scroll: u16::MAX,
+            issue_detail_max_scroll: 0,
+            issues_preview_scroll: 0,
+            issues_preview_max_scroll: 0,
+            issue_comments_scroll: 0,
+            issue_comments_max_scroll: 0,
+            issue_recent_comments_scroll: 0,
+            issue_recent_comments_max_scroll: 0,
             status: String::new(),
             scanning: false,
             syncing: false,
@@ -100,12 +179,17 @@ impl App {
             pending_g: false,
             pending_d: false,
             comment_editor: CommentEditorState::default(),
+            editor_cancel_view: View::Issues,
             preset_choice: 0,
         }
     }
 
     pub fn view(&self) -> View {
         self.view
+    }
+
+    pub fn focus(&self) -> Focus {
+        self.focus
     }
 
     pub fn repos(&self) -> &[LocalRepoRow] {
@@ -124,6 +208,56 @@ impl App {
         &self.comments
     }
 
+    pub fn issues_for_view(&self) -> Vec<&IssueRow> {
+        self.filtered_issue_indices
+            .iter()
+            .filter_map(|index| self.issues.get(*index))
+            .collect::<Vec<&IssueRow>>()
+    }
+
+    pub fn selected_issue_row(&self) -> Option<&IssueRow> {
+        let issue_index = *self.filtered_issue_indices.get(self.selected_issue)?;
+        self.issues.get(issue_index)
+    }
+
+    pub fn current_issue_row(&self) -> Option<&IssueRow> {
+        let issue_id = self.current_issue_id?;
+        self.issues.iter().find(|issue| issue.id == issue_id)
+    }
+
+    pub fn issue_filter(&self) -> IssueFilter {
+        self.issue_filter
+    }
+
+    pub fn set_issue_filter(&mut self, filter: IssueFilter) {
+        self.issue_filter = filter;
+        self.rebuild_issue_filter();
+        self.issues_preview_scroll = 0;
+        self.status = format!("Filter: {}", self.issue_filter.label());
+    }
+
+    pub fn issue_query(&self) -> &str {
+        self.issue_query.as_str()
+    }
+
+    pub fn issue_search_mode(&self) -> bool {
+        self.issue_search_mode
+    }
+
+    pub fn issue_counts(&self) -> (usize, usize) {
+        let open = self
+            .issues
+            .iter()
+            .filter(|issue| issue.state == "open")
+            .count();
+        let closed = self
+            .issues
+            .iter()
+            .filter(|issue| issue.state == "closed")
+            .count();
+        (open, closed)
+    }
+
     pub fn comment_defaults(&self) -> &[CommentDefault] {
         &self.config.comment_defaults
     }
@@ -140,16 +274,21 @@ impl App {
         self.selected_issue
     }
 
-    pub fn selected_comment(&self) -> usize {
-        self.selected_comment
-    }
-
     pub fn issue_detail_scroll(&self) -> u16 {
         self.issue_detail_scroll
     }
 
+    pub fn issues_preview_scroll(&self) -> u16 {
+        self.issues_preview_scroll
+    }
+
     pub fn issue_comments_scroll(&self) -> u16 {
         self.issue_comments_scroll
+    }
+
+
+    pub fn issue_recent_comments_scroll(&self) -> u16 {
+        self.issue_recent_comments_scroll
     }
 
     pub fn selected_preset(&self) -> usize {
@@ -206,6 +345,11 @@ impl App {
             self.handle_editor_key(key);
             return;
         }
+        if self.view == View::Issues && self.issue_search_mode {
+            if self.handle_issue_search_key(key) {
+                return;
+            }
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
             if self.view == View::RepoPicker {
                 self.rescan_requested = true;
@@ -213,6 +357,19 @@ impl App {
                 self.status = "Scanning...".to_string();
             }
             return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if key.code == KeyCode::Char('u') {
+                self.page_up();
+                return;
+            }
+            if key.code == KeyCode::Char('d') {
+                self.page_down();
+                return;
+            }
+            if self.handle_focus_key(key.code) {
+                return;
+            }
         }
 
         if key.code != KeyCode::Char('g') {
@@ -225,7 +382,27 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.view = View::RepoPicker;
+                self.set_view(View::RepoPicker);
+            }
+            KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.issue_search_mode = true;
+                self.status = "Search issues".to_string();
+            }
+            KeyCode::Char('f') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.set_issue_filter(self.issue_filter.next());
+            }
+            KeyCode::Char('[') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.set_issue_filter(self.issue_filter.prev());
+            }
+            KeyCode::Char(']') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.set_issue_filter(self.issue_filter.next());
+            }
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty()
+                    && self.view == View::Issues
+                    && IssueFilter::from_key(ch).is_some() =>
+            {
+                self.set_issue_filter(IssueFilter::from_key(ch).unwrap_or(IssueFilter::Open));
             }
             KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.request_sync();
@@ -247,8 +424,16 @@ impl App {
                 }
             }
             KeyCode::Char('d') if key.modifiers.is_empty() && self.view == View::Issues => {
-                if self.issues.is_empty() {
+                if self.filtered_issue_indices.is_empty() {
                     self.pending_d = false;
+                    return;
+                }
+                if self
+                    .selected_issue_row()
+                    .is_some_and(|issue| issue.state == "closed")
+                {
+                    self.pending_d = false;
+                    self.status = "Issue already closed".to_string();
                     return;
                 }
                 if self.pending_d {
@@ -261,22 +446,34 @@ impl App {
             KeyCode::Char('G') => self.jump_bottom(),
             KeyCode::Char('c') if self.view == View::IssueDetail => {
                 self.reset_issue_comments_scroll();
-                self.view = View::IssueComments;
+                self.set_view(View::IssueComments);
+            }
+            KeyCode::Char('n') if self.view == View::IssueComments => self.jump_next_comment(),
+            KeyCode::Char('p') if self.view == View::IssueComments => self.jump_prev_comment(),
+            KeyCode::Char('m')
+                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
+                self.action = Some(AppAction::AddIssueComment);
+            }
+            KeyCode::Char('u')
+                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
+                self.action = Some(AppAction::ReopenIssue);
             }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
-                self.view = View::Issues;
+                self.set_view(View::Issues);
             }
             KeyCode::Char('b') if self.view == View::IssueComments => {
-                self.view = View::IssueDetail;
+                self.set_view(View::IssueDetail);
             }
             KeyCode::Esc if self.view == View::IssueDetail => {
-                self.view = View::Issues;
+                self.set_view(View::Issues);
             }
             KeyCode::Esc if self.view == View::IssueComments => {
-                self.view = View::IssueDetail;
+                self.set_view(View::IssueDetail);
             }
             KeyCode::Esc if self.view == View::CommentPresetPicker => {
-                self.view = View::Issues;
+                self.set_view(View::Issues);
             }
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
@@ -296,6 +493,13 @@ impl App {
 
     pub fn set_view(&mut self, view: View) {
         self.view = view;
+        match self.view {
+            View::Issues => self.focus = Focus::IssuesList,
+            View::IssueDetail => self.focus = Focus::IssueBody,
+            _ => {
+                self.issue_search_mode = false;
+            }
+        }
     }
 
     pub fn set_repos(&mut self, repos: Vec<LocalRepoRow>) {
@@ -311,6 +515,9 @@ impl App {
     pub fn set_issues(&mut self, issues: Vec<IssueRow>) {
         self.issues = issues;
         self.selected_issue = 0;
+        self.rebuild_issue_filter();
+        self.issues_preview_scroll = 0;
+        self.issues_preview_max_scroll = 0;
     }
 
     pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
@@ -318,23 +525,52 @@ impl App {
         if self.comments.is_empty() {
             self.selected_comment = 0;
             self.issue_comments_scroll = 0;
+            self.issue_recent_comments_scroll = 0;
+            self.issue_comments_max_scroll = 0;
+            self.issue_recent_comments_max_scroll = 0;
             return;
         }
         self.selected_comment = self.comments.len() - 1;
-        self.issue_comments_scroll = u16::MAX;
+        self.issue_comments_scroll = 0;
+        self.issue_recent_comments_scroll = 0;
+        self.issue_comments_max_scroll = 0;
+        self.issue_recent_comments_max_scroll = 0;
     }
 
     pub fn reset_issue_detail_scroll(&mut self) {
         self.issue_detail_scroll = 0;
     }
 
-    pub fn reset_issue_comments_scroll(&mut self) {
-        self.issue_comments_scroll = u16::MAX;
+    pub fn set_issue_detail_max_scroll(&mut self, max_scroll: u16) {
+        self.issue_detail_max_scroll = max_scroll;
+        if self.issue_detail_scroll > max_scroll {
+            self.issue_detail_scroll = max_scroll;
+        }
     }
 
-    pub fn set_comment_defaults(&mut self, defaults: Vec<CommentDefault>) {
-        self.config.comment_defaults = defaults;
-        self.preset_choice = 0;
+    pub fn set_issues_preview_max_scroll(&mut self, max_scroll: u16) {
+        self.issues_preview_max_scroll = max_scroll;
+        if self.issues_preview_scroll > max_scroll {
+            self.issues_preview_scroll = max_scroll;
+        }
+    }
+
+    pub fn reset_issue_comments_scroll(&mut self) {
+        self.issue_comments_scroll = 0;
+    }
+
+    pub fn set_issue_comments_max_scroll(&mut self, max_scroll: u16) {
+        self.issue_comments_max_scroll = max_scroll;
+        if self.issue_comments_scroll > max_scroll {
+            self.issue_comments_scroll = max_scroll;
+        }
+    }
+
+    pub fn set_issue_recent_comments_max_scroll(&mut self, max_scroll: u16) {
+        self.issue_recent_comments_max_scroll = max_scroll;
+        if self.issue_recent_comments_scroll > max_scroll {
+            self.issue_recent_comments_scroll = max_scroll;
+        }
     }
 
     pub fn add_comment_default(&mut self, preset: CommentDefault) {
@@ -385,6 +621,10 @@ impl App {
     pub fn set_current_repo(&mut self, owner: &str, repo: &str) {
         self.current_owner = Some(owner.to_string());
         self.current_repo = Some(repo.to_string());
+        self.current_issue_id = None;
+        self.current_issue_number = None;
+        self.issue_query.clear();
+        self.issue_search_mode = false;
     }
 
     pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
@@ -396,8 +636,28 @@ impl App {
         &self.comment_editor
     }
 
+    pub fn editor_mode(&self) -> EditorMode {
+        self.comment_editor.mode()
+    }
+
     pub fn editor_mut(&mut self) -> &mut CommentEditorState {
         &mut self.comment_editor
+    }
+
+    pub fn open_close_comment_editor(&mut self) {
+        self.comment_editor.reset_for_close();
+        self.editor_cancel_view = View::CommentPresetPicker;
+        self.set_view(View::CommentEditor);
+    }
+
+    pub fn open_issue_comment_editor(&mut self, return_view: View) {
+        self.comment_editor.reset_for_comment();
+        self.editor_cancel_view = return_view;
+        self.set_view(View::CommentEditor);
+    }
+
+    pub fn editor_cancel_view(&self) -> View {
+        self.editor_cancel_view
     }
 
     pub fn current_issue_id(&self) -> Option<i64> {
@@ -431,11 +691,21 @@ impl App {
                 }
             }
             View::Issues => {
+                if self.focus == Focus::IssuesPreview {
+                    self.issues_preview_scroll = self.issues_preview_scroll.saturating_sub(1);
+                    return;
+                }
                 if self.selected_issue > 0 {
                     self.selected_issue -= 1;
+                    self.issues_preview_scroll = 0;
                 }
             }
             View::IssueDetail => {
+                if self.focus == Focus::IssueRecentComments {
+                    self.issue_recent_comments_scroll =
+                        self.issue_recent_comments_scroll.saturating_sub(1);
+                    return;
+                }
                 self.issue_detail_scroll = self.issue_detail_scroll.saturating_sub(1);
             }
             View::IssueComments => {
@@ -463,15 +733,30 @@ impl App {
                 }
             }
             View::Issues => {
-                if self.selected_issue + 1 < self.issues.len() {
+                if self.focus == Focus::IssuesPreview {
+                    let max = self.issues_preview_max_scroll;
+                    self.issues_preview_scroll =
+                        self.issues_preview_scroll.saturating_add(1).min(max);
+                    return;
+                }
+                if self.selected_issue + 1 < self.filtered_issue_indices.len() {
                     self.selected_issue += 1;
+                    self.issues_preview_scroll = 0;
                 }
             }
             View::IssueDetail => {
-                self.issue_detail_scroll = self.issue_detail_scroll.saturating_add(1);
+                if self.focus == Focus::IssueRecentComments {
+                    let max = self.issue_recent_comments_max_scroll;
+                    self.issue_recent_comments_scroll =
+                        self.issue_recent_comments_scroll.saturating_add(1).min(max);
+                    return;
+                }
+                let max = self.issue_detail_max_scroll;
+                self.issue_detail_scroll = self.issue_detail_scroll.saturating_add(1).min(max);
             }
             View::IssueComments => {
-                self.issue_comments_scroll = self.issue_comments_scroll.saturating_add(1);
+                let max = self.issue_comments_max_scroll;
+                self.issue_comments_scroll = self.issue_comments_scroll.saturating_add(1).min(max);
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -496,7 +781,7 @@ impl App {
             }
             View::IssueDetail => {
                 self.reset_issue_comments_scroll();
-                self.view = View::IssueComments;
+                self.set_view(View::IssueComments);
             }
             View::IssueComments => {}
             View::CommentPresetPicker => {
@@ -510,8 +795,21 @@ impl App {
         match self.view {
             View::RepoPicker => self.selected_repo = 0,
             View::RemoteChooser => self.selected_remote = 0,
-            View::Issues => self.selected_issue = 0,
-            View::IssueDetail => self.issue_detail_scroll = 0,
+            View::Issues => {
+                if self.focus == Focus::IssuesPreview {
+                    self.issues_preview_scroll = 0;
+                    return;
+                }
+                self.selected_issue = 0;
+                self.issues_preview_scroll = 0;
+            }
+            View::IssueDetail => {
+                if self.focus == Focus::IssueRecentComments {
+                    self.issue_recent_comments_scroll = 0;
+                    return;
+                }
+                self.issue_detail_scroll = 0;
+            }
             View::IssueComments => self.issue_comments_scroll = 0,
             View::CommentPresetPicker => self.preset_choice = 0,
             View::CommentPresetName | View::CommentEditor => {}
@@ -531,15 +829,24 @@ impl App {
                 }
             }
             View::Issues => {
-                if !self.issues.is_empty() {
-                    self.selected_issue = self.issues.len() - 1;
+                if self.focus == Focus::IssuesPreview {
+                    self.issues_preview_scroll = self.issues_preview_max_scroll;
+                    return;
+                }
+                if !self.filtered_issue_indices.is_empty() {
+                    self.selected_issue = self.filtered_issue_indices.len() - 1;
+                    self.issues_preview_scroll = 0;
                 }
             }
             View::IssueDetail => {
-                self.issue_detail_scroll = u16::MAX;
+                if self.focus == Focus::IssueRecentComments {
+                    self.issue_recent_comments_scroll = self.issue_recent_comments_max_scroll;
+                    return;
+                }
+                self.issue_detail_scroll = self.issue_detail_max_scroll;
             }
             View::IssueComments => {
-                self.issue_comments_scroll = u16::MAX;
+                self.issue_comments_scroll = self.issue_comments_max_scroll;
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -551,43 +858,162 @@ impl App {
         }
     }
 
+    fn page_up(&mut self) {
+        for _ in 0..10 {
+            self.move_selection_up();
+        }
+    }
+
+    fn page_down(&mut self) {
+        for _ in 0..10 {
+            self.move_selection_down();
+        }
+    }
+
+    fn jump_next_comment(&mut self) {
+        let offsets = self.comment_offsets();
+        if offsets.is_empty() {
+            return;
+        }
+        let current = self.issue_comments_scroll;
+        let mut target = self.issue_comments_max_scroll;
+        let mut index = offsets.len() - 1;
+        for (offset_index, offset) in offsets.iter().enumerate() {
+            if *offset > current {
+                target = *offset;
+                index = offset_index;
+                break;
+            }
+        }
+        self.selected_comment = index;
+        self.issue_comments_scroll = target.min(self.issue_comments_max_scroll);
+    }
+
+    fn jump_prev_comment(&mut self) {
+        let offsets = self.comment_offsets();
+        if offsets.is_empty() {
+            return;
+        }
+        let current = self.issue_comments_scroll;
+        let mut target = 0;
+        let mut index = 0;
+        for (offset_index, offset) in offsets.iter().enumerate() {
+            if *offset >= current {
+                break;
+            }
+            target = *offset;
+            index = offset_index;
+        }
+        self.selected_comment = index;
+        self.issue_comments_scroll = target;
+    }
+
+    fn comment_offsets(&self) -> Vec<u16> {
+        let mut offsets = Vec::new();
+        let mut line = 0usize;
+        for comment in &self.comments {
+            offsets.push(line.min(u16::MAX as usize) as u16);
+            line += 1;
+            line += markdown::render(comment.body.as_str()).lines.len().max(1);
+            line += 1;
+        }
+        offsets
+    }
+
+    fn rebuild_issue_filter(&mut self) {
+        let query = self.issue_query.trim().to_ascii_lowercase();
+        self.filtered_issue_indices = self
+            .issues
+            .iter()
+            .enumerate()
+            .filter_map(|(index, issue)| {
+                if self.issue_filter.matches(issue) && Self::issue_matches_query(issue, query.as_str()) {
+                    return Some(index);
+                }
+                None
+            })
+            .collect::<Vec<usize>>();
+        if self.selected_issue >= self.filtered_issue_indices.len() {
+            self.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
+        }
+    }
+
+    fn issue_matches_query(issue: &IssueRow, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+
+        let title = issue.title.to_ascii_lowercase();
+        let body = issue.body.to_ascii_lowercase();
+        let labels = issue.labels.to_ascii_lowercase();
+        let assignees = issue.assignees.to_ascii_lowercase();
+        let number = issue.number.to_string();
+        let state = issue.state.to_ascii_lowercase();
+
+        query.split_whitespace().all(|token| {
+            if let Some(value) = token.strip_prefix("is:") {
+                return value == state;
+            }
+            if let Some(value) = token.strip_prefix("label:") {
+                return labels.contains(value);
+            }
+            if let Some(value) = token.strip_prefix("assignee:") {
+                return assignees.contains(value);
+            }
+            if let Some(value) = token.strip_prefix('#') {
+                return value.parse::<i64>().ok().is_some_and(|parsed| issue.number == parsed);
+            }
+            title.contains(token)
+                || body.contains(token)
+                || labels.contains(token)
+                || assignees.contains(token)
+                || number.contains(token)
+        })
+    }
+
     fn handle_editor_key(&mut self, key: KeyEvent) {
         match self.view {
             View::CommentPresetName => match key.code {
                 KeyCode::Esc => {
-                    self.view = View::CommentPresetPicker;
+                    self.set_view(View::CommentPresetPicker);
                 }
                 KeyCode::Enter => {
                     if self.comment_editor.name().is_empty() {
                         self.status = "Preset name required".to_string();
                         return;
                     }
-                    self.view = View::CommentEditor;
+                    self.editor_cancel_view = View::CommentPresetPicker;
+                    self.set_view(View::CommentEditor);
                 }
                 KeyCode::Backspace => self.comment_editor.backspace_name(),
                 KeyCode::Char(ch) => self.comment_editor.append_name(ch),
                 _ => {}
             },
             View::CommentEditor => {
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Enter)
-                {
-                    match self.comment_editor.mode() {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.set_view(self.editor_cancel_view);
+                    }
+                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        self.comment_editor.newline()
+                    }
+                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                        self.comment_editor.newline()
+                    }
+                    KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.comment_editor.newline()
+                    }
+                    KeyCode::Enter => match self.comment_editor.mode() {
                         EditorMode::CloseIssue => {
                             self.action = Some(AppAction::SubmitComment);
+                        }
+                        EditorMode::AddComment => {
+                            self.action = Some(AppAction::SubmitIssueComment);
                         }
                         EditorMode::AddPreset => {
                             self.action = Some(AppAction::SavePreset);
                         }
-                    }
-                    return;
-                }
-
-                match key.code {
-                    KeyCode::Esc => {
-                        self.view = View::CommentPresetPicker;
-                    }
-                    KeyCode::Enter => self.comment_editor.newline(),
+                    },
                     KeyCode::Backspace => self.comment_editor.backspace_text(),
                     KeyCode::Char(ch) => self.comment_editor.append_text(ch),
                     _ => {}
@@ -596,11 +1022,90 @@ impl App {
             _ => {}
         }
     }
+
+    fn handle_issue_search_key(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
+            self.issue_query.clear();
+            self.rebuild_issue_filter();
+            self.issues_preview_scroll = 0;
+            self.update_search_status();
+            return true;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.issue_search_mode = false;
+                self.issue_query.clear();
+                self.rebuild_issue_filter();
+                self.issues_preview_scroll = 0;
+                self.status = "Search cleared".to_string();
+            }
+            KeyCode::Enter => {
+                self.issue_search_mode = false;
+                self.update_search_status();
+            }
+            KeyCode::Backspace => {
+                self.issue_query.pop();
+                self.rebuild_issue_filter();
+                self.issues_preview_scroll = 0;
+                self.update_search_status();
+            }
+            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+                self.issue_query.push(ch);
+                self.rebuild_issue_filter();
+                self.issues_preview_scroll = 0;
+                self.update_search_status();
+            }
+            _ => {}
+        }
+        true
+    }
+
+    fn update_search_status(&mut self) {
+        if self.issue_query.trim().is_empty() {
+            self.status = format!("Filter: {}", self.issue_filter.label());
+            return;
+        }
+        self.status = format!(
+            "Search: {} ({} results)",
+            self.issue_query,
+            self.filtered_issue_indices.len()
+        );
+    }
+
+    fn handle_focus_key(&mut self, code: KeyCode) -> bool {
+        match self.view {
+            View::Issues => match code {
+                KeyCode::Char('h') | KeyCode::Char('k') => {
+                    self.focus = Focus::IssuesList;
+                    true
+                }
+                KeyCode::Char('l') | KeyCode::Char('j') => {
+                    self.focus = Focus::IssuesPreview;
+                    true
+                }
+                _ => false,
+            },
+            View::IssueDetail => match code {
+                KeyCode::Char('h') | KeyCode::Char('k') => {
+                    self.focus = Focus::IssueBody;
+                    true
+                }
+                KeyCode::Char('l') | KeyCode::Char('j') => {
+                    self.focus = Focus::IssueRecentComments;
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     CloseIssue,
+    AddComment,
     AddPreset,
 }
 
@@ -639,6 +1144,11 @@ impl CommentEditorState {
         self.text.clear();
     }
 
+    pub fn reset_for_comment(&mut self) {
+        self.mode = EditorMode::AddComment;
+        self.text.clear();
+    }
+
     pub fn reset_for_preset_name(&mut self) {
         self.mode = EditorMode::AddPreset;
         self.name.clear();
@@ -668,7 +1178,7 @@ impl CommentEditorState {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, AppAction, View};
+    use super::{App, AppAction, Focus, IssueFilter, View};
     use crate::config::Config;
     use crate::store::IssueRow;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -695,5 +1205,281 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::CloseIssue));
+    }
+
+    #[test]
+    fn f_cycles_issue_filter() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 1,
+                state: "open".to_string(),
+                title: "Open".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 2,
+                state: "closed".to_string(),
+                title: "Closed".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        assert_eq!(app.issue_filter(), IssueFilter::Open);
+        assert_eq!(app.issues_for_view().len(), 1);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Closed);
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Open);
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
+    }
+
+    #[test]
+    fn ctrl_l_moves_focus_to_preview_and_j_scrolls_preview() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 1,
+            state: "open".to_string(),
+            title: "Open".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+
+        assert_eq!(app.focus(), Focus::IssuesList);
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert_eq!(app.focus(), Focus::IssuesPreview);
+
+        app.set_issues_preview_max_scroll(5);
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.issues_preview_scroll(), 1);
+    }
+
+    #[test]
+    fn slash_search_filters_and_escape_clears() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 101,
+                state: "open".to_string(),
+                title: "Login bug".to_string(),
+                body: "Fails for SSO users".to_string(),
+                labels: "bug,auth".to_string(),
+                assignees: "alex".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 202,
+                state: "open".to_string(),
+                title: "Docs polish".to_string(),
+                body: "Update README".to_string(),
+                labels: "docs".to_string(),
+                assignees: "sam".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        assert!(app.issue_search_mode());
+
+        app.on_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+
+        assert_eq!(app.issue_query(), "bug");
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(101));
+
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.issue_search_mode());
+        assert_eq!(app.issue_query(), "");
+        assert_eq!(app.issues_for_view().len(), 2);
+    }
+
+    #[test]
+    fn slash_search_matches_issue_number() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 777,
+            state: "open".to_string(),
+            title: "Telemetry".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('#'), KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
+
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(777));
+    }
+
+    #[test]
+    fn reopen_action_for_closed_issue() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 9,
+            repo_id: 1,
+            number: 99,
+            state: "closed".to_string(),
+            title: "Closed".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+        app.set_issue_filter(IssueFilter::Closed);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::ReopenIssue));
+    }
+
+    #[test]
+    fn comment_action_on_issue() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 9,
+            repo_id: 1,
+            number: 99,
+            state: "open".to_string(),
+            title: "Open".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::AddIssueComment));
+    }
+
+    #[test]
+    fn slash_search_supports_qualifier_tokens() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 11,
+                state: "open".to_string(),
+                title: "Auth".to_string(),
+                body: String::new(),
+                labels: "bug,security".to_string(),
+                assignees: "alex".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 22,
+                state: "closed".to_string(),
+                title: "Docs".to_string(),
+                body: String::new(),
+                labels: "docs".to_string(),
+                assignees: "sam".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+        app.set_issue_filter(IssueFilter::Closed);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for ch in "is:closed label:docs".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(22));
+    }
+
+    #[test]
+    fn enter_submits_comment_editor() {
+        let mut app = App::new(Config::default());
+        app.open_issue_comment_editor(View::Issues);
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitIssueComment));
+    }
+
+    #[test]
+    fn shift_enter_adds_newline_in_comment_editor() {
+        let mut app = App::new(Config::default());
+        app.open_issue_comment_editor(View::Issues);
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+
+        assert_eq!(app.editor().text(), "a\nb");
+        assert_eq!(app.take_action(), None);
+    }
+
+    #[test]
+    fn ctrl_j_adds_newline_in_comment_editor() {
+        let mut app = App::new(Config::default());
+        app.open_issue_comment_editor(View::Issues);
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+        app.on_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+
+        assert_eq!(app.editor().text(), "a\nb");
+        assert_eq!(app.take_action(), None);
     }
 }
