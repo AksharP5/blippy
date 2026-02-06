@@ -182,6 +182,10 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
 
 fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
+    let content_area = main.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     let selected = app.issues().get(app.selected_issue());
     let title = selected
         .map(|issue| format!("#{} {}", issue.number, issue.title))
@@ -242,17 +246,25 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
         }
     }
 
+    let viewport_height = content_area.height.saturating_sub(2) as usize;
+    let max_scroll = lines.len().saturating_sub(viewport_height) as u16;
+    let scroll = app.issue_detail_scroll().min(max_scroll);
+
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .wrap(Wrap { trim: false })
-        .scroll((app.issue_detail_scroll(), 0));
-    frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
+        .scroll((scroll, 0));
+    frame.render_widget(paragraph, content_area);
 
     draw_status(frame, app, footer);
 }
 
 fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
+    let content_area = main.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     let block = panel_block("Comments");
     let mut lines = Vec::new();
     if app.comments().is_empty() {
@@ -275,17 +287,15 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         }
     }
 
+    let viewport_height = content_area.height.saturating_sub(2) as usize;
+    let max_scroll = lines.len().saturating_sub(viewport_height) as u16;
+    let scroll = app.issue_comments_scroll().min(max_scroll);
+
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .wrap(Wrap { trim: false })
-        .scroll((app.issue_comments_scroll(), 0));
-    frame.render_widget(
-        paragraph,
-        main.inner(Margin {
-            vertical: 1,
-            horizontal: 2,
-        }),
-    );
+        .scroll((scroll, 0));
+    frame.render_widget(paragraph, content_area);
 
     draw_status(frame, app, footer);
 }
