@@ -287,7 +287,11 @@ impl App {
 
     pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
         self.comments = comments;
-        self.selected_comment = 0;
+        if self.comments.is_empty() {
+            self.selected_comment = 0;
+            return;
+        }
+        self.selected_comment = self.comments.len() - 1;
     }
 
     pub fn set_comment_defaults(&mut self, defaults: Vec<CommentDefault>) {

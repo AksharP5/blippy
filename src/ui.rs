@@ -1,4 +1,4 @@
-use ratatui::layout::Margin;
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
@@ -19,6 +19,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let block = Block::default().title("Repos").borders(Borders::ALL);
     let items = if app.repos().is_empty() {
         vec![ListItem::new("No repos found. Run `glyph sync` or press Ctrl+R to rescan.")]
@@ -34,17 +35,18 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
     let list = List::new(items).block(block).highlight_symbol("> ");
     frame.render_stateful_widget(
         list,
-        area.inner(Margin {
+        main.inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
         &mut list_state(app.selected_repo()),
     );
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
 fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let block = Block::default().title("Choose Remote").borders(Borders::ALL);
     let items = app
         .remotes()
@@ -57,17 +59,18 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
     let list = List::new(items).block(block).highlight_symbol("> ");
     frame.render_stateful_widget(
         list,
-        area.inner(Margin {
+        main.inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
         &mut list_state(app.selected_remote()),
     );
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
 fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let block = Block::default().title("Issues").borders(Borders::ALL);
     let items = if app.issues().is_empty() {
         vec![ListItem::new("No cached issues yet. Run `glyph sync`.")]
@@ -80,17 +83,18 @@ fn draw_issues(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let list = List::new(items).block(block).highlight_symbol("> ");
     frame.render_stateful_widget(
         list,
-        area.inner(Margin {
+        main.inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
         &mut list_state(app.selected_issue()),
     );
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
 fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let title = app
         .issues()
         .get(app.selected_issue())
@@ -108,17 +112,18 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
     let list = List::new(items).block(block).highlight_symbol("> ");
     frame.render_stateful_widget(
         list,
-        area.inner(Margin {
+        main.inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
         &mut list_state(app.selected_comment()),
     );
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
 fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let block = Block::default().title("Close Issue").borders(Borders::ALL);
     let mut items = Vec::new();
     items.push(ListItem::new("Close without comment"));
@@ -131,39 +136,41 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
     let list = List::new(items).block(block).highlight_symbol("> ");
     frame.render_stateful_widget(
         list,
-        area.inner(Margin {
+        main.inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
         &mut list_state(app.selected_preset()),
     );
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
 fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let block = Block::default().title("Preset Name").borders(Borders::ALL);
     let text = app.editor().name();
     let paragraph = Paragraph::new(text)
         .block(block)
         .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area.inner(Margin { vertical: 1, horizontal: 2 }));
+    frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
 fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
     let block = Block::default().title("Comment").borders(Borders::ALL);
     let text = app.editor().text();
     let paragraph = Paragraph::new(text)
         .block(block)
         .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, area.inner(Margin { vertical: 1, horizontal: 2 }));
+    frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
 
-    draw_status(frame, app, area);
+    draw_status(frame, app, footer);
 }
 
-fn draw_status(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let status = app.status();
     let help = help_text(app);
     let text = if status.is_empty() {
@@ -174,11 +181,15 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
         .block(Block::default());
-    let status_area = area.inner(Margin {
-        vertical: 0,
-        horizontal: 2,
-    });
-    frame.render_widget(paragraph, status_area);
+    frame.render_widget(paragraph, area.inner(Margin { vertical: 0, horizontal: 2 }));
+}
+
+fn split_area(area: Rect) -> (Rect, Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(area);
+    (chunks[0], chunks[1])
 }
 
 fn help_text(app: &App) -> String {
