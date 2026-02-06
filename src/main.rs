@@ -5,6 +5,7 @@ mod config;
 mod discovery;
 mod git;
 mod github;
+mod markdown;
 mod repo_index;
 mod sync;
 mod store;
@@ -260,6 +261,7 @@ fn handle_actions(
                 None => return Ok(()),
             };
             app.set_current_issue(issue_id, issue_number);
+            app.reset_issue_detail_scroll();
             load_comments_for_issue(app, conn, issue_id)?;
             app.set_view(View::IssueDetail);
             app.set_comment_syncing(false);

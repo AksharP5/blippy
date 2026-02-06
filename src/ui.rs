@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wra
 use ratatui::Frame;
 
 use crate::app::{App, View};
+use crate::markdown;
 
 pub fn draw(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
@@ -184,7 +185,14 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
         assignees, comment_count
     )));
     lines.push(Line::from(""));
-    lines.push(Line::from(body));
+    let rendered_body = markdown::render(body);
+    if rendered_body.lines.is_empty() {
+        lines.push(Line::from("No description."));
+    } else {
+        for line in rendered_body.lines {
+            lines.push(line);
+        }
+    }
     lines.push(Line::from(""));
     lines.push(Line::from("Recent comments:"));
 
@@ -193,15 +201,29 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Re
     } else {
         let start = app.comments().len().saturating_sub(3);
         for comment in &app.comments()[start..] {
-            lines.push(Line::from(format!("- {}", comment.author)));
-            lines.push(Line::from(comment.body.as_str()));
+            lines.push(Line::from(vec![
+                Span::styled("- ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    comment.author.as_str(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            let rendered_comment = markdown::render(comment.body.as_str());
+            if rendered_comment.lines.is_empty() {
+                lines.push(Line::from(""));
+            } else {
+                for line in rendered_comment.lines {
+                    lines.push(line);
+                }
+            }
             lines.push(Line::from(""));
         }
     }
 
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((app.issue_detail_scroll(), 0));
     frame.render_widget(paragraph, main.inner(Margin { vertical: 1, horizontal: 2 }));
 
     draw_status(frame, app, footer);
@@ -216,10 +238,21 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         app.comments()
             .iter()
             .map(|comment| {
-                ListItem::new(vec![
-                    Line::from(format!("{}", comment.author)),
-                    Line::from(comment.body.as_str()),
-                ])
+                let mut lines = Vec::new();
+                lines.push(Line::from(Span::styled(
+                    comment.author.as_str(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )));
+                let rendered = markdown::render(comment.body.as_str());
+                if rendered.lines.is_empty() {
+                    lines.push(Line::from(""));
+                } else {
+                    for line in rendered.lines {
+                        lines.push(line);
+                    }
+                }
+                lines.push(Line::from(""));
+                ListItem::new(lines)
             })
             .collect()
     };

@@ -49,6 +49,7 @@ pub struct App {
     selected_remote: usize,
     selected_issue: usize,
     selected_comment: usize,
+    issue_detail_scroll: u16,
     status: String,
     scanning: bool,
     syncing: bool,
@@ -81,6 +82,7 @@ impl App {
             selected_remote: 0,
             selected_issue: 0,
             selected_comment: 0,
+            issue_detail_scroll: 0,
             status: String::new(),
             scanning: false,
             syncing: false,
@@ -138,6 +140,10 @@ impl App {
 
     pub fn selected_comment(&self) -> usize {
         self.selected_comment
+    }
+
+    pub fn issue_detail_scroll(&self) -> u16 {
+        self.issue_detail_scroll
     }
 
     pub fn selected_preset(&self) -> usize {
@@ -309,6 +315,10 @@ impl App {
         self.selected_comment = self.comments.len() - 1;
     }
 
+    pub fn reset_issue_detail_scroll(&mut self) {
+        self.issue_detail_scroll = 0;
+    }
+
     pub fn set_comment_defaults(&mut self, defaults: Vec<CommentDefault>) {
         self.config.comment_defaults = defaults;
         self.preset_choice = 0;
@@ -412,7 +422,9 @@ impl App {
                     self.selected_issue -= 1;
                 }
             }
-            View::IssueDetail => {}
+            View::IssueDetail => {
+                self.issue_detail_scroll = self.issue_detail_scroll.saturating_sub(1);
+            }
             View::IssueComments => {
                 if self.selected_comment > 0 {
                     self.selected_comment -= 1;
@@ -444,7 +456,9 @@ impl App {
                     self.selected_issue += 1;
                 }
             }
-            View::IssueDetail => {}
+            View::IssueDetail => {
+                self.issue_detail_scroll = self.issue_detail_scroll.saturating_add(1);
+            }
             View::IssueComments => {
                 if self.selected_comment + 1 < self.comments.len() {
                     self.selected_comment += 1;
@@ -487,7 +501,7 @@ impl App {
             View::RepoPicker => self.selected_repo = 0,
             View::RemoteChooser => self.selected_remote = 0,
             View::Issues => self.selected_issue = 0,
-            View::IssueDetail => {}
+            View::IssueDetail => self.issue_detail_scroll = 0,
             View::IssueComments => self.selected_comment = 0,
             View::CommentPresetPicker => self.preset_choice = 0,
             View::CommentPresetName | View::CommentEditor => {}
@@ -511,7 +525,9 @@ impl App {
                     self.selected_issue = self.issues.len() - 1;
                 }
             }
-            View::IssueDetail => {}
+            View::IssueDetail => {
+                self.issue_detail_scroll = u16::MAX;
+            }
             View::IssueComments => {
                 if !self.comments.is_empty() {
                     self.selected_comment = self.comments.len() - 1;
