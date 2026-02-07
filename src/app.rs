@@ -55,6 +55,23 @@ pub enum IssueFilter {
     Closed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssigneeFilter {
+    All,
+    Unassigned,
+    User(String),
+}
+
+impl AssigneeFilter {
+    fn label(&self) -> String {
+        match self {
+            Self::All => "all".to_string(),
+            Self::Unassigned => "unassigned".to_string(),
+            Self::User(user) => user.clone(),
+        }
+    }
+}
+
 impl IssueFilter {
     fn next(self) -> Self {
         match self {
@@ -107,6 +124,7 @@ pub struct App {
     selected_issue: usize,
     selected_comment: usize,
     issue_filter: IssueFilter,
+    assignee_filter: AssigneeFilter,
     issue_query: String,
     issue_search_mode: bool,
     filtered_issue_indices: Vec<usize>,
@@ -153,6 +171,7 @@ impl App {
             selected_issue: 0,
             selected_comment: 0,
             issue_filter: IssueFilter::Open,
+            assignee_filter: AssigneeFilter::All,
             issue_query: String::new(),
             issue_search_mode: false,
             filtered_issue_indices: Vec::new(),
@@ -229,11 +248,23 @@ impl App {
         self.issue_filter
     }
 
+    pub fn assignee_filter_label(&self) -> String {
+        self.assignee_filter.label()
+    }
+
+    pub fn has_assignee_filter(&self) -> bool {
+        !matches!(self.assignee_filter, AssigneeFilter::All)
+    }
+
     pub fn set_issue_filter(&mut self, filter: IssueFilter) {
         self.issue_filter = filter;
         self.rebuild_issue_filter();
         self.issues_preview_scroll = 0;
-        self.status = format!("Filter: {}", self.issue_filter.label());
+        self.status = format!(
+            "Filter: {} | assignee: {}",
+            self.issue_filter.label(),
+            self.assignee_filter.label()
+        );
     }
 
     pub fn issue_query(&self) -> &str {
@@ -390,6 +421,12 @@ impl App {
             }
             KeyCode::Char('f') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.set_issue_filter(self.issue_filter.next());
+            }
+            KeyCode::Char('a') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.cycle_assignee_filter(true);
+            }
+            KeyCode::Char('A') if self.view == View::Issues => {
+                self.cycle_assignee_filter(false);
             }
             KeyCode::Char('[') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.set_issue_filter(self.issue_filter.prev());
@@ -630,6 +667,7 @@ impl App {
         self.current_repo = Some(repo.to_string());
         self.current_issue_id = None;
         self.current_issue_number = None;
+        self.assignee_filter = AssigneeFilter::All;
         self.issue_query.clear();
         self.issue_search_mode = false;
     }
@@ -945,7 +983,10 @@ impl App {
             .iter()
             .enumerate()
             .filter_map(|(index, issue)| {
-                if self.issue_filter.matches(issue) && Self::issue_matches_query(issue, query.as_str()) {
+                if self.issue_filter.matches(issue)
+                    && self.assignee_filter_matches(issue)
+                    && Self::issue_matches_query(issue, query.as_str())
+                {
                     return Some(index);
                 }
                 None
@@ -976,7 +1017,11 @@ impl App {
                 return labels.contains(value);
             }
             if let Some(value) = token.strip_prefix("assignee:") {
-                return assignees.contains(value);
+                let value = value.strip_prefix('@').unwrap_or(value);
+                if value == "none" || value == "unassigned" {
+                    return issue.assignees.trim().is_empty();
+                }
+                return Self::issue_has_assignee(issue.assignees.as_str(), value);
             }
             if let Some(value) = token.strip_prefix('#') {
                 return value.parse::<i64>().ok().is_some_and(|parsed| issue.number == parsed);
@@ -987,6 +1032,78 @@ impl App {
                 || assignees.contains(token)
                 || number.contains(token)
         })
+    }
+
+    fn cycle_assignee_filter(&mut self, forward: bool) {
+        let options = self.assignee_options();
+        if options.is_empty() {
+            self.assignee_filter = AssigneeFilter::All;
+            self.rebuild_issue_filter();
+            return;
+        }
+
+        let current = options
+            .iter()
+            .position(|option| *option == self.assignee_filter)
+            .unwrap_or(0);
+        let next = if forward {
+            (current + 1) % options.len()
+        } else if current == 0 {
+            options.len() - 1
+        } else {
+            current - 1
+        };
+
+        self.assignee_filter = options[next].clone();
+        self.rebuild_issue_filter();
+        self.issues_preview_scroll = 0;
+        self.status = format!(
+            "Assignee: {} ({} issues)",
+            self.assignee_filter.label(),
+            self.filtered_issue_indices.len()
+        );
+    }
+
+    fn assignee_options(&self) -> Vec<AssigneeFilter> {
+        let mut users = self
+            .issues
+            .iter()
+            .flat_map(|issue| issue.assignees.split(','))
+            .map(str::trim)
+            .filter(|assignee| !assignee.is_empty())
+            .map(|assignee| assignee.to_string())
+            .collect::<Vec<String>>();
+        users.sort_by_key(|user| user.to_ascii_lowercase());
+        users.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+
+        let has_unassigned = self
+            .issues
+            .iter()
+            .any(|issue| issue.assignees.trim().is_empty());
+
+        let mut options = vec![AssigneeFilter::All];
+        if has_unassigned {
+            options.push(AssigneeFilter::Unassigned);
+        }
+        for user in users {
+            options.push(AssigneeFilter::User(user));
+        }
+        options
+    }
+
+    fn assignee_filter_matches(&self, issue: &IssueRow) -> bool {
+        match &self.assignee_filter {
+            AssigneeFilter::All => true,
+            AssigneeFilter::Unassigned => issue.assignees.trim().is_empty(),
+            AssigneeFilter::User(user) => Self::issue_has_assignee(issue.assignees.as_str(), user),
+        }
+    }
+
+    fn issue_has_assignee(issue_assignees: &str, user: &str) -> bool {
+        issue_assignees
+            .split(',')
+            .map(str::trim)
+            .any(|assignee| assignee.eq_ignore_ascii_case(user))
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
@@ -1081,12 +1198,17 @@ impl App {
 
     fn update_search_status(&mut self) {
         if self.issue_query.trim().is_empty() {
-            self.status = format!("Filter: {}", self.issue_filter.label());
+            self.status = format!(
+                "Filter: {} | assignee: {}",
+                self.issue_filter.label(),
+                self.assignee_filter.label()
+            );
             return;
         }
         self.status = format!(
-            "Search: {} ({} results)",
+            "Search: {} | assignee: {} ({} results)",
             self.issue_query,
+            self.assignee_filter.label(),
             self.filtered_issue_indices.len()
         );
     }
@@ -1325,6 +1447,69 @@ mod tests {
     }
 
     #[test]
+    fn a_cycles_assignee_filter() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 1,
+                state: "open".to_string(),
+                title: "One".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: "alex".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 2,
+                state: "open".to_string(),
+                title: "Two".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: "sam".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 3,
+                repo_id: 1,
+                number: 3,
+                state: "open".to_string(),
+                title: "Three".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        assert_eq!(app.assignee_filter_label(), "all");
+        assert_eq!(app.issues_for_view().len(), 3);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.assignee_filter_label(), "unassigned");
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(3));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.assignee_filter_label(), "alex");
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
+        assert_eq!(app.assignee_filter_label(), "unassigned");
+    }
+
+    #[test]
     fn slash_search_filters_and_escape_clears() {
         let mut app = App::new(Config::default());
         app.set_view(View::Issues);
@@ -1488,6 +1673,48 @@ mod tests {
 
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(22));
+    }
+
+    #[test]
+    fn assignee_qualifier_matches_exact_user() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 11,
+                state: "open".to_string(),
+                title: "One".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: "alex,sam".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 12,
+                state: "open".to_string(),
+                title: "Two".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: "samiam".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for ch in "assignee:sam".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(11));
     }
 
     #[test]

@@ -12,6 +12,7 @@ const GITHUB_GREEN: Color = Color::Rgb(63, 185, 80);
 const GITHUB_RED: Color = Color::Rgb(248, 81, 73);
 const GITHUB_BG: Color = Color::Rgb(13, 17, 23);
 const GITHUB_PANEL: Color = Color::Rgb(22, 27, 34);
+const GITHUB_PANEL_ALT: Color = Color::Rgb(28, 34, 43);
 const GITHUB_MUTED: Color = Color::Rgb(139, 148, 158);
 const PANEL_BORDER: Color = Color::Rgb(48, 54, 61);
 const SELECT_BG: Color = Color::Rgb(33, 58, 89);
@@ -105,7 +106,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(0)])
+        .constraints([Constraint::Length(5), Constraint::Min(0)])
         .split(main);
     let panes = Layout::default()
         .direction(Direction::Horizontal)
@@ -123,8 +124,32 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
         query.to_string()
     };
     let query_display = ellipsize(query_label.as_str(), 64);
+    let assignee = app.assignee_filter_label();
+    let visible_count = visible_issues.len();
+    let total_count = app.issues().len();
     let header_text = Text::from(vec![
         issue_tabs_line(app.issue_filter(), open_count, closed_count),
+        Line::from(vec![
+            Span::styled("assignee: ", Style::default().fg(GITHUB_MUTED)),
+            if app.has_assignee_filter() {
+                Span::styled(
+                    assignee.clone(),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(GITHUB_BLUE)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(assignee.clone(), Style::default().fg(GITHUB_MUTED))
+            },
+            Span::raw("  "),
+            Span::styled("(a/A cycle)", Style::default().fg(GITHUB_MUTED)),
+            Span::raw("  "),
+            Span::styled(
+                format!("showing {} of {}", visible_count, total_count),
+                Style::default().fg(GITHUB_MUTED),
+            ),
+        ]),
         Line::from(vec![
             Span::styled("search: ", Style::default().fg(GITHUB_MUTED)),
             Span::raw(query_display.clone()),
@@ -150,12 +175,12 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
             vertical: 1,
             horizontal: 1,
         });
-        if content.width > 0 && content.height > 1 {
+        if content.width > 0 && content.height > 2 {
             let cursor_x = content
                 .x
                 .saturating_add((8 + query_display.chars().count()) as u16)
                 .min(content.x.saturating_add(content.width.saturating_sub(1)));
-            let cursor_y = content.y.saturating_add(1);
+            let cursor_y = content.y.saturating_add(2);
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }
@@ -195,11 +220,12 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                     Span::raw(issue.title.clone()),
                 ]);
                 let line2 = Line::from(format!(
-                    "assignees: {}  comments: {}  labels: {}",
-                    assignees,
+                    "@{}  comments:{}  labels:{}",
+                    ellipsize(assignees, 20),
                     issue.comments_count,
-                    ellipsize(labels, 26)
-                ));
+                    ellipsize(labels, 24)
+                ))
+                .style(Style::default().fg(GITHUB_MUTED));
                 ListItem::new(vec![line1, line2])
             })
             .collect()
@@ -282,7 +308,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let preview_block = panel_block_with_border(&preview_title, focus_border(preview_focused));
     let preview_widget = Paragraph::new(Text::from(preview_lines))
         .block(preview_block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL_ALT))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(preview_widget, preview_area);
@@ -338,7 +364,13 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         Text::from(vec![Line::from(vec![
             Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
             Span::raw("  "),
-            Span::styled(issue_state.clone(), Style::default().fg(issue_state_color(issue_state.as_str())).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                issue_state.clone(),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(issue_state_color(issue_state.as_str()))
+                    .add_modifier(Modifier::BOLD),
+            ),
         ])])
     };
     let header_block = Block::default()
@@ -365,12 +397,13 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )));
     }
-    body_lines.push(Line::from(format!(
+    let metadata = Line::from(format!(
         "assignees: {} | comments: {} | labels: {}",
         assignees,
         comment_count,
         ellipsize(labels.as_str(), 44)
-    )));
+    ));
+    body_lines.push(metadata.style(Style::default().fg(GITHUB_MUTED)));
     if let Some(updated) = format_datetime(updated_at.as_deref()) {
         body_lines.push(Line::from(format!("updated: {}", updated)));
     }
@@ -701,7 +734,7 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a/A assignee • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
@@ -759,10 +792,11 @@ fn status_context(app: &App) -> String {
         } else {
             ellipsize(query, 24)
         };
+        let assignee = ellipsize(app.assignee_filter_label().as_str(), 18);
         let mode = if app.issue_search_mode() { "search" } else { "browse" };
         return format!(
-            "repo: {}  |  focus: {}  |  mode: {}  |  query: {}  |  status: {}",
-            repo, focus, mode, query, sync
+            "repo: {}  |  focus: {}  |  mode: {}  |  assignee: {}  |  query: {}  |  status: {}",
+            repo, focus, mode, assignee, query, sync
         );
     }
     format!("repo: {}  |  focus: {}  |  status: {}", repo, focus, sync)

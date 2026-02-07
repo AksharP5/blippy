@@ -82,6 +82,7 @@ cargo test
 - gg/G: jump top/bottom in focused pane
 - f: cycle issue filter (open/closed)
 - 1/2: switch issue tab (open/closed), or use `[` and `]`
+- a/A: cycle assignee filter (all/unassigned/users)
 - /: search issues by number/title/body/labels/assignees (Enter keep, Esc clear)
 - m: add comment to selected issue
 - u: reopen selected closed issue
@@ -98,6 +99,7 @@ Search supports simple GitHub-like qualifiers:
 - `is:open` or `is:closed`
 - `label:bug`
 - `assignee:alex`
+- `assignee:none` for unassigned
 - `#123` for exact issue number
 
 ## Comment Defaults
