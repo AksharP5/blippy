@@ -156,7 +156,7 @@ pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
         SELECT id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
         FROM issues
         WHERE repo_id = ?1
-        ORDER BY updated_at DESC
+        ORDER BY number DESC
         ",
     )?;
 
@@ -414,7 +414,7 @@ fn fetch_issues_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<IssueRow>> 
         SELECT id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
         FROM issues
         WHERE id IN ({})
-        ORDER BY updated_at DESC
+        ORDER BY number DESC
         ",
         placeholders
     );
@@ -865,6 +865,60 @@ mod tests {
         assert_eq!(comments.len(), 2);
         assert_eq!(comments[0].body, "first");
         assert_eq!(comments[1].body, "second");
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn issues_are_ordered_newest_number_first() {
+        let dir = unique_temp_dir("issue-order");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "glyph".to_string(),
+            updated_at: None,
+            etag: None,
+        };
+        upsert_repo(&conn, &repo).expect("insert repo");
+
+        let older_number_newer_update = IssueRow {
+            id: 60,
+            repo_id: 1,
+            number: 4,
+            state: "open".to_string(),
+            title: "older number".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: Some("2025-01-05T00:00:00Z".to_string()),
+            is_pr: false,
+        };
+        let newer_number_older_update = IssueRow {
+            id: 61,
+            repo_id: 1,
+            number: 5,
+            state: "open".to_string(),
+            title: "newer number".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+            is_pr: false,
+        };
+
+        upsert_issue(&conn, &older_number_newer_update).expect("insert issue 1");
+        upsert_issue(&conn, &newer_number_older_update).expect("insert issue 2");
+
+        let issues = list_issues(&conn, 1).expect("list issues");
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].number, 5);
+        assert_eq!(issues[1].number, 4);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);

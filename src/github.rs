@@ -94,6 +94,8 @@ impl GitHubClient {
             .bearer_auth(&self.token)
             .query(&[
                 ("state", "all"),
+                ("sort", "created"),
+                ("direction", "desc"),
                 ("per_page", "100"),
                 ("page", &page.to_string()),
             ])
