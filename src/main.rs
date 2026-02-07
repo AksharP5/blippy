@@ -145,7 +145,7 @@ fn run_app(
     event_rx: Receiver<AppEvent>,
     event_tx: Sender<AppEvent>,
 ) -> Result<()> {
-    let tick_rate = Duration::from_millis(250);
+    let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
     let mut last_issue_poll = Instant::now();
     let mut last_comment_poll = Instant::now();

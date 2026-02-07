@@ -121,6 +121,7 @@ where
     let mut stats = SyncStats::default();
     let mut page = 1u32;
     let mut fetched_any_page = false;
+    const PROGRESS_BATCH: usize = 10;
     loop {
         let page_result = _client.list_issues_page(_owner, _repo, page).await;
         let issues = match page_result {
@@ -138,6 +139,8 @@ where
         if issues.is_empty() {
             break;
         }
+        let mut persisted_since_update = 0usize;
+        let mut emitted_for_page = false;
         for issue in issues {
             let row = match map_issue_to_row(repo_row.id, &issue) {
                 Some(row) => row,
@@ -145,8 +148,16 @@ where
             };
             crate::store::upsert_issue(_conn, &row)?;
             stats.issues += 1;
+            persisted_since_update += 1;
+            if persisted_since_update >= PROGRESS_BATCH {
+                _on_progress(page, &stats);
+                emitted_for_page = true;
+                persisted_since_update = 0;
+            }
         }
-        _on_progress(page, &stats);
+        if persisted_since_update > 0 || !emitted_for_page {
+            _on_progress(page, &stats);
+        }
         page += 1;
     }
 
