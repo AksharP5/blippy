@@ -13,7 +13,7 @@ pub struct SyncStats {
 #[async_trait]
 pub trait GitHubApi {
     async fn get_repo(&self, owner: &str, repo: &str) -> Result<ApiRepo>;
-    async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>>;
+    async fn list_issues_page(&self, owner: &str, repo: &str, page: u32) -> Result<Vec<ApiIssue>>;
     async fn list_comments(
         &self,
         owner: &str,
@@ -28,8 +28,8 @@ impl GitHubApi for GitHubClient {
         self.get_repo(owner, repo).await
     }
 
-    async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>> {
-        self.list_issues(owner, repo).await
+    async fn list_issues_page(&self, owner: &str, repo: &str, page: u32) -> Result<Vec<ApiIssue>> {
+        self.list_issues_page(owner, repo, page).await
     }
 
     async fn list_comments(
@@ -106,14 +106,30 @@ pub async fn sync_repo(
     crate::store::upsert_repo(_conn, &repo_row)?;
 
     let mut stats = SyncStats::default();
-    let issues = _client.list_issues(_owner, _repo).await?;
-    for issue in issues {
-        let row = match map_issue_to_row(repo_row.id, &issue) {
-            Some(row) => row,
-            None => continue,
+    let mut page = 1u32;
+    loop {
+        let page_result = _client.list_issues_page(_owner, _repo, page).await;
+        let issues = match page_result {
+            Ok(issues) => issues,
+            Err(error) => {
+                if stats.issues > 0 {
+                    break;
+                }
+                return Err(error);
+            }
         };
-        crate::store::upsert_issue(_conn, &row)?;
-        stats.issues += 1;
+        if issues.is_empty() {
+            break;
+        }
+        for issue in issues {
+            let row = match map_issue_to_row(repo_row.id, &issue) {
+                Some(row) => row,
+                None => continue,
+            };
+            crate::store::upsert_issue(_conn, &row)?;
+            stats.issues += 1;
+        }
+        page += 1;
     }
 
     Ok(stats)
@@ -266,6 +282,8 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_issue_page: None,
+            issue_page_size: 100,
         };
 
         let stats = sync_repo(&client, &conn, "acme", "glyph")
@@ -287,6 +305,8 @@ mod tests {
         repo: ApiRepo,
         issues: Vec<ApiIssue>,
         comments: HashMap<i64, Vec<ApiComment>>,
+        fail_issue_page: Option<u32>,
+        issue_page_size: usize,
     }
 
     #[async_trait]
@@ -302,12 +322,23 @@ mod tests {
             })
         }
 
-        async fn list_issues(
+        async fn list_issues_page(
             &self,
             _owner: &str,
             _repo: &str,
+            page: u32,
         ) -> anyhow::Result<Vec<ApiIssue>> {
-            Ok(self.issues.clone())
+            if self.fail_issue_page.is_some_and(|fail_page| fail_page == page) {
+                return Err(anyhow::anyhow!("rate limit"));
+            }
+
+            let page_index = page.saturating_sub(1) as usize;
+            let start = page_index.saturating_mul(self.issue_page_size);
+            if start >= self.issues.len() {
+                return Ok(Vec::new());
+            }
+            let end = (start + self.issue_page_size).min(self.issues.len());
+            Ok(self.issues[start..end].to_vec())
         }
 
         async fn list_comments(
@@ -322,6 +353,90 @@ mod tests {
                 .cloned()
                 .unwrap_or_default())
         }
+    }
+
+    #[tokio::test]
+    async fn sync_repo_persists_partial_when_later_page_fails() {
+        let dir = unique_temp_dir("sync-partial");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let issues = vec![
+            ApiIssue {
+                id: 10,
+                number: 1,
+                state: "open".to_string(),
+                title: "Issue 1".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+            ApiIssue {
+                id: 11,
+                number: 2,
+                state: "open".to_string(),
+                title: "Issue 2".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-02T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+            ApiIssue {
+                id: 12,
+                number: 3,
+                state: "open".to_string(),
+                title: "Issue 3".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-03T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+        ];
+        let client = FakeGitHub {
+            repo,
+            issues,
+            comments: HashMap::new(),
+            fail_issue_page: Some(3),
+            issue_page_size: 1,
+        };
+
+        let stats = sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
+        assert_eq!(stats.issues, 2);
+
+        let rows = list_issues(&conn, 1).expect("list issues");
+        assert_eq!(rows.len(), 2);
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

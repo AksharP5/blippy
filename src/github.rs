@@ -81,20 +81,33 @@ impl GitHubClient {
         Ok(response.json::<ApiRepo>().await?)
     }
 
+    pub async fn list_issues_page(
+        &self,
+        owner: &str,
+        repo: &str,
+        page: u32,
+    ) -> Result<Vec<ApiIssue>> {
+        let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(&self.token)
+            .query(&[
+                ("state", "all"),
+                ("per_page", "100"),
+                ("page", &page.to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(response.json::<Vec<ApiIssue>>().await?)
+    }
+
     pub async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>> {
-        let mut page = 1;
+        let mut page = 1u32;
         let mut issues = Vec::new();
         loop {
-            let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
-            let response = self
-                .client
-                .get(url)
-                .bearer_auth(&self.token)
-                .query(&[("state", "all"), ("per_page", "100"), ("page", &page.to_string())])
-                .send()
-                .await?
-                .error_for_status()?;
-            let batch = response.json::<Vec<ApiIssue>>().await?;
+            let batch = self.list_issues_page(owner, repo, page).await?;
             if batch.is_empty() {
                 break;
             }
