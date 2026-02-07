@@ -557,9 +557,22 @@ impl App {
     }
 
     pub fn set_issues(&mut self, issues: Vec<IssueRow>) {
+        let selected_issue_number = self.selected_issue_row().map(|issue| issue.number);
+        let current_issue_number = self.current_issue_number;
         self.issues = issues;
-        self.selected_issue = 0;
         self.rebuild_issue_filter();
+        self.selected_issue = selected_issue_number
+            .and_then(|number| {
+                self.filtered_issue_indices
+                    .iter()
+                    .position(|index| self.issues.get(*index).is_some_and(|issue| issue.number == number))
+            })
+            .unwrap_or(0);
+        if let Some(number) = current_issue_number {
+            if let Some(issue) = self.issues.iter().find(|issue| issue.number == number) {
+                self.current_issue_id = Some(issue.id);
+            }
+        }
         self.issues_preview_scroll = 0;
         self.issues_preview_max_scroll = 0;
     }
@@ -1751,5 +1764,73 @@ mod tests {
 
         assert_eq!(app.editor().text(), "a\nb");
         assert_eq!(app.take_action(), None);
+    }
+
+    #[test]
+    fn set_issues_preserves_selected_issue_when_still_present() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 1,
+                state: "open".to_string(),
+                title: "One".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 2,
+                state: "open".to_string(),
+                title: "Two".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
+
+        app.set_issues(vec![
+            IssueRow {
+                id: 10,
+                repo_id: 1,
+                number: 2,
+                state: "open".to_string(),
+                title: "Two refreshed".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 11,
+                repo_id: 1,
+                number: 3,
+                state: "open".to_string(),
+                title: "Three".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
     }
 }

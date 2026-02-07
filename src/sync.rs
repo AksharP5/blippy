@@ -101,18 +101,35 @@ pub async fn sync_repo(
     _owner: &str,
     _repo: &str,
 ) -> Result<SyncStats> {
+    sync_repo_with_progress(_client, _conn, _owner, _repo, |_page, _stats| {}).await
+}
+
+pub async fn sync_repo_with_progress<F>(
+    _client: &dyn GitHubApi,
+    _conn: &rusqlite::Connection,
+    _owner: &str,
+    _repo: &str,
+    mut _on_progress: F,
+) -> Result<SyncStats>
+where
+    F: FnMut(u32, &SyncStats),
+{
     let repo = _client.get_repo(_owner, _repo).await?;
     let repo_row = map_repo_to_row(&repo);
     crate::store::upsert_repo(_conn, &repo_row)?;
 
     let mut stats = SyncStats::default();
     let mut page = 1u32;
+    let mut fetched_any_page = false;
     loop {
         let page_result = _client.list_issues_page(_owner, _repo, page).await;
         let issues = match page_result {
-            Ok(issues) => issues,
+            Ok(issues) => {
+                fetched_any_page = true;
+                issues
+            }
             Err(error) => {
-                if stats.issues > 0 {
+                if fetched_any_page {
                     break;
                 }
                 return Err(error);
@@ -129,6 +146,7 @@ pub async fn sync_repo(
             crate::store::upsert_issue(_conn, &row)?;
             stats.issues += 1;
         }
+        _on_progress(page, &stats);
         page += 1;
     }
 
@@ -137,7 +155,10 @@ pub async fn sync_repo(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo, GitHubApi};
+    use super::{
+        map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo, sync_repo_with_progress,
+        GitHubApi,
+    };
     use crate::github::{ApiComment, ApiIssue, ApiLabel, ApiRepo, ApiUser};
     use crate::store::{comments_for_issue, list_issues, open_db_at};
     use async_trait::async_trait;
@@ -434,6 +455,123 @@ mod tests {
 
         let rows = list_issues(&conn, 1).expect("list issues");
         assert_eq!(rows.len(), 2);
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_repo_reports_progress_per_page() {
+        let dir = unique_temp_dir("sync-progress");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let issues = vec![
+            ApiIssue {
+                id: 10,
+                number: 1,
+                state: "open".to_string(),
+                title: "Issue 1".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+            ApiIssue {
+                id: 11,
+                number: 2,
+                state: "open".to_string(),
+                title: "Issue 2".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-02T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+        ];
+        let client = FakeGitHub {
+            repo,
+            issues,
+            comments: HashMap::new(),
+            fail_issue_page: None,
+            issue_page_size: 1,
+        };
+
+        let mut progress = Vec::new();
+        let stats = sync_repo_with_progress(&client, &conn, "acme", "glyph", |page, stats| {
+            progress.push((page, stats.issues));
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(stats.issues, 2);
+        assert_eq!(progress, vec![(1, 1), (2, 2)]);
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_repo_keeps_partial_when_only_prs_seen_before_failure() {
+        let dir = unique_temp_dir("sync-pr-only-partial");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let issues = vec![ApiIssue {
+            id: 11,
+            number: 2,
+            state: "open".to_string(),
+            title: "PR".to_string(),
+            body: None,
+            comments: 0,
+            updated_at: None,
+            labels: Vec::new(),
+            assignees: Vec::new(),
+            user: ApiUser {
+                login: "dev".to_string(),
+                user_type: None,
+            },
+            pull_request: Some(serde_json::json!({"url": "x"})),
+        }];
+        let client = FakeGitHub {
+            repo,
+            issues,
+            comments: HashMap::new(),
+            fail_issue_page: Some(2),
+            issue_page_size: 1,
+        };
+
+        let stats = sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
+        assert_eq!(stats.issues, 0);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);

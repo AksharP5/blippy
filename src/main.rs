@@ -33,7 +33,7 @@ use crate::git::list_github_remotes_at;
 use crate::github::GitHubClient;
 use crate::repo_index::index_repo_path;
 use crate::store::delete_db;
-use crate::sync::{sync_repo, SyncStats};
+use crate::sync::{sync_repo_with_progress, SyncStats};
 use crate::store::{
     comment_now_epoch, comments_for_issue, get_repo_by_slug, list_issues, list_local_repos,
     prune_comments, touch_comments_for_issue, update_issue_comments_count,
@@ -626,11 +626,28 @@ fn handle_events(
                 if app.current_owner() == Some(owner.as_str())
                     && app.current_repo() == Some(repo.as_str())
                 {
-                    load_issues_for_slug(app, conn, &owner, &repo)?;
+                    refresh_current_repo_issues(app, conn)?;
                     let (open_count, closed_count) = app.issue_counts();
                     app.set_status(format!(
                         "Synced {} issues (open: {}, closed: {})",
                         stats.issues, open_count, closed_count
+                    ));
+                }
+            }
+            AppEvent::SyncProgress {
+                owner,
+                repo,
+                page,
+                stats,
+            } => {
+                if app.current_owner() == Some(owner.as_str())
+                    && app.current_repo() == Some(repo.as_str())
+                {
+                    refresh_current_repo_issues(app, conn)?;
+                    let (open_count, closed_count) = app.issue_counts();
+                    app.set_status(format!(
+                        "Syncing page {}: {} issues cached (open: {}, closed: {})",
+                        page, stats.issues, open_count, closed_count
                     ));
                 }
             }
@@ -678,6 +695,12 @@ enum ScanMode {
 enum AppEvent {
     ReposUpdated,
     ScanFinished,
+    SyncProgress {
+        owner: String,
+        repo: String,
+        page: u32,
+        stats: SyncStats,
+    },
     SyncFinished { owner: String, repo: String, stats: SyncStats },
     SyncFailed { owner: String, repo: String, message: String },
     CommentsUpdated { issue_id: i64, count: usize },
@@ -799,7 +822,18 @@ fn start_repo_sync(owner: String, repo: String, token: String, event_tx: Sender<
             }
         };
 
-        let result = runtime.block_on(async { sync_repo(&client, &conn, &owner, &repo).await });
+        let progress_tx = event_tx.clone();
+        let result = runtime.block_on(async {
+            sync_repo_with_progress(&client, &conn, &owner, &repo, |page, stats| {
+                let _ = progress_tx.send(AppEvent::SyncProgress {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    page,
+                    stats: stats.clone(),
+                });
+            })
+            .await
+        });
         let stats = match result {
             Ok(stats) => stats,
             Err(error) => {
@@ -813,6 +847,23 @@ fn start_repo_sync(owner: String, repo: String, token: String, event_tx: Sender<
         };
         let _ = event_tx.send(AppEvent::SyncFinished { owner, repo, stats });
     });
+}
+
+fn refresh_current_repo_issues(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner, repo),
+        _ => return Ok(()),
+    };
+    let repo_row = match get_repo_by_slug(conn, owner, repo)? {
+        Some(repo_row) => repo_row,
+        None => {
+            app.set_issues(Vec::new());
+            return Ok(());
+        }
+    };
+    let issues = list_issues(conn, repo_row.id)?;
+    app.set_issues(issues);
+    Ok(())
 }
 
 fn start_comment_sync(
