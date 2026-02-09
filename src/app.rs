@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use crate::config::{CommentDefault, Config};
@@ -60,6 +61,21 @@ pub enum AssigneeFilter {
     All,
     Unassigned,
     User(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingIssueAction {
+    Closing,
+    Reopening,
+}
+
+impl PendingIssueAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Closing => "closing...",
+            Self::Reopening => "reopening...",
+        }
+    }
 }
 
 impl AssigneeFilter {
@@ -148,6 +164,7 @@ pub struct App {
     current_repo: Option<String>,
     current_issue_id: Option<i64>,
     current_issue_number: Option<i64>,
+    pending_issue_actions: HashMap<i64, PendingIssueAction>,
     pending_g: bool,
     pending_d: bool,
     comment_editor: CommentEditorState,
@@ -195,6 +212,7 @@ impl App {
             current_repo: None,
             current_issue_id: None,
             current_issue_number: None,
+            pending_issue_actions: HashMap::new(),
             pending_g: false,
             pending_d: false,
             comment_editor: CommentEditorState::default(),
@@ -738,6 +756,21 @@ impl App {
         self.current_issue_number
     }
 
+    pub fn set_pending_issue_action(&mut self, issue_number: i64, action: PendingIssueAction) {
+        self.pending_issue_actions.insert(issue_number, action);
+    }
+
+    pub fn clear_pending_issue_action(&mut self, issue_number: i64) {
+        self.pending_issue_actions.remove(&issue_number);
+    }
+
+    pub fn pending_issue_badge(&self, issue_number: i64) -> Option<&'static str> {
+        self.pending_issue_actions
+            .get(&issue_number)
+            .copied()
+            .map(PendingIssueAction::label)
+    }
+
     pub fn take_rescan_request(&mut self) -> bool {
         let requested = self.rescan_requested;
         self.rescan_requested = false;
@@ -1017,6 +1050,25 @@ impl App {
                 None
             })
             .collect::<Vec<usize>>();
+
+        self.filtered_issue_indices
+            .sort_by(|left_index, right_index| {
+                let left = self.issues.get(*left_index);
+                let right = self.issues.get(*right_index);
+                match (left, right) {
+                    (Some(left), Some(right)) => {
+                        if self.issue_filter == IssueFilter::Closed {
+                            let updated_cmp = right.updated_at.cmp(&left.updated_at);
+                            if updated_cmp != std::cmp::Ordering::Equal {
+                                return updated_cmp;
+                            }
+                        }
+                        right.number.cmp(&left.number)
+                    }
+                    _ => std::cmp::Ordering::Equal,
+                }
+            });
+
         if self.selected_issue >= self.filtered_issue_indices.len() {
             self.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
         }
@@ -1811,7 +1863,6 @@ mod tests {
             },
         ]);
 
-        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
 
         app.set_issues(vec![
@@ -1867,5 +1918,42 @@ mod tests {
         assert_eq!(app.issues_for_view().len(), 1);
         app.update_issue_state_by_number(10, "closed");
         assert_eq!(app.issues_for_view().len(), 0);
+    }
+
+    #[test]
+    fn closed_filter_sorts_by_recently_closed() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 10,
+                state: "closed".to_string(),
+                title: "older close".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 11,
+                state: "closed".to_string(),
+                title: "newer close".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: Some("2024-01-02T00:00:00Z".to_string()),
+                is_pr: false,
+            },
+        ]);
+
+        app.set_issue_filter(IssueFilter::Closed);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(11));
     }
 }

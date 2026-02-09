@@ -218,6 +218,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                         Style::default().fg(issue_state_color(issue.state.as_str())),
                     ),
                     Span::raw(issue.title.clone()),
+                    pending_issue_span(app.pending_issue_badge(issue.number)),
                 ]);
                 let line2 = Line::from(format!(
                     "@{}  comments:{}  labels:{}",
@@ -328,9 +329,10 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     });
     let body_focused = app.focus() == Focus::IssueBody;
     let comments_focused = app.focus() == Focus::IssueRecentComments;
-    let (issue_title, issue_state, body, assignees, labels, comment_count, updated_at) =
+    let (issue_number, issue_title, issue_state, body, assignees, labels, comment_count, updated_at) =
         match app.current_issue_row() {
             Some(issue) => (
+                Some(issue.number),
                 format!("#{} {}", issue.number, issue.title),
                 issue.state.clone(),
                 issue.body.clone(),
@@ -348,6 +350,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             issue.updated_at.clone(),
         ),
             None => (
+                None,
                 String::new(),
                 String::new(),
                 String::new(),
@@ -361,6 +364,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let header_text = if issue_title.is_empty() {
         Text::from(Line::from("Issue detail"))
     } else {
+        let pending = issue_number.and_then(|number| app.pending_issue_badge(number));
         Text::from(vec![Line::from(vec![
             Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
             Span::raw("  "),
@@ -371,6 +375,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                     .bg(issue_state_color(issue_state.as_str()))
                     .add_modifier(Modifier::BOLD),
             ),
+            pending_issue_span(pending),
         ])])
     };
     let header_block = Block::default()
@@ -849,6 +854,19 @@ fn issue_state_color(state: &str) -> Color {
         return GITHUB_RED;
     }
     GITHUB_GREEN
+}
+
+fn pending_issue_span(pending: Option<&str>) -> Span<'static> {
+    match pending {
+        Some(label) => Span::styled(
+            format!("  [{}]", label),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(210, 153, 34))
+                .add_modifier(Modifier::BOLD),
+        ),
+        None => Span::raw(String::new()),
+    }
 }
 
 fn ellipsize(input: &str, max: usize) -> String {

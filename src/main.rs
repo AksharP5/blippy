@@ -24,7 +24,7 @@ use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::app::{App, AppAction, PresetSelection, View};
+use crate::app::{App, AppAction, PendingIssueAction, PresetSelection, View};
 use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
 use crate::cli::{parse_args, CliCommand};
 use crate::config::Config;
@@ -410,6 +410,7 @@ fn close_issue_with_comment(
     };
 
     start_close_issue(owner, repo, issue_number, token.to_string(), body, event_tx);
+    app.set_pending_issue_action(issue_number, PendingIssueAction::Closing);
     app.set_view(View::Issues);
     app.set_status("Closing issue...".to_string());
     Ok(())
@@ -469,6 +470,7 @@ fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Resul
     };
 
     start_reopen_issue(owner, repo, issue_number, token.to_string(), event_tx);
+    app.set_pending_issue_action(issue_number, PendingIssueAction::Reopening);
     app.set_status("Reopening issue...".to_string());
     Ok(())
 }
@@ -700,6 +702,13 @@ fn handle_events(
                 }
             }
             AppEvent::IssueUpdated { issue_number, message } => {
+                if message.starts_with("closed")
+                    || message.starts_with("close failed")
+                    || message.starts_with("reopened")
+                    || message.starts_with("reopen failed")
+                {
+                    app.clear_pending_issue_action(issue_number);
+                }
                 if message.starts_with("closed") {
                     app.update_issue_state_by_number(issue_number, "closed");
                 }
