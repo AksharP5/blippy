@@ -700,6 +700,12 @@ fn handle_events(
                 }
             }
             AppEvent::IssueUpdated { issue_number, message } => {
+                if message.starts_with("closed") {
+                    app.update_issue_state_by_number(issue_number, "closed");
+                }
+                if message.starts_with("reopened") {
+                    app.update_issue_state_by_number(issue_number, "open");
+                }
                 app.set_status(format!("#{} {}", issue_number, message));
                 app.request_sync();
                 if app.current_issue_number() == Some(issue_number) {

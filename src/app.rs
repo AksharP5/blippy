@@ -690,6 +690,18 @@ impl App {
         self.current_issue_number = Some(issue_number);
     }
 
+    pub fn update_issue_state_by_number(&mut self, issue_number: i64, state: &str) {
+        for issue in &mut self.issues {
+            if issue.number == issue_number {
+                issue.state = state.to_string();
+            }
+        }
+        self.rebuild_issue_filter();
+        if self.selected_issue >= self.filtered_issue_indices.len() {
+            self.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
+        }
+    }
+
     pub fn editor(&self) -> &CommentEditorState {
         &self.comment_editor
     }
@@ -1832,5 +1844,28 @@ mod tests {
         ]);
 
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
+    }
+
+    #[test]
+    fn update_issue_state_rebuilds_filtered_view() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 10,
+            state: "open".to_string(),
+            title: "One".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+
+        assert_eq!(app.issues_for_view().len(), 1);
+        app.update_issue_state_by_number(10, "closed");
+        assert_eq!(app.issues_for_view().len(), 0);
     }
 }
