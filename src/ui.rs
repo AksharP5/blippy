@@ -329,6 +329,11 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     });
     let body_focused = app.focus() == Focus::IssueBody;
     let comments_focused = app.focus() == Focus::IssueRecentComments;
+    let focus_chip = if body_focused {
+        "focus: description"
+    } else {
+        "focus: recent comments"
+    };
     let (issue_number, issue_title, issue_state, body, assignees, labels, comment_count, updated_at) =
         match app.current_issue_row() {
             Some(issue) => (
@@ -373,6 +378,14 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                 Style::default()
                     .fg(Color::Black)
                     .bg(issue_state_color(issue_state.as_str()))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                focus_chip,
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(139, 148, 158))
                     .add_modifier(Modifier::BOLD),
             ),
             pending_issue_span(pending),
@@ -461,10 +474,28 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     app.set_issue_detail_max_scroll(max_scroll);
     let scroll = app.issue_detail_scroll();
 
-    let body_block = panel_block_with_border("Issue description", focus_border(body_focused));
+    let body_block = Block::default()
+        .title(Line::from(Span::styled(
+            "Issue description",
+            Style::default()
+                .fg(if body_focused { GITHUB_BLUE } else { GITHUB_MUTED })
+                .add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(focus_border(body_focused)))
+        .style(Style::default().bg(if body_focused {
+            GITHUB_PANEL_ALT
+        } else {
+            GITHUB_PANEL
+        }));
     let body_paragraph = Paragraph::new(Text::from(body_lines))
         .block(body_block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(Color::White).bg(if body_focused {
+            GITHUB_PANEL_ALT
+        } else {
+            GITHUB_PANEL
+        }))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(body_paragraph, panes[0]);
@@ -473,24 +504,34 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let comments_max_scroll = comment_lines.len().saturating_sub(comments_viewport) as u16;
     app.set_issue_recent_comments_max_scroll(comments_max_scroll);
     let comments_scroll = app.issue_recent_comments_scroll();
-    let comments_border = if comments_focused {
-        GITHUB_BLUE
-    } else {
-        GITHUB_GREEN
-    };
+    let comments_border = focus_border(comments_focused);
     let comments_title = format!("Recent comments ({})", app.comments().len());
     let comment_block = Block::default()
         .title(Line::from(Span::styled(
             comments_title,
             Style::default()
-                .fg(GITHUB_GREEN)
+                .fg(if comments_focused {
+                    GITHUB_BLUE
+                } else {
+                    GITHUB_MUTED
+                })
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().bg(if comments_focused {
+            GITHUB_PANEL_ALT
+        } else {
+            GITHUB_PANEL
+        }))
         .border_style(Style::default().fg(comments_border));
     let comment_paragraph = Paragraph::new(Text::from(comment_lines))
         .block(comment_block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(Color::White).bg(if comments_focused {
+            GITHUB_PANEL_ALT
+        } else {
+            GITHUB_PANEL
+        }))
         .wrap(Wrap { trim: false })
         .scroll((comments_scroll, 0));
     frame.render_widget(comment_paragraph, panes[1]);
