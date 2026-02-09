@@ -1,19 +1,27 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::github::{ApiComment, ApiIssue, ApiRepo, GitHubClient};
+use crate::github::{ApiComment, ApiIssue, ApiIssuesPageResult, ApiRepo, GitHubClient};
 use crate::store::{CommentRow, IssueRow, RepoRow};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SyncStats {
     pub issues: usize,
     pub comments: usize,
+    pub not_modified: bool,
 }
 
 #[async_trait]
 pub trait GitHubApi {
     async fn get_repo(&self, owner: &str, repo: &str) -> Result<ApiRepo>;
-    async fn list_issues_page(&self, owner: &str, repo: &str, page: u32) -> Result<Vec<ApiIssue>>;
+    async fn list_issues_page(
+        &self,
+        owner: &str,
+        repo: &str,
+        page: u32,
+        if_none_match: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<ApiIssuesPageResult>;
     async fn list_comments(
         &self,
         owner: &str,
@@ -28,8 +36,16 @@ impl GitHubApi for GitHubClient {
         self.get_repo(owner, repo).await
     }
 
-    async fn list_issues_page(&self, owner: &str, repo: &str, page: u32) -> Result<Vec<ApiIssue>> {
-        self.list_issues_page(owner, repo, page).await
+    async fn list_issues_page(
+        &self,
+        owner: &str,
+        repo: &str,
+        page: u32,
+        if_none_match: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<ApiIssuesPageResult> {
+        self.list_issues_page_conditional(owner, repo, page, if_none_match, since)
+            .await
     }
 
     async fn list_comments(
@@ -118,34 +134,86 @@ where
     let repo_row = map_repo_to_row(&repo);
     crate::store::upsert_repo(_conn, &repo_row)?;
 
+    let stored_repo = crate::store::get_repo_by_slug(_conn, _owner, _repo)?;
+    let previous_cursor = stored_repo
+        .as_ref()
+        .and_then(|stored_repo| stored_repo.updated_at.clone());
+    let previous_etag = stored_repo
+        .as_ref()
+        .and_then(|stored_repo| stored_repo.etag.clone());
+
     let mut stats = SyncStats::default();
     let mut page = 1u32;
     let mut fetched_any_page = false;
+    let mut sync_completed = true;
+    let mut latest_seen_updated_at = previous_cursor.clone();
+    let mut first_page_etag = None;
     const PROGRESS_BATCH: usize = 10;
     loop {
-        let page_result = _client.list_issues_page(_owner, _repo, page).await;
-        let issues = match page_result {
-            Ok(issues) => {
+        let if_none_match = if page == 1 {
+            previous_etag.as_deref()
+        } else {
+            None
+        };
+        let page_result = _client
+            .list_issues_page(
+                _owner,
+                _repo,
+                page,
+                if_none_match,
+                previous_cursor.as_deref(),
+            )
+            .await;
+        let (issues, etag) = match page_result {
+            Ok(ApiIssuesPageResult::NotModified) => {
+                stats.not_modified = true;
+                return Ok(stats);
+            }
+            Ok(ApiIssuesPageResult::Page(page_result)) => {
                 fetched_any_page = true;
-                issues
+                (page_result.issues, page_result.etag)
             }
             Err(error) => {
                 if fetched_any_page {
+                    sync_completed = false;
                     break;
                 }
                 return Err(error);
             }
         };
+        if page == 1 {
+            first_page_etag = etag;
+        }
         if issues.is_empty() {
             break;
         }
         let mut persisted_since_update = 0usize;
         let mut emitted_for_page = false;
+        let mut reached_previous_cursor = false;
         for issue in issues {
+            if let (Some(cursor), Some(issue_updated_at)) =
+                (previous_cursor.as_deref(), issue.updated_at.as_deref())
+            {
+                if issue_updated_at < cursor {
+                    reached_previous_cursor = true;
+                    break;
+                }
+            }
+
             let row = match map_issue_to_row(repo_row.id, &issue) {
                 Some(row) => row,
                 None => continue,
             };
+
+            if let Some(updated_at) = row.updated_at.as_deref() {
+                let should_replace = latest_seen_updated_at
+                    .as_deref()
+                    .is_none_or(|current| updated_at > current);
+                if should_replace {
+                    latest_seen_updated_at = Some(updated_at.to_string());
+                }
+            }
+
             crate::store::upsert_issue(_conn, &row)?;
             stats.issues += 1;
             persisted_since_update += 1;
@@ -158,7 +226,20 @@ where
         if persisted_since_update > 0 || !emitted_for_page {
             _on_progress(page, &stats);
         }
+        if reached_previous_cursor {
+            break;
+        }
         page += 1;
+    }
+
+    if sync_completed {
+        let next_cursor = latest_seen_updated_at
+            .as_deref()
+            .or(previous_cursor.as_deref());
+        let next_etag = first_page_etag
+            .as_deref()
+            .or(previous_etag.as_deref());
+        crate::store::update_repo_sync_state(_conn, repo_row.id, next_cursor, next_etag)?;
     }
 
     Ok(stats)
@@ -170,8 +251,8 @@ mod tests {
         map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo, sync_repo_with_progress,
         GitHubApi,
     };
-    use crate::github::{ApiComment, ApiIssue, ApiLabel, ApiRepo, ApiUser};
-    use crate::store::{comments_for_issue, list_issues, open_db_at};
+    use crate::github::{ApiComment, ApiIssue, ApiIssuesPageResult, ApiLabel, ApiRepo, ApiUser};
+    use crate::store::{comments_for_issue, get_repo_by_slug, list_issues, open_db_at};
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::fs;
@@ -316,6 +397,8 @@ mod tests {
             comments: HashMap::new(),
             fail_issue_page: None,
             issue_page_size: 100,
+            page_etag: Some("etag-sync".to_string()),
+            not_modified_when_etag_matches: false,
         };
 
         let stats = sync_repo(&client, &conn, "acme", "glyph")
@@ -339,6 +422,8 @@ mod tests {
         comments: HashMap<i64, Vec<ApiComment>>,
         fail_issue_page: Option<u32>,
         issue_page_size: usize,
+        page_etag: Option<String>,
+        not_modified_when_etag_matches: bool,
     }
 
     #[async_trait]
@@ -359,7 +444,19 @@ mod tests {
             _owner: &str,
             _repo: &str,
             page: u32,
-        ) -> anyhow::Result<Vec<ApiIssue>> {
+            if_none_match: Option<&str>,
+            _since: Option<&str>,
+        ) -> anyhow::Result<ApiIssuesPageResult> {
+            if page == 1
+                && self.not_modified_when_etag_matches
+                && self
+                    .page_etag
+                    .as_deref()
+                    .is_some_and(|etag| Some(etag) == if_none_match)
+            {
+                return Ok(ApiIssuesPageResult::NotModified);
+            }
+
             if self.fail_issue_page.is_some_and(|fail_page| fail_page == page) {
                 return Err(anyhow::anyhow!("rate limit"));
             }
@@ -367,10 +464,16 @@ mod tests {
             let page_index = page.saturating_sub(1) as usize;
             let start = page_index.saturating_mul(self.issue_page_size);
             if start >= self.issues.len() {
-                return Ok(Vec::new());
+                return Ok(ApiIssuesPageResult::Page(crate::github::ApiIssuesPage {
+                    issues: Vec::new(),
+                    etag: self.page_etag.clone(),
+                }));
             }
             let end = (start + self.issue_page_size).min(self.issues.len());
-            Ok(self.issues[start..end].to_vec())
+            Ok(ApiIssuesPageResult::Page(crate::github::ApiIssuesPage {
+                issues: self.issues[start..end].to_vec(),
+                etag: self.page_etag.clone(),
+            }))
         }
 
         async fn list_comments(
@@ -457,6 +560,8 @@ mod tests {
             comments: HashMap::new(),
             fail_issue_page: Some(3),
             issue_page_size: 1,
+            page_etag: Some("etag-partial".to_string()),
+            not_modified_when_etag_matches: false,
         };
 
         let stats = sync_repo(&client, &conn, "acme", "glyph")
@@ -525,6 +630,8 @@ mod tests {
             comments: HashMap::new(),
             fail_issue_page: None,
             issue_page_size: 1,
+            page_etag: Some("etag-progress".to_string()),
+            not_modified_when_etag_matches: false,
         };
 
         let mut progress = Vec::new();
@@ -536,6 +643,190 @@ mod tests {
 
         assert_eq!(stats.issues, 2);
         assert_eq!(progress, vec![(1, 1), (2, 2)]);
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_repo_updates_repo_sync_cursor_after_success() {
+        let dir = unique_temp_dir("sync-cursor");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let issues = vec![
+            ApiIssue {
+                id: 10,
+                number: 1,
+                state: "open".to_string(),
+                title: "Issue 1".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+            ApiIssue {
+                id: 11,
+                number: 2,
+                state: "open".to_string(),
+                title: "Issue 2".to_string(),
+                body: Some("body".to_string()),
+                comments: 0,
+                updated_at: Some("2024-01-03T00:00:00Z".to_string()),
+                labels: Vec::new(),
+                assignees: Vec::new(),
+                user: ApiUser {
+                    login: "dev".to_string(),
+                    user_type: None,
+                },
+                pull_request: None,
+            },
+        ];
+        let client = FakeGitHub {
+            repo,
+            issues,
+            comments: HashMap::new(),
+            fail_issue_page: None,
+            issue_page_size: 100,
+            page_etag: Some("etag-cursor".to_string()),
+            not_modified_when_etag_matches: false,
+        };
+
+        sync_repo(&client, &conn, "acme", "glyph").await.expect("sync");
+
+        let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
+            .expect("lookup")
+            .expect("repo");
+        assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-03T00:00:00Z"));
+        assert_eq!(stored_repo.etag.as_deref(), Some("etag-cursor"));
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_repo_skips_fetch_when_etag_not_modified() {
+        let dir = unique_temp_dir("sync-not-modified");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let existing = crate::store::RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "glyph".to_string(),
+            updated_at: Some("2024-01-05T00:00:00Z".to_string()),
+            etag: Some("etag-stable".to_string()),
+        };
+        crate::store::upsert_repo(&conn, &existing).expect("seed repo state");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let client = FakeGitHub {
+            repo,
+            issues: Vec::new(),
+            comments: HashMap::new(),
+            fail_issue_page: None,
+            issue_page_size: 100,
+            page_etag: Some("etag-stable".to_string()),
+            not_modified_when_etag_matches: true,
+        };
+
+        let stats = sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
+        assert!(stats.not_modified);
+        assert_eq!(stats.issues, 0);
+
+        let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
+            .expect("lookup")
+            .expect("repo");
+        assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-05T00:00:00Z"));
+        assert_eq!(stored_repo.etag.as_deref(), Some("etag-stable"));
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_repo_does_not_advance_cursor_on_partial_failure() {
+        let dir = unique_temp_dir("sync-cursor-partial");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let existing = crate::store::RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "glyph".to_string(),
+            updated_at: Some("2024-01-01T00:00:00Z".to_string()),
+            etag: Some("etag-old".to_string()),
+        };
+        crate::store::upsert_repo(&conn, &existing).expect("seed repo state");
+
+        let repo = ApiRepo {
+            id: 1,
+            name: "glyph".to_string(),
+            owner: ApiUser {
+                login: "acme".to_string(),
+                user_type: None,
+            },
+        };
+        let issues = vec![ApiIssue {
+            id: 10,
+            number: 1,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: Some("body".to_string()),
+            comments: 0,
+            updated_at: Some("2024-01-03T00:00:00Z".to_string()),
+            labels: Vec::new(),
+            assignees: Vec::new(),
+            user: ApiUser {
+                login: "dev".to_string(),
+                user_type: None,
+            },
+            pull_request: None,
+        }];
+        let client = FakeGitHub {
+            repo,
+            issues,
+            comments: HashMap::new(),
+            fail_issue_page: Some(2),
+            issue_page_size: 1,
+            page_etag: Some("etag-new".to_string()),
+            not_modified_when_etag_matches: false,
+        };
+
+        let stats = sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
+        assert_eq!(stats.issues, 1);
+        assert!(!stats.not_modified);
+
+        let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
+            .expect("lookup")
+            .expect("repo");
+        assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-01T00:00:00Z"));
+        assert_eq!(stored_repo.etag.as_deref(), Some("etag-old"));
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
@@ -577,6 +868,8 @@ mod tests {
             comments: HashMap::new(),
             fail_issue_page: Some(2),
             issue_page_size: 1,
+            page_etag: Some("etag-pr-only".to_string()),
+            not_modified_when_etag_matches: false,
         };
 
         let stats = sync_repo(&client, &conn, "acme", "glyph")

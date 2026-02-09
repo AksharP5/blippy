@@ -657,6 +657,13 @@ fn handle_events(
                 {
                     refresh_current_repo_issues(app, conn)?;
                     let (open_count, closed_count) = app.issue_counts();
+                    if stats.not_modified {
+                        app.set_status(format!(
+                            "No issue changes (open: {}, closed: {})",
+                            open_count, closed_count
+                        ));
+                        continue;
+                    }
                     app.set_status(format!(
                         "Synced {} issues (open: {}, closed: {})",
                         stats.issues, open_count, closed_count

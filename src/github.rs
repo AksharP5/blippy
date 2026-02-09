@@ -1,5 +1,5 @@
 use anyhow::Result;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT};
 use serde::Deserialize;
 
 const API_BASE: &str = "https://api.github.com";
@@ -47,6 +47,18 @@ pub struct ApiRepo {
     pub owner: ApiUser,
 }
 
+#[derive(Debug, Clone)]
+pub struct ApiIssuesPage {
+    pub issues: Vec<ApiIssue>,
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ApiIssuesPageResult {
+    NotModified,
+    Page(ApiIssuesPage),
+}
+
 pub struct GitHubClient {
     client: reqwest::Client,
     token: String,
@@ -87,22 +99,55 @@ impl GitHubClient {
         repo: &str,
         page: u32,
     ) -> Result<Vec<ApiIssue>> {
+        let result = self
+            .list_issues_page_conditional(owner, repo, page, None, None)
+            .await?;
+        match result {
+            ApiIssuesPageResult::NotModified => Ok(Vec::new()),
+            ApiIssuesPageResult::Page(page) => Ok(page.issues),
+        }
+    }
+
+    pub async fn list_issues_page_conditional(
+        &self,
+        owner: &str,
+        repo: &str,
+        page: u32,
+        if_none_match: Option<&str>,
+        since: Option<&str>,
+    ) -> Result<ApiIssuesPageResult> {
         let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
-        let response = self
+        let mut request = self
             .client
             .get(url)
             .bearer_auth(&self.token)
             .query(&[
                 ("state", "all"),
-                ("sort", "created"),
+                ("sort", "updated"),
                 ("direction", "desc"),
                 ("per_page", "100"),
                 ("page", &page.to_string()),
-            ])
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(response.json::<Vec<ApiIssue>>().await?)
+            ]);
+        if let Some(value) = if_none_match {
+            request = request.header(IF_NONE_MATCH, value);
+        }
+        if let Some(value) = since {
+            request = request.query(&[("since", value)]);
+        }
+
+        let response = request.send().await?;
+        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(ApiIssuesPageResult::NotModified);
+        }
+
+        let response = response.error_for_status()?;
+        let etag = response
+            .headers()
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(ToString::to_string);
+        let issues = response.json::<Vec<ApiIssue>>().await?;
+        Ok(ApiIssuesPageResult::Page(ApiIssuesPage { issues, etag }))
     }
 
     pub async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>> {

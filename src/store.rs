@@ -72,8 +72,8 @@ pub fn upsert_repo(_conn: &Connection, _repo: &RepoRow) -> Result<()> {
         ON CONFLICT(id) DO UPDATE SET
             owner = excluded.owner,
             name = excluded.name,
-            updated_at = excluded.updated_at,
-            etag = excluded.etag
+            updated_at = COALESCE(excluded.updated_at, repos.updated_at),
+            etag = COALESCE(excluded.etag, repos.etag)
         ",
         (
             _repo.id,
@@ -82,6 +82,19 @@ pub fn upsert_repo(_conn: &Connection, _repo: &RepoRow) -> Result<()> {
             _repo.updated_at.as_deref(),
             _repo.etag.as_deref(),
         ),
+    )?;
+    Ok(())
+}
+
+pub fn update_repo_sync_state(
+    _conn: &Connection,
+    _repo_id: i64,
+    _updated_at: Option<&str>,
+    _etag: Option<&str>,
+) -> Result<()> {
+    _conn.execute(
+        "UPDATE repos SET updated_at = ?1, etag = ?2 WHERE id = ?3",
+        (_updated_at, _etag, _repo_id),
     )?;
     Ok(())
 }
@@ -973,6 +986,38 @@ mod tests {
         let found = get_repo_by_slug(&conn, "acme", "glyph").expect("lookup");
         assert!(found.is_some());
         assert_eq!(found.unwrap().id, 99);
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_repo_preserves_existing_sync_state_when_new_values_missing() {
+        let dir = unique_temp_dir("repo-sync-state");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let with_state = RepoRow {
+            id: 7,
+            owner: "acme".to_string(),
+            name: "glyph".to_string(),
+            updated_at: Some("2024-01-05T00:00:00Z".to_string()),
+            etag: Some("etag-1".to_string()),
+        };
+        upsert_repo(&conn, &with_state).expect("insert repo with sync state");
+
+        let without_state = RepoRow {
+            updated_at: None,
+            etag: None,
+            ..with_state
+        };
+        upsert_repo(&conn, &without_state).expect("upsert repo without sync state");
+
+        let repo = get_repo_by_slug(&conn, "acme", "glyph")
+            .expect("lookup")
+            .expect("repo");
+        assert_eq!(repo.etag.as_deref(), Some("etag-1"));
+        assert_eq!(repo.updated_at.as_deref(), Some("2024-01-05T00:00:00Z"));
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
