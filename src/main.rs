@@ -43,7 +43,7 @@ type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
 
 const AUTH_DEBUG_ENV: &str = "GLYPH_AUTH_DEBUG";
-const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(60);
+const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const COMMENT_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
 const COMMENT_CAP: i64 = 7_500;

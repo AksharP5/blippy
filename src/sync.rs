@@ -130,11 +130,17 @@ pub async fn sync_repo_with_progress<F>(
 where
     F: FnMut(u32, &SyncStats),
 {
-    let repo = _client.get_repo(_owner, _repo).await?;
-    let repo_row = map_repo_to_row(&repo);
-    crate::store::upsert_repo(_conn, &repo_row)?;
-
     let stored_repo = crate::store::get_repo_by_slug(_conn, _owner, _repo)?;
+    let repo_row = match stored_repo.as_ref() {
+        Some(repo_row) => repo_row.clone(),
+        None => {
+            let repo = _client.get_repo(_owner, _repo).await?;
+            let repo_row = map_repo_to_row(&repo);
+            crate::store::upsert_repo(_conn, &repo_row)?;
+            repo_row
+        }
+    };
+
     let previous_cursor = stored_repo
         .as_ref()
         .and_then(|stored_repo| stored_repo.updated_at.clone());
@@ -395,6 +401,7 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
             page_etag: Some("etag-sync".to_string()),
@@ -420,6 +427,7 @@ mod tests {
         repo: ApiRepo,
         issues: Vec<ApiIssue>,
         comments: HashMap<i64, Vec<ApiComment>>,
+        fail_get_repo: bool,
         fail_issue_page: Option<u32>,
         issue_page_size: usize,
         page_etag: Option<String>,
@@ -429,6 +437,9 @@ mod tests {
     #[async_trait]
     impl GitHubApi for FakeGitHub {
         async fn get_repo(&self, _owner: &str, _repo: &str) -> anyhow::Result<ApiRepo> {
+            if self.fail_get_repo {
+                return Err(anyhow::anyhow!("get repo failed"));
+            }
             Ok(ApiRepo {
                 id: self.repo.id,
                 name: self.repo.name.clone(),
@@ -558,6 +569,7 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: Some(3),
             issue_page_size: 1,
             page_etag: Some("etag-partial".to_string()),
@@ -628,6 +640,7 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 1,
             page_etag: Some("etag-progress".to_string()),
@@ -700,6 +713,7 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
             page_etag: Some("etag-cursor".to_string()),
@@ -745,6 +759,7 @@ mod tests {
             repo,
             issues: Vec::new(),
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
             page_etag: Some("etag-stable".to_string()),
@@ -762,6 +777,48 @@ mod tests {
             .expect("repo");
         assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-05T00:00:00Z"));
         assert_eq!(stored_repo.etag.as_deref(), Some("etag-stable"));
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sync_repo_uses_cached_repo_without_get_repo_call() {
+        let dir = unique_temp_dir("sync-cached-repo");
+        let db_path = dir.join("glyph.db");
+        let conn = open_db_at(&db_path).expect("open db");
+
+        let existing = crate::store::RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "glyph".to_string(),
+            updated_at: Some("2024-01-05T00:00:00Z".to_string()),
+            etag: Some("etag-stable".to_string()),
+        };
+        crate::store::upsert_repo(&conn, &existing).expect("seed repo state");
+
+        let client = FakeGitHub {
+            repo: ApiRepo {
+                id: 1,
+                name: "glyph".to_string(),
+                owner: ApiUser {
+                    login: "acme".to_string(),
+                    user_type: None,
+                },
+            },
+            issues: Vec::new(),
+            comments: HashMap::new(),
+            fail_get_repo: true,
+            fail_issue_page: None,
+            issue_page_size: 100,
+            page_etag: Some("etag-stable".to_string()),
+            not_modified_when_etag_matches: true,
+        };
+
+        let stats = sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
+        assert!(stats.not_modified);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
@@ -810,6 +867,7 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: Some(2),
             issue_page_size: 1,
             page_etag: Some("etag-new".to_string()),
@@ -866,6 +924,7 @@ mod tests {
             repo,
             issues,
             comments: HashMap::new(),
+            fail_get_repo: false,
             fail_issue_page: Some(2),
             issue_page_size: 1,
             page_etag: Some("etag-pr-only".to_string()),
