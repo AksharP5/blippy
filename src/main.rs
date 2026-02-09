@@ -162,6 +162,14 @@ fn run_app(
         }
 
         handle_events(app, conn, &event_rx)?;
+        drive_background_tasks(
+            app,
+            conn,
+            token,
+            event_tx.clone(),
+            &mut last_issue_poll,
+            &mut last_comment_poll,
+        )?;
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if app.should_quit() {
@@ -182,18 +190,37 @@ fn run_app(
         }
 
         handle_actions(app, conn, token, event_tx.clone())?;
-        maybe_start_issue_poll(app, &mut last_issue_poll);
-        maybe_start_repo_sync(app, token, event_tx.clone())?;
-        maybe_start_comment_poll(app, token, event_tx.clone(), &mut last_comment_poll)?;
-        if app.view() == View::RepoPicker && app.repos().is_empty() {
-            app.set_repos(load_repos(conn)?);
-        }
-        maybe_start_rescan(app, event_tx.clone())?;
+        drive_background_tasks(
+            app,
+            conn,
+            token,
+            event_tx.clone(),
+            &mut last_issue_poll,
+            &mut last_comment_poll,
+        )?;
 
         if last_tick.elapsed() >= tick_rate {
             last_tick = Instant::now();
         }
     }
+}
+
+fn drive_background_tasks(
+    app: &mut App,
+    conn: &rusqlite::Connection,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+    last_issue_poll: &mut Instant,
+    last_comment_poll: &mut Instant,
+) -> Result<()> {
+    maybe_start_issue_poll(app, last_issue_poll);
+    maybe_start_repo_sync(app, token, event_tx.clone())?;
+    maybe_start_comment_poll(app, token, event_tx.clone(), last_comment_poll)?;
+    if app.view() == View::RepoPicker && app.repos().is_empty() {
+        app.set_repos(load_repos(conn)?);
+    }
+    maybe_start_rescan(app, event_tx)?;
+    Ok(())
 }
 
 fn initialize_app(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
