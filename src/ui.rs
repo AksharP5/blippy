@@ -302,8 +302,10 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
         vertical: 1,
         horizontal: 1,
     });
+    let preview_content_width = preview_area.width.saturating_sub(2);
     let viewport_height = preview_area.height.saturating_sub(2) as usize;
-    let max_scroll = preview_lines.len().saturating_sub(viewport_height) as u16;
+    let total_lines = wrapped_line_count(&preview_lines, preview_content_width);
+    let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_issues_preview_max_scroll(max_scroll);
     let scroll = app.issues_preview_scroll();
     let preview_block = panel_block_with_border(&preview_title, focus_border(preview_focused));
@@ -329,11 +331,6 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     });
     let body_focused = app.focus() == Focus::IssueBody;
     let comments_focused = app.focus() == Focus::IssueRecentComments;
-    let focus_chip = if body_focused {
-        "focus: description"
-    } else {
-        "focus: recent comments"
-    };
     let (issue_number, issue_title, issue_state, body, assignees, labels, comment_count, updated_at) =
         match app.current_issue_row() {
             Some(issue) => (
@@ -378,14 +375,6 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                 Style::default()
                     .fg(Color::Black)
                     .bg(issue_state_color(issue_state.as_str()))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                focus_chip,
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Rgb(139, 148, 158))
                     .add_modifier(Modifier::BOLD),
             ),
             pending_issue_span(pending),
@@ -469,8 +458,10 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .constraints([Constraint::Min(0), Constraint::Length(comments_height)])
         .split(content_area);
 
-    let viewport_height = panes[0].height.saturating_sub(2) as usize;
-    let max_scroll = body_lines.len().saturating_sub(viewport_height) as u16;
+    let body_content_width = panes[0].width.saturating_sub(2);
+    let body_viewport_height = panes[0].height.saturating_sub(2) as usize;
+    let body_total_lines = wrapped_line_count(&body_lines, body_content_width);
+    let max_scroll = body_total_lines.saturating_sub(body_viewport_height) as u16;
     app.set_issue_detail_max_scroll(max_scroll);
     let scroll = app.issue_detail_scroll();
 
@@ -500,8 +491,10 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .scroll((scroll, 0));
     frame.render_widget(body_paragraph, panes[0]);
 
+    let comments_content_width = panes[1].width.saturating_sub(2);
     let comments_viewport = panes[1].height.saturating_sub(2) as usize;
-    let comments_max_scroll = comment_lines.len().saturating_sub(comments_viewport) as u16;
+    let comments_total_lines = wrapped_line_count(&comment_lines, comments_content_width);
+    let comments_max_scroll = comments_total_lines.saturating_sub(comments_viewport) as u16;
     app.set_issue_recent_comments_max_scroll(comments_max_scroll);
     let comments_scroll = app.issue_recent_comments_scroll();
     let comments_border = focus_border(comments_focused);
@@ -595,8 +588,10 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         }
     }
 
+    let comments_content_width = content_area.width.saturating_sub(2);
     let viewport_height = content_area.height.saturating_sub(2) as usize;
-    let max_scroll = lines.len().saturating_sub(viewport_height) as u16;
+    let total_lines = wrapped_line_count(&lines, comments_content_width);
+    let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_issue_comments_max_scroll(max_scroll);
     let scroll = app.issue_comments_scroll();
 
@@ -813,15 +808,6 @@ fn status_context(app: &App) -> String {
         (Some(owner), Some(repo)) => format!("{}/{}", owner, repo),
         _ => "no repo selected".to_string(),
     };
-    let focus = match app.view() {
-        View::Issues | View::IssueDetail => match app.focus() {
-            Focus::IssuesList => "issues list",
-            Focus::IssuesPreview => "issue preview",
-            Focus::IssueBody => "issue description",
-            Focus::IssueRecentComments => "recent comments",
-        },
-        _ => "n/a",
-    };
     let sync = if app.syncing() {
         "syncing"
     } else if app.comment_syncing() {
@@ -841,11 +827,11 @@ fn status_context(app: &App) -> String {
         let assignee = ellipsize(app.assignee_filter_label().as_str(), 18);
         let mode = if app.issue_search_mode() { "search" } else { "browse" };
         return format!(
-            "repo: {}  |  focus: {}  |  mode: {}  |  assignee: {}  |  query: {}  |  status: {}",
-            repo, focus, mode, assignee, query, sync
+            "repo: {}  |  mode: {}  |  assignee: {}  |  query: {}  |  status: {}",
+            repo, mode, assignee, query, sync
         );
     }
-    format!("repo: {}  |  focus: {}  |  status: {}", repo, focus, sync)
+    format!("repo: {}  |  status: {}", repo, sync)
 }
 
 fn list_state(selected: usize) -> ListState {
@@ -908,6 +894,25 @@ fn pending_issue_span(pending: Option<&str>) -> Span<'static> {
         ),
         None => Span::raw(String::new()),
     }
+}
+
+fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
+    if lines.is_empty() {
+        return 0;
+    }
+    let content_width = width.max(1) as usize;
+    lines
+        .iter()
+        .map(|line| {
+            let line_width = line
+                .spans
+                .iter()
+                .map(|span| span.content.chars().count())
+                .sum::<usize>()
+                .max(1);
+            line_width.div_ceil(content_width)
+        })
+        .sum()
 }
 
 fn ellipsize(input: &str, max: usize) -> String {
