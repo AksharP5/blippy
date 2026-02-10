@@ -1001,7 +1001,6 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     .unwrap_or_default();
                 for comment in target_right {
                     lines.push(render_inline_review_comment(
-                        comment.id,
                         comment.author.as_str(),
                         comment.body.as_str(),
                         ReviewSide::Right,
@@ -1023,7 +1022,6 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     .unwrap_or_default();
                 for comment in target_left {
                     lines.push(render_inline_review_comment(
-                        comment.id,
                         comment.author.as_str(),
                         comment.body.as_str(),
                         ReviewSide::Left,
@@ -1033,6 +1031,26 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                         right_width,
                         app.selected_pull_request_review_comment_id() == Some(comment.id),
                     ));
+                }
+            }
+
+            let unanchored = app.pull_request_unanchored_comments_for_path(file_name.as_str());
+            if !unanchored.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("Unanchored comments ({})", unanchored.len()),
+                    Style::default().fg(GITHUB_MUTED).add_modifier(Modifier::BOLD),
+                )));
+                for comment in unanchored {
+                    lines.push(Line::from(Span::styled(
+                        format!(
+                            "  [thread {}] @{} {}",
+                            comment.id,
+                            comment.author,
+                            ellipsize(comment.body.as_str(), panel_width.saturating_sub(18))
+                        ),
+                        Style::default().fg(POPUP_BORDER),
+                    )));
                 }
             }
         }
@@ -1518,34 +1536,30 @@ fn help_text(app: &App) -> String {
                 .is_some_and(|issue| issue.is_pr)
                 || app.work_item_mode() == crate::app::WorkItemMode::PullRequests;
             let mut parts = vec![
-                "Ctrl+h/j/k/l pane",
-                "j/k move/scroll",
-                "Ctrl+u/d page",
-                "gg/G top/bottom",
+                "j/k move",
+                "Enter open",
                 "/ search",
                 "p issues/prs",
                 "1/2 tabs",
-                "f cycle",
-                "a assignee filter",
+                "f open/closed",
+                "a assignee",
                 "l labels",
                 "Shift+A assignees",
                 "m comment",
                 "r refresh",
                 "o browser",
-                "Ctrl+y copy status",
-                "Ctrl+G repos",
                 "q quit",
             ];
             if reviewing_pr {
-                parts.insert(11, "u reopen pull request");
-                parts.insert(12, "dd close pull request");
-                parts.insert(13, "v checkout PR");
+                parts.insert(10, "u reopen");
+                parts.insert(11, "dd close");
+                parts.insert(12, "v checkout");
             } else {
-                parts.insert(11, "u reopen issue");
-                parts.insert(12, "dd close issue");
+                parts.insert(10, "u reopen");
+                parts.insert(11, "dd close");
                 if app.selected_issue_has_known_linked_pr() {
-                    parts.insert(13, "Shift+P open linked PR in TUI");
-                    parts.insert(14, "Shift+O open linked PR in browser");
+                    parts.insert(12, "Shift+P linked PR (TUI)");
+                    parts.insert(13, "Shift+O linked PR (web)");
                 }
             }
             parts.join(" • ")
@@ -1553,31 +1567,31 @@ fn help_text(app: &App) -> String {
         View::IssueDetail => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on description opens comments • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
+                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • r refresh • Esc back • q quit"
                     .to_string();
             }
             if app.selected_issue_has_known_linked_pr() {
-                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+P open linked PR in TUI • Shift+O open linked PR in browser • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
+                return "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • q quit"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
+            "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • q quit"
                 .to_string()
         }
         View::IssueComments => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
+                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • r refresh • Esc back • q quit"
                     .to_string();
             }
             if app.selected_issue_has_known_linked_pr() {
-                return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+P open linked PR in TUI • Shift+O open linked PR in browser • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
+                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • q quit"
                     .to_string();
             }
-            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
+            "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • q quit"
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l switch pane • j/k move file/line • Enter focus diff • h/l old/new side • Shift+V visual range • m add review comment • e edit comment • x delete comment • Shift+R resolve/reopen thread • n/p cycle comments at line • Ctrl+u/d page • gg/G top/bottom • v checkout PR • Esc back • r refresh changes/comments • o browser • Ctrl+y copy status • q quit"
+            "Ctrl+h/l pane • j/k move file/line • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc back • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1835,7 +1849,6 @@ fn render_split_diff_row(
 }
 
 fn render_inline_review_comment(
-    comment_id: i64,
     author: &str,
     body: &str,
     side: ReviewSide,
@@ -1850,13 +1863,12 @@ fn render_inline_review_comment(
         ReviewSide::Right => "new",
     };
     let prefix = if selected { ">" } else { " " };
-    let resolved_label = if resolved { "resolved" } else { "open" };
+    let resolved_label = if resolved { "done" } else { "open" };
     let text = format!(
-        "{} [{} {} #{} @{}] {}",
+        "{} [{} {} @{}] {}",
         prefix,
         side_label,
         resolved_label,
-        comment_id,
         author,
         ellipsize(body, width.saturating_sub(24))
     );
