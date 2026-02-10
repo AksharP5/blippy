@@ -5,6 +5,7 @@ use anyhow::Result;
 use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
 use crate::markdown;
+use crate::pr_diff::{parse_patch, DiffKind};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,8 @@ pub enum AppAction {
     EditIssueComment,
     DeleteIssueComment,
     SubmitEditedComment,
+    AddPullRequestReviewComment,
+    SubmitPullRequestReviewComment,
     EditLabels,
     EditAssignees,
     SubmitLabels,
@@ -65,6 +68,12 @@ pub enum Focus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestReviewFocus {
+    Files,
+    Diff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueFilter {
     Open,
     Closed,
@@ -83,6 +92,39 @@ pub struct PullRequestFile {
     pub additions: i64,
     pub deletions: i64,
     pub patch: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewSide {
+    Left,
+    Right,
+}
+
+impl ReviewSide {
+    pub fn as_api_side(self) -> &'static str {
+        match self {
+            Self::Left => "LEFT",
+            Self::Right => "RIGHT",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestReviewComment {
+    pub id: i64,
+    pub path: String,
+    pub line: i64,
+    pub side: ReviewSide,
+    pub body: String,
+    pub author: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestReviewTarget {
+    pub path: String,
+    pub line: i64,
+    pub side: ReviewSide,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,8 +252,10 @@ pub struct App {
     syncing: bool,
     comment_syncing: bool,
     pull_request_files_syncing: bool,
+    pull_request_review_comments_syncing: bool,
     comment_sync_requested: bool,
     pull_request_files_sync_requested: bool,
+    pull_request_review_comments_sync_requested: bool,
     sync_requested: bool,
     rescan_requested: bool,
     action: Option<AppAction>,
@@ -223,6 +267,13 @@ pub struct App {
     linked_pull_requests: HashMap<i64, Option<i64>>,
     pull_request_files_issue_id: Option<i64>,
     pull_request_files: Vec<PullRequestFile>,
+    pull_request_review_comments: Vec<PullRequestReviewComment>,
+    pull_request_review_focus: PullRequestReviewFocus,
+    selected_pull_request_file: usize,
+    selected_pull_request_diff_line: usize,
+    pull_request_diff_scroll: u16,
+    pull_request_diff_max_scroll: u16,
+    pending_review_target: Option<PullRequestReviewTarget>,
     pending_issue_actions: HashMap<i64, PendingIssueAction>,
     pending_g: bool,
     pending_d: bool,
@@ -277,8 +328,10 @@ impl App {
             syncing: false,
             comment_syncing: false,
             pull_request_files_syncing: false,
+            pull_request_review_comments_syncing: false,
             comment_sync_requested: false,
             pull_request_files_sync_requested: false,
+            pull_request_review_comments_sync_requested: false,
             sync_requested: false,
             rescan_requested: false,
             action: None,
@@ -290,6 +343,13 @@ impl App {
             linked_pull_requests: HashMap::new(),
             pull_request_files_issue_id: None,
             pull_request_files: Vec::new(),
+            pull_request_review_comments: Vec::new(),
+            pull_request_review_focus: PullRequestReviewFocus::Files,
+            selected_pull_request_file: 0,
+            selected_pull_request_diff_line: 0,
+            pull_request_diff_scroll: 0,
+            pull_request_diff_max_scroll: 0,
+            pending_review_target: None,
             pending_issue_actions: HashMap::new(),
             pending_g: false,
             pending_d: false,
@@ -639,8 +699,82 @@ impl App {
         self.pull_request_files_syncing
     }
 
+    pub fn pull_request_review_comments_syncing(&self) -> bool {
+        self.pull_request_review_comments_syncing
+    }
+
     pub fn pull_request_files(&self) -> &[PullRequestFile] {
         &self.pull_request_files
+    }
+
+    pub fn pull_request_review_comments(&self) -> &[PullRequestReviewComment] {
+        &self.pull_request_review_comments
+    }
+
+    pub fn pull_request_review_focus(&self) -> PullRequestReviewFocus {
+        self.pull_request_review_focus
+    }
+
+    pub fn selected_pull_request_file(&self) -> usize {
+        self.selected_pull_request_file
+    }
+
+    pub fn selected_pull_request_diff_line(&self) -> usize {
+        self.selected_pull_request_diff_line
+    }
+
+    pub fn pull_request_diff_scroll(&self) -> u16 {
+        self.pull_request_diff_scroll
+    }
+
+    pub fn selected_pull_request_file_row(&self) -> Option<&PullRequestFile> {
+        self.pull_request_files.get(self.selected_pull_request_file)
+    }
+
+    pub fn selected_pull_request_diff_rows_len(&self) -> usize {
+        let file = match self.selected_pull_request_file_row() {
+            Some(file) => file,
+            None => return 0,
+        };
+        parse_patch(file.patch.as_deref()).len()
+    }
+
+    pub fn selected_pull_request_review_target(&self) -> Option<PullRequestReviewTarget> {
+        let file = self.selected_pull_request_file_row()?;
+        let rows = parse_patch(file.patch.as_deref());
+        let row = rows.get(self.selected_pull_request_diff_line)?;
+        match row.kind {
+            DiffKind::Added | DiffKind::Context => Some(PullRequestReviewTarget {
+                path: file.filename.clone(),
+                line: row.new_line?,
+                side: ReviewSide::Right,
+            }),
+            DiffKind::Removed => Some(PullRequestReviewTarget {
+                path: file.filename.clone(),
+                line: row.old_line?,
+                side: ReviewSide::Left,
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn pull_request_comments_for_path_and_line(
+        &self,
+        path: &str,
+        side: ReviewSide,
+        line: i64,
+    ) -> Vec<&PullRequestReviewComment> {
+        self.pull_request_review_comments
+            .iter()
+            .filter(|comment| comment.path == path && comment.side == side && comment.line == line)
+            .collect::<Vec<&PullRequestReviewComment>>()
+    }
+
+    pub fn pull_request_comments_count_for_path(&self, path: &str) -> usize {
+        self.pull_request_review_comments
+            .iter()
+            .filter(|comment| comment.path == path)
+            .count()
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
@@ -744,6 +878,7 @@ impl App {
                 self.request_sync();
                 if self.current_view_issue_is_pull_request() {
                     self.request_pull_request_files_sync();
+                    self.request_pull_request_review_comments_sync();
                 }
                 self.status = "Syncing issue and comments...".to_string();
             }
@@ -789,10 +924,13 @@ impl App {
             KeyCode::Char('m')
                 if matches!(
                     self.view,
-                    View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                    View::Issues | View::IssueDetail | View::IssueComments
                 ) =>
             {
                 self.action = Some(AppAction::AddIssueComment);
+            }
+            KeyCode::Char('m') if self.view == View::PullRequestFiles => {
+                self.action = Some(AppAction::AddPullRequestReviewComment);
             }
             KeyCode::Char('e') if self.view == View::IssueComments => {
                 self.action = Some(AppAction::EditIssueComment);
@@ -919,6 +1057,9 @@ impl App {
         match self.view {
             View::Issues => self.focus = Focus::IssuesList,
             View::IssueDetail => self.focus = Focus::IssueBody,
+            View::PullRequestFiles => {
+                self.pull_request_review_focus = PullRequestReviewFocus::Files;
+            }
             _ => {
                 self.issue_search_mode = false;
                 if self.view != View::RepoPicker {
@@ -985,8 +1126,39 @@ impl App {
     pub fn set_pull_request_files(&mut self, issue_id: i64, files: Vec<PullRequestFile>) {
         self.pull_request_files_issue_id = Some(issue_id);
         self.pull_request_files = files;
-        self.issue_recent_comments_scroll = 0;
-        self.issue_recent_comments_max_scroll = 0;
+        self.selected_pull_request_file = 0;
+        self.selected_pull_request_diff_line = 0;
+        self.pull_request_diff_scroll = 0;
+        self.pull_request_diff_max_scroll = 0;
+        self.pull_request_review_focus = PullRequestReviewFocus::Files;
+    }
+
+    pub fn set_pull_request_review_comments(
+        &mut self,
+        mut comments: Vec<PullRequestReviewComment>,
+    ) {
+        comments.sort_by(|left, right| {
+            left.path
+                .cmp(&right.path)
+                .then(left.line.cmp(&right.line))
+                .then(left.id.cmp(&right.id))
+        });
+        self.pull_request_review_comments = comments;
+    }
+
+    pub fn set_pull_request_review_focus(&mut self, focus: PullRequestReviewFocus) {
+        self.pull_request_review_focus = focus;
+    }
+
+    pub fn set_pull_request_diff_max_scroll(&mut self, max_scroll: u16) {
+        self.pull_request_diff_max_scroll = max_scroll;
+        if self.pull_request_diff_scroll > max_scroll {
+            self.pull_request_diff_scroll = max_scroll;
+        }
+    }
+
+    pub fn set_pull_request_diff_scroll(&mut self, scroll: u16) {
+        self.pull_request_diff_scroll = scroll.min(self.pull_request_diff_max_scroll);
     }
 
     pub fn reset_issue_detail_scroll(&mut self) {
@@ -1054,6 +1226,10 @@ impl App {
         self.pull_request_files_syncing = syncing;
     }
 
+    pub fn set_pull_request_review_comments_syncing(&mut self, syncing: bool) {
+        self.pull_request_review_comments_syncing = syncing;
+    }
+
     pub fn request_comment_sync(&mut self) {
         self.comment_sync_requested = true;
     }
@@ -1071,6 +1247,16 @@ impl App {
     pub fn take_pull_request_files_sync_request(&mut self) -> bool {
         let requested = self.pull_request_files_sync_requested;
         self.pull_request_files_sync_requested = false;
+        requested
+    }
+
+    pub fn request_pull_request_review_comments_sync(&mut self) {
+        self.pull_request_review_comments_sync_requested = true;
+    }
+
+    pub fn take_pull_request_review_comments_sync_request(&mut self) -> bool {
+        let requested = self.pull_request_review_comments_sync_requested;
+        self.pull_request_review_comments_sync_requested = false;
         requested
     }
 
@@ -1093,6 +1279,12 @@ impl App {
         self.linked_pull_requests.clear();
         self.pull_request_files_issue_id = None;
         self.pull_request_files.clear();
+        self.pull_request_review_comments.clear();
+        self.selected_pull_request_file = 0;
+        self.selected_pull_request_diff_line = 0;
+        self.pull_request_diff_scroll = 0;
+        self.pull_request_diff_max_scroll = 0;
+        self.pull_request_review_focus = PullRequestReviewFocus::Files;
         self.repo_search_mode = false;
         self.assignee_filter = AssigneeFilter::All;
         self.work_item_mode = WorkItemMode::Issues;
@@ -1103,9 +1295,16 @@ impl App {
     pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
         self.current_issue_id = Some(issue_id);
         self.current_issue_number = Some(issue_number);
+        self.pending_review_target = None;
         if self.pull_request_files_issue_id != Some(issue_id) {
             self.pull_request_files_issue_id = None;
             self.pull_request_files.clear();
+            self.pull_request_review_comments.clear();
+            self.selected_pull_request_file = 0;
+            self.selected_pull_request_diff_line = 0;
+            self.pull_request_diff_scroll = 0;
+            self.pull_request_diff_max_scroll = 0;
+            self.pull_request_review_focus = PullRequestReviewFocus::Files;
         }
     }
 
@@ -1203,6 +1402,7 @@ impl App {
 
     pub fn open_issue_comment_editor(&mut self, return_view: View) {
         self.editing_comment_id = None;
+        self.pending_review_target = None;
         self.comment_editor.reset_for_comment();
         self.editor_cancel_view = return_view;
         self.set_view(View::CommentEditor);
@@ -1215,7 +1415,19 @@ impl App {
         body: &str,
     ) {
         self.editing_comment_id = Some(comment_id);
+        self.pending_review_target = None;
         self.comment_editor.reset_for_comment_edit(body);
+        self.editor_cancel_view = return_view;
+        self.set_view(View::CommentEditor);
+    }
+
+    pub fn open_pull_request_review_comment_editor(
+        &mut self,
+        return_view: View,
+        target: PullRequestReviewTarget,
+    ) {
+        self.pending_review_target = Some(target);
+        self.comment_editor.reset_for_pull_request_review_comment();
         self.editor_cancel_view = return_view;
         self.set_view(View::CommentEditor);
     }
@@ -1321,6 +1533,10 @@ impl App {
         self.editing_comment_id.take()
     }
 
+    pub fn take_pending_review_target(&mut self) -> Option<PullRequestReviewTarget> {
+        self.pending_review_target.take()
+    }
+
     pub fn current_issue_id(&self) -> Option<i64> {
         self.current_issue_id
     }
@@ -1388,8 +1604,17 @@ impl App {
                 self.jump_prev_comment();
             }
             View::PullRequestFiles => {
-                self.issue_recent_comments_scroll =
-                    self.issue_recent_comments_scroll.saturating_sub(1);
+                if self.pull_request_review_focus == PullRequestReviewFocus::Files {
+                    if self.selected_pull_request_file > 0 {
+                        self.selected_pull_request_file -= 1;
+                        self.selected_pull_request_diff_line = 0;
+                        self.pull_request_diff_scroll = 0;
+                    }
+                    return;
+                }
+                if self.selected_pull_request_diff_line > 0 {
+                    self.selected_pull_request_diff_line -= 1;
+                }
             }
             View::CommentPresetPicker => {
                 if self.preset_choice > 0 {
@@ -1464,9 +1689,21 @@ impl App {
                 self.jump_next_comment();
             }
             View::PullRequestFiles => {
-                let max = self.issue_recent_comments_max_scroll;
-                self.issue_recent_comments_scroll =
-                    self.issue_recent_comments_scroll.saturating_add(1).min(max);
+                if self.pull_request_review_focus == PullRequestReviewFocus::Files {
+                    if self.selected_pull_request_file + 1 < self.pull_request_files.len() {
+                        self.selected_pull_request_file += 1;
+                        self.selected_pull_request_diff_line = 0;
+                        self.pull_request_diff_scroll = 0;
+                    }
+                    return;
+                }
+                let rows_len = self.selected_pull_request_diff_rows_len();
+                if rows_len == 0 {
+                    return;
+                }
+                if self.selected_pull_request_diff_line + 1 < rows_len {
+                    self.selected_pull_request_diff_line += 1;
+                }
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -1537,7 +1774,11 @@ impl App {
                 self.set_view(View::IssueComments);
             }
             View::IssueComments => {}
-            View::PullRequestFiles => {}
+            View::PullRequestFiles => {
+                if self.pull_request_review_focus == PullRequestReviewFocus::Files {
+                    self.pull_request_review_focus = PullRequestReviewFocus::Diff;
+                }
+            }
             View::CommentPresetPicker => {
                 self.action = Some(AppAction::PickPreset);
             }
@@ -1572,7 +1813,14 @@ impl App {
                 self.issue_comments_scroll = 0;
             }
             View::PullRequestFiles => {
-                self.issue_recent_comments_scroll = 0;
+                if self.pull_request_review_focus == PullRequestReviewFocus::Files {
+                    self.selected_pull_request_file = 0;
+                    self.selected_pull_request_diff_line = 0;
+                    self.pull_request_diff_scroll = 0;
+                    return;
+                }
+                self.selected_pull_request_diff_line = 0;
+                self.pull_request_diff_scroll = 0;
             }
             View::CommentPresetPicker => self.preset_choice = 0,
             View::LabelPicker => {
@@ -1627,7 +1875,19 @@ impl App {
                 self.issue_comments_scroll = self.issue_comments_max_scroll;
             }
             View::PullRequestFiles => {
-                self.issue_recent_comments_scroll = self.issue_recent_comments_max_scroll;
+                if self.pull_request_review_focus == PullRequestReviewFocus::Files {
+                    if !self.pull_request_files.is_empty() {
+                        self.selected_pull_request_file = self.pull_request_files.len() - 1;
+                        self.selected_pull_request_diff_line = 0;
+                        self.pull_request_diff_scroll = 0;
+                    }
+                    return;
+                }
+                let rows_len = self.selected_pull_request_diff_rows_len();
+                if rows_len > 0 {
+                    self.selected_pull_request_diff_line = rows_len - 1;
+                    self.pull_request_diff_scroll = self.pull_request_diff_max_scroll;
+                }
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -1940,6 +2200,7 @@ impl App {
                 match key.code {
                     KeyCode::Esc => {
                         self.editing_comment_id = None;
+                        self.pending_review_target = None;
                         self.set_view(self.editor_cancel_view);
                     }
                     KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -1966,6 +2227,9 @@ impl App {
                         }
                         EditorMode::EditComment => {
                             self.action = Some(AppAction::SubmitEditedComment);
+                        }
+                        EditorMode::AddPullRequestReviewComment => {
+                            self.action = Some(AppAction::SubmitPullRequestReviewComment);
                         }
                         EditorMode::AddPreset => {
                             self.action = Some(AppAction::SavePreset);
@@ -2158,6 +2422,17 @@ impl App {
                 }
                 _ => false,
             },
+            View::PullRequestFiles => match code {
+                KeyCode::Char('h') | KeyCode::Char('k') => {
+                    self.pull_request_review_focus = PullRequestReviewFocus::Files;
+                    true
+                }
+                KeyCode::Char('l') | KeyCode::Char('j') => {
+                    self.pull_request_review_focus = PullRequestReviewFocus::Diff;
+                    true
+                }
+                _ => false,
+            },
             _ => false,
         }
     }
@@ -2191,6 +2466,7 @@ pub enum EditorMode {
     CloseIssue,
     AddComment,
     EditComment,
+    AddPullRequestReviewComment,
     AddPreset,
 }
 
@@ -2198,7 +2474,11 @@ impl EditorMode {
     fn allows_multiline(self) -> bool {
         matches!(
             self,
-            Self::CloseIssue | Self::AddComment | Self::EditComment | Self::AddPreset
+            Self::CloseIssue
+                | Self::AddComment
+                | Self::EditComment
+                | Self::AddPullRequestReviewComment
+                | Self::AddPreset
         )
     }
 }
@@ -2248,6 +2528,11 @@ impl CommentEditorState {
         self.text = body.to_string();
     }
 
+    pub fn reset_for_pull_request_review_comment(&mut self) {
+        self.mode = EditorMode::AddPullRequestReviewComment;
+        self.text.clear();
+    }
+
     pub fn reset_for_preset_name(&mut self) {
         self.mode = EditorMode::AddPreset;
         self.name.clear();
@@ -2277,7 +2562,18 @@ impl CommentEditorState {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, AppAction, Focus, IssueFilter, View, WorkItemMode};
+    use super::{
+        App,
+        AppAction,
+        Focus,
+        IssueFilter,
+        PullRequestFile,
+        PullRequestReviewFocus,
+        PullRequestReviewTarget,
+        ReviewSide,
+        View,
+        WorkItemMode,
+    };
     use crate::config::Config;
     use crate::store::{CommentRow, IssueRow, LocalRepoRow};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -2866,6 +3162,57 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
         assert_eq!(app.take_action(), Some(AppAction::AddIssueComment));
+    }
+
+    #[test]
+    fn m_triggers_pull_request_review_comment_in_review_view() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,2 @@\n-old\n+new\n+more".to_string()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::AddPullRequestReviewComment)
+        );
+        let target = app
+            .selected_pull_request_review_target()
+            .expect("review target");
+        assert_eq!(target.path, "src/main.rs");
+        assert_eq!(target.line, 1);
+        assert_eq!(target.side, ReviewSide::Left);
+    }
+
+    #[test]
+    fn review_comment_editor_submit_action_is_emitted() {
+        let mut app = App::new(Config::default());
+        app.open_pull_request_review_comment_editor(
+            View::PullRequestFiles,
+            PullRequestReviewTarget {
+                path: "src/main.rs".to_string(),
+                line: 10,
+                side: ReviewSide::Right,
+            },
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::SubmitPullRequestReviewComment)
+        );
     }
 
     #[test]

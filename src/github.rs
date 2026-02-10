@@ -56,6 +56,27 @@ pub struct ApiPullRequestFile {
     pub patch: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct ApiPullRequestHead {
+    pub sha: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ApiPullRequestSummary {
+    pub head: ApiPullRequestHead,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ApiPullRequestReviewComment {
+    pub id: i64,
+    pub path: String,
+    pub line: Option<i64>,
+    pub side: Option<String>,
+    pub body: Option<String>,
+    pub created_at: Option<String>,
+    pub user: ApiUser,
+}
+
 #[derive(Debug, Clone)]
 pub struct ApiIssuesPage {
     pub issues: Vec<ApiIssue>,
@@ -233,6 +254,87 @@ impl GitHubClient {
             page += 1;
         }
         Ok(files)
+    }
+
+    pub async fn pull_request_head_sha(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<String> {
+        let url = format!("{}/repos/{}/{}/pulls/{}", API_BASE, owner, repo, pull_number);
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .error_for_status()?;
+        let pull = response.json::<ApiPullRequestSummary>().await?;
+        Ok(pull.head.sha)
+    }
+
+    pub async fn list_pull_request_review_comments(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<Vec<ApiPullRequestReviewComment>> {
+        let mut page = 1;
+        let mut comments = Vec::new();
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/pulls/{}/comments",
+                API_BASE, owner, repo, pull_number
+            );
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let batch = response.json::<Vec<ApiPullRequestReviewComment>>().await?;
+            if batch.is_empty() {
+                break;
+            }
+            comments.extend(batch);
+            page += 1;
+        }
+        Ok(comments)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_pull_request_review_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+        commit_id: &str,
+        path: &str,
+        line: i64,
+        side: &str,
+        body: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/comments",
+            API_BASE, owner, repo, pull_number
+        );
+        self.client
+            .post(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({
+                "body": body,
+                "commit_id": commit_id,
+                "path": path,
+                "line": line,
+                "side": side,
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 
     pub async fn find_linked_pull_request(

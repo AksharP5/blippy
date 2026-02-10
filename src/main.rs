@@ -6,6 +6,7 @@ mod discovery;
 mod git;
 mod github;
 mod markdown;
+mod pr_diff;
 mod repo_index;
 mod sync;
 mod store;
@@ -31,6 +32,8 @@ use crate::app::{
     PendingIssueAction,
     PresetSelection,
     PullRequestFile,
+    PullRequestReviewComment,
+    ReviewSide,
     View,
     WorkItemMode,
 };
@@ -168,6 +171,7 @@ fn run_app(
             ) {
                 app.set_comment_syncing(false);
                 app.set_pull_request_files_syncing(false);
+                app.set_pull_request_review_comments_syncing(false);
             }
             last_view = app.view();
             last_issue_poll = Instant::now();
@@ -230,6 +234,7 @@ fn drive_background_tasks(
     maybe_start_repo_sync(app, token, event_tx.clone())?;
     maybe_start_comment_poll(app, token, event_tx.clone(), last_comment_poll)?;
     maybe_start_pull_request_files_sync(app, token, event_tx.clone())?;
+    maybe_start_pull_request_review_comments_sync(app, token, event_tx.clone())?;
     if app.view() == View::RepoPicker && app.repos().is_empty() {
         app.set_repos(load_repos(conn)?);
     }
@@ -318,6 +323,7 @@ fn handle_actions(
             app.request_comment_sync();
             if is_pr {
                 app.request_pull_request_files_sync();
+                app.request_pull_request_review_comments_sync();
             } else if !app.linked_pull_request_known(issue_number) {
                 if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                     start_linked_pull_request_lookup(
@@ -378,6 +384,20 @@ fn handle_actions(
         }
         AppAction::DeleteIssueComment => {
             delete_issue_comment(app, token, event_tx.clone())?;
+        }
+        AppAction::AddPullRequestReviewComment => {
+            let target = match app.selected_pull_request_review_target() {
+                Some(target) => target,
+                None => {
+                    app.set_status("Select a diff line to comment on".to_string());
+                    return Ok(());
+                }
+            };
+            app.open_pull_request_review_comment_editor(app.view(), target);
+        }
+        AppAction::SubmitPullRequestReviewComment => {
+            let comment = app.editor().text().to_string();
+            submit_pull_request_review_comment(app, token, comment, event_tx.clone())?;
         }
         AppAction::EditLabels => {
             let return_view = app.view();
@@ -600,6 +620,64 @@ fn update_issue_comment(
     );
     app.set_view(app.editor_cancel_view());
     app.set_status("Updating comment...".to_string());
+    Ok(())
+}
+
+fn submit_pull_request_review_comment(
+    app: &mut App,
+    token: &str,
+    body: String,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    if body.trim().is_empty() {
+        app.set_status("Review comment cannot be empty".to_string());
+        return Ok(());
+    }
+
+    let target = match app.take_pending_review_target() {
+        Some(target) => target,
+        None => {
+            app.set_status("No review target selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let pull_number = match issue_number(app) {
+        Some(pull_number) => pull_number,
+        None => {
+            app.set_status("No pull request selected".to_string());
+            return Ok(());
+        }
+    };
+    let issue_id = match app.current_issue_id() {
+        Some(issue_id) => issue_id,
+        None => {
+            app.set_status("No pull request selected".to_string());
+            return Ok(());
+        }
+    };
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_create_pull_request_review_comment(
+        owner,
+        repo,
+        issue_id,
+        pull_number,
+        target.path,
+        target.line,
+        target.side,
+        token.to_string(),
+        body,
+        event_tx,
+    );
+    app.set_view(app.editor_cancel_view());
+    app.set_status("Submitting review comment...".to_string());
     Ok(())
 }
 
@@ -1153,6 +1231,7 @@ fn open_pull_request_in_tui(
         app.set_comment_syncing(false);
         app.request_comment_sync();
         app.request_pull_request_files_sync();
+        app.request_pull_request_review_comments_sync();
         return Ok(true);
     }
 
@@ -1466,6 +1545,31 @@ fn handle_events(
                     app.set_status(format!("PR files unavailable: {}", message));
                 }
             }
+            AppEvent::PullRequestReviewCommentsUpdated { issue_id, comments } => {
+                app.set_pull_request_review_comments_syncing(false);
+                if app.current_issue_id() == Some(issue_id) {
+                    let count = comments.len();
+                    app.set_pull_request_review_comments(comments);
+                    app.set_status(format!("Loaded {} review comments", count));
+                }
+            }
+            AppEvent::PullRequestReviewCommentsFailed { issue_id, message } => {
+                app.set_pull_request_review_comments_syncing(false);
+                if app.current_issue_id() == Some(issue_id) {
+                    app.set_status(format!("PR review comments unavailable: {}", message));
+                }
+            }
+            AppEvent::PullRequestReviewCommentCreated { issue_id } => {
+                if app.current_issue_id() == Some(issue_id) {
+                    app.request_pull_request_review_comments_sync();
+                    app.set_status("Review comment submitted".to_string());
+                }
+            }
+            AppEvent::PullRequestReviewCommentCreateFailed { issue_id, message } => {
+                if app.current_issue_id() == Some(issue_id) {
+                    app.set_status(format!("Review comment failed: {}", message));
+                }
+            }
             AppEvent::LinkedPullRequestResolved {
                 issue_number,
                 pull_number,
@@ -1605,6 +1709,21 @@ enum AppEvent {
         files: Vec<PullRequestFile>,
     },
     PullRequestFilesFailed {
+        issue_id: i64,
+        message: String,
+    },
+    PullRequestReviewCommentsUpdated {
+        issue_id: i64,
+        comments: Vec<PullRequestReviewComment>,
+    },
+    PullRequestReviewCommentsFailed {
+        issue_id: i64,
+        message: String,
+    },
+    PullRequestReviewCommentCreated {
+        issue_id: i64,
+    },
+    PullRequestReviewCommentCreateFailed {
         issue_id: i64,
         message: String,
     },
@@ -1757,6 +1876,48 @@ fn maybe_start_pull_request_files_sync(
     );
     app.set_pull_request_files_syncing(true);
     app.set_status("Loading pull request changes...".to_string());
+    Ok(())
+}
+
+fn maybe_start_pull_request_review_comments_sync(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    if !matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
+        return Ok(());
+    }
+    if app.pull_request_review_comments_syncing() {
+        return Ok(());
+    }
+    if !app.take_pull_request_review_comments_sync_request() {
+        return Ok(());
+    }
+    if !app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+        return Ok(());
+    }
+
+    let (owner, repo, issue_id, issue_number) = match (
+        app.current_owner(),
+        app.current_repo(),
+        app.current_issue_id(),
+        app.current_issue_number(),
+    ) {
+        (Some(owner), Some(repo), Some(issue_id), Some(issue_number)) => {
+            (owner.to_string(), repo.to_string(), issue_id, issue_number)
+        }
+        _ => return Ok(()),
+    };
+
+    start_pull_request_review_comments_sync(
+        owner,
+        repo,
+        issue_id,
+        issue_number,
+        token.to_string(),
+        event_tx,
+    );
+    app.set_pull_request_review_comments_syncing(true);
     Ok(())
 }
 
@@ -1975,6 +2136,166 @@ fn start_pull_request_files_sync(
             issue_id,
             files: mapped,
         });
+    });
+}
+
+fn start_pull_request_review_comments_sync(
+    owner: String,
+    repo: String,
+    issue_id: i64,
+    pull_number: i64,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .list_pull_request_review_comments(&owner, &repo, pull_number)
+                .await
+        });
+
+        let comments = match result {
+            Ok(comments) => comments,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let mapped = comments
+            .into_iter()
+            .filter_map(|comment| {
+                let line = comment.line?;
+                let side_value = comment.side.unwrap_or_else(|| "RIGHT".to_string());
+                let side = if side_value.eq_ignore_ascii_case("left") {
+                    ReviewSide::Left
+                } else {
+                    ReviewSide::Right
+                };
+                Some(PullRequestReviewComment {
+                    id: comment.id,
+                    path: comment.path,
+                    line,
+                    side,
+                    body: comment.body.unwrap_or_default(),
+                    author: comment.user.login,
+                    created_at: comment.created_at,
+                })
+            })
+            .collect::<Vec<PullRequestReviewComment>>();
+        let _ = event_tx.send(AppEvent::PullRequestReviewCommentsUpdated {
+            issue_id,
+            comments: mapped,
+        });
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_create_pull_request_review_comment(
+    owner: String,
+    repo: String,
+    issue_id: i64,
+    pull_number: i64,
+    path: String,
+    line: i64,
+    side: ReviewSide,
+    token: String,
+    body: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let head_sha = runtime.block_on(async {
+            client
+                .pull_request_head_sha(&owner, &repo, pull_number)
+                .await
+        });
+        let head_sha = match head_sha {
+            Ok(head_sha) => head_sha,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let created = runtime.block_on(async {
+            client
+                .create_pull_request_review_comment(
+                    &owner,
+                    &repo,
+                    pull_number,
+                    head_sha.as_str(),
+                    path.as_str(),
+                    line,
+                    side.as_api_side(),
+                    body.as_str(),
+                )
+                .await
+        });
+        match created {
+            Ok(()) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreated { issue_id });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+            }
+        }
     });
 }
 
