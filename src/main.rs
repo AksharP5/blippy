@@ -2455,15 +2455,16 @@ fn start_pull_request_review_comments_sync(
                         .in_reply_to_id
                         .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
                 });
-            let (line, side, path) = match anchor {
-                Some(anchor) => anchor,
-                None => continue,
+            let (line, side, path, anchored) = match anchor {
+                Some((line, side, path)) => (line, side, path, true),
+                None => (0, ReviewSide::Right, comment.path.clone(), false),
             };
 
             mapped.push(PullRequestReviewComment {
                 id: comment.id,
                 thread_id: comment.thread_id,
                 resolved: comment.is_resolved,
+                anchored,
                 path,
                 line,
                 side,

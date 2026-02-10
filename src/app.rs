@@ -118,6 +118,7 @@ pub struct PullRequestReviewComment {
     pub id: i64,
     pub thread_id: Option<String>,
     pub resolved: bool,
+    pub anchored: bool,
     pub path: String,
     pub line: i64,
     pub side: ReviewSide,
@@ -794,7 +795,22 @@ impl App {
     ) -> Vec<&PullRequestReviewComment> {
         self.pull_request_review_comments
             .iter()
-            .filter(|comment| comment.path == path && comment.side == side && comment.line == line)
+            .filter(|comment| {
+                comment.anchored
+                    && comment.path == path
+                    && comment.side == side
+                    && comment.line == line
+            })
+            .collect::<Vec<&PullRequestReviewComment>>()
+    }
+
+    pub fn pull_request_unanchored_comments_for_path(
+        &self,
+        path: &str,
+    ) -> Vec<&PullRequestReviewComment> {
+        self.pull_request_review_comments
+            .iter()
+            .filter(|comment| !comment.anchored && comment.path == path)
             .collect::<Vec<&PullRequestReviewComment>>()
     }
 
@@ -811,7 +827,8 @@ impl App {
             .pull_request_review_comments
             .iter()
             .filter(|comment| {
-                comment.path == target.path
+                comment.anchored
+                    && comment.path == target.path
                     && comment.side == target.side
                     && comment.line == target.line
             })
@@ -1010,9 +1027,7 @@ impl App {
             KeyCode::Char('x') if self.view == View::PullRequestFiles => {
                 self.action = Some(AppAction::DeletePullRequestReviewComment);
             }
-            KeyCode::Char('R')
-                if self.view == View::PullRequestFiles
-                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
+            KeyCode::Char('R') if self.view == View::PullRequestFiles =>
             {
                 self.action = Some(AppAction::ResolvePullRequestReviewComment);
             }
@@ -1034,9 +1049,7 @@ impl App {
                     self.sync_selected_pull_request_review_comment();
                 }
             }
-            KeyCode::Char('V')
-                if self.view == View::PullRequestFiles
-                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
+            KeyCode::Char('V') if self.view == View::PullRequestFiles =>
             {
                 self.toggle_pull_request_visual_mode();
             }
@@ -2231,7 +2244,8 @@ impl App {
             .pull_request_review_comments
             .iter()
             .filter(|comment| {
-                comment.path == target.path
+                comment.anchored
+                    && comment.path == target.path
                     && comment.side == target.side
                     && comment.line == target.line
             })
