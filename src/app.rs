@@ -73,6 +73,15 @@ pub enum WorkItemMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestFile {
+    pub filename: String,
+    pub status: String,
+    pub additions: i64,
+    pub deletions: i64,
+    pub patch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssigneeFilter {
     All,
     Unassigned,
@@ -196,7 +205,9 @@ pub struct App {
     scanning: bool,
     syncing: bool,
     comment_syncing: bool,
+    pull_request_files_syncing: bool,
     comment_sync_requested: bool,
+    pull_request_files_sync_requested: bool,
     sync_requested: bool,
     rescan_requested: bool,
     action: Option<AppAction>,
@@ -205,6 +216,8 @@ pub struct App {
     current_repo_path: Option<String>,
     current_issue_id: Option<i64>,
     current_issue_number: Option<i64>,
+    pull_request_files_issue_id: Option<i64>,
+    pull_request_files: Vec<PullRequestFile>,
     pending_issue_actions: HashMap<i64, PendingIssueAction>,
     pending_g: bool,
     pending_d: bool,
@@ -258,7 +271,9 @@ impl App {
             scanning: false,
             syncing: false,
             comment_syncing: false,
+            pull_request_files_syncing: false,
             comment_sync_requested: false,
+            pull_request_files_sync_requested: false,
             sync_requested: false,
             rescan_requested: false,
             action: None,
@@ -267,6 +282,8 @@ impl App {
             current_repo_path: None,
             current_issue_id: None,
             current_issue_number: None,
+            pull_request_files_issue_id: None,
+            pull_request_files: Vec::new(),
             pending_issue_actions: HashMap::new(),
             pending_g: false,
             pending_d: false,
@@ -566,6 +583,14 @@ impl App {
         self.comment_syncing
     }
 
+    pub fn pull_request_files_syncing(&self) -> bool {
+        self.pull_request_files_syncing
+    }
+
+    pub fn pull_request_files(&self) -> &[PullRequestFile] {
+        &self.pull_request_files
+    }
+
     pub fn on_key(&mut self, key: KeyEvent) {
         if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
             self.handle_editor_key(key);
@@ -661,6 +686,9 @@ impl App {
             {
                 self.request_comment_sync();
                 self.request_sync();
+                if self.current_view_issue_is_pull_request() {
+                    self.request_pull_request_files_sync();
+                }
                 self.status = "Syncing issue and comments...".to_string();
             }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
@@ -850,6 +878,13 @@ impl App {
         self.issue_recent_comments_max_scroll = 0;
     }
 
+    pub fn set_pull_request_files(&mut self, issue_id: i64, files: Vec<PullRequestFile>) {
+        self.pull_request_files_issue_id = Some(issue_id);
+        self.pull_request_files = files;
+        self.issue_recent_comments_scroll = 0;
+        self.issue_recent_comments_max_scroll = 0;
+    }
+
     pub fn reset_issue_detail_scroll(&mut self) {
         self.issue_detail_scroll = 0;
     }
@@ -911,6 +946,10 @@ impl App {
         self.comment_syncing = syncing;
     }
 
+    pub fn set_pull_request_files_syncing(&mut self, syncing: bool) {
+        self.pull_request_files_syncing = syncing;
+    }
+
     pub fn request_comment_sync(&mut self) {
         self.comment_sync_requested = true;
     }
@@ -918,6 +957,16 @@ impl App {
     pub fn take_comment_sync_request(&mut self) -> bool {
         let requested = self.comment_sync_requested;
         self.comment_sync_requested = false;
+        requested
+    }
+
+    pub fn request_pull_request_files_sync(&mut self) {
+        self.pull_request_files_sync_requested = true;
+    }
+
+    pub fn take_pull_request_files_sync_request(&mut self) -> bool {
+        let requested = self.pull_request_files_sync_requested;
+        self.pull_request_files_sync_requested = false;
         requested
     }
 
@@ -937,6 +986,8 @@ impl App {
         self.current_repo_path = path.map(ToString::to_string);
         self.current_issue_id = None;
         self.current_issue_number = None;
+        self.pull_request_files_issue_id = None;
+        self.pull_request_files.clear();
         self.repo_search_mode = false;
         self.assignee_filter = AssigneeFilter::All;
         self.work_item_mode = WorkItemMode::Issues;
@@ -947,6 +998,10 @@ impl App {
     pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
         self.current_issue_id = Some(issue_id);
         self.current_issue_number = Some(issue_number);
+        if self.pull_request_files_issue_id != Some(issue_id) {
+            self.pull_request_files_issue_id = None;
+            self.pull_request_files.clear();
+        }
     }
 
     pub fn update_issue_state_by_number(&mut self, issue_number: i64, state: &str) {
@@ -1513,6 +1568,13 @@ impl App {
 
         self.current_issue_row()
             .is_some_and(|issue| issue.state.eq_ignore_ascii_case("closed"))
+    }
+
+    fn current_view_issue_is_pull_request(&self) -> bool {
+        if self.view == View::Issues {
+            return self.selected_issue_row().is_some_and(|issue| issue.is_pr);
+        }
+        self.current_issue_row().is_some_and(|issue| issue.is_pr)
     }
 
     fn rebuild_issue_filter(&mut self) {
@@ -2229,6 +2291,30 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::CheckoutPullRequest));
+    }
+
+    #[test]
+    fn r_requests_pull_request_files_sync_for_pr_detail() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueDetail);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 10,
+            state: "open".to_string(),
+            title: "PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        }]);
+        app.set_current_issue(1, 10);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+        assert!(app.take_pull_request_files_sync_request());
     }
 
     #[test]

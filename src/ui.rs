@@ -559,13 +559,51 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         }
     }
 
-    let mut comment_lines = Vec::new();
-    if app.comments().is_empty() {
-        comment_lines.push(Line::from("No comments cached yet."));
+    let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
+    let mut side_lines = Vec::new();
+    if is_pr {
+        if app.pull_request_files_syncing() {
+            side_lines.push(Line::from("Loading pull request changes..."));
+        } else if app.pull_request_files().is_empty() {
+            side_lines.push(Line::from("No changed files cached yet. Press r to refresh."));
+        } else {
+            for file in app.pull_request_files() {
+                side_lines.push(Line::from(vec![
+                    Span::styled(file_status_symbol(file.status.as_str()), Style::default().fg(file_status_color(file.status.as_str()))),
+                    Span::raw(" "),
+                    Span::styled(file.filename.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                ]));
+                side_lines.push(
+                    Line::from(format!(
+                        "  +{} -{}",
+                        file.additions,
+                        file.deletions
+                    ))
+                    .style(Style::default().fg(GITHUB_MUTED)),
+                );
+                if let Some(patch) = file.patch.as_deref() {
+                    for patch_line in patch.lines().take(8) {
+                        side_lines.push(
+                            Line::from(format!("  {}", ellipsize(patch_line, 100)))
+                                .style(Style::default().fg(GITHUB_MUTED)),
+                        );
+                    }
+                    if patch.lines().count() > 8 {
+                        side_lines.push(
+                            Line::from("  ...")
+                                .style(Style::default().fg(GITHUB_MUTED)),
+                        );
+                    }
+                }
+                side_lines.push(Line::from(""));
+            }
+        }
+    } else if app.comments().is_empty() {
+        side_lines.push(Line::from("No comments cached yet."));
     } else {
         let start = app.comments().len().saturating_sub(3);
         for (index, comment) in app.comments()[start..].iter().enumerate() {
-            comment_lines.push(comment_header(
+            side_lines.push(comment_header(
                 start + index + 1,
                 comment.author.as_str(),
                 comment.created_at.as_deref(),
@@ -573,13 +611,13 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             ));
             let rendered_comment = markdown::render(comment.body.as_str());
             if rendered_comment.lines.is_empty() {
-                comment_lines.push(Line::from(""));
+                side_lines.push(Line::from(""));
             } else {
                 for line in rendered_comment.lines {
-                    comment_lines.push(line);
+                    side_lines.push(line);
                 }
             }
-            comment_lines.push(Line::from(""));
+            side_lines.push(Line::from(""));
         }
     }
 
@@ -627,17 +665,21 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .scroll((scroll, 0));
     frame.render_widget(body_paragraph, panes[0]);
 
-    let comments_content_width = panes[1].width.saturating_sub(2);
-    let comments_viewport = panes[1].height.saturating_sub(2) as usize;
-    let comments_total_lines = wrapped_line_count(&comment_lines, comments_content_width);
-    let comments_max_scroll = comments_total_lines.saturating_sub(comments_viewport) as u16;
-    app.set_issue_recent_comments_max_scroll(comments_max_scroll);
-    let comments_scroll = app.issue_recent_comments_scroll();
-    let comments_border = focus_border(comments_focused);
-    let comments_title = format!("Recent comments ({})", app.comments().len());
-    let comment_block = Block::default()
+    let side_content_width = panes[1].width.saturating_sub(2);
+    let side_viewport = panes[1].height.saturating_sub(2) as usize;
+    let side_total_lines = wrapped_line_count(&side_lines, side_content_width);
+    let side_max_scroll = side_total_lines.saturating_sub(side_viewport) as u16;
+    app.set_issue_recent_comments_max_scroll(side_max_scroll);
+    let side_scroll = app.issue_recent_comments_scroll();
+    let side_border = focus_border(comments_focused);
+    let side_title = if is_pr {
+        format!("Changed files ({})", app.pull_request_files().len())
+    } else {
+        format!("Recent comments ({})", app.comments().len())
+    };
+    let side_block = Block::default()
         .title(Line::from(Span::styled(
-            comments_title,
+            side_title,
             Style::default()
                 .fg(if comments_focused {
                     GITHUB_BLUE
@@ -653,17 +695,17 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         } else {
             GITHUB_PANEL
         }))
-        .border_style(Style::default().fg(comments_border));
-    let comment_paragraph = Paragraph::new(Text::from(comment_lines))
-        .block(comment_block)
+        .border_style(Style::default().fg(side_border));
+    let side_paragraph = Paragraph::new(Text::from(side_lines))
+        .block(side_block)
         .style(Style::default().fg(Color::White).bg(if comments_focused {
             GITHUB_PANEL_ALT
         } else {
             GITHUB_PANEL
         }))
         .wrap(Wrap { trim: false })
-        .scroll((comments_scroll, 0));
-    frame.render_widget(comment_paragraph, panes[1]);
+        .scroll((side_scroll, 0));
+    frame.render_widget(side_paragraph, panes[1]);
 
     draw_status(frame, app, footer);
 }
@@ -1192,6 +1234,8 @@ fn status_context(app: &App) -> String {
     };
     let sync = if app.syncing() {
         "syncing"
+    } else if app.pull_request_files_syncing() {
+        "loading pr files"
     } else if app.comment_syncing() {
         "syncing comments"
     } else if app.scanning() {
@@ -1262,6 +1306,38 @@ fn issue_state_color(state: &str) -> Color {
         return GITHUB_RED;
     }
     GITHUB_GREEN
+}
+
+fn file_status_symbol(status: &str) -> &'static str {
+    if status.eq_ignore_ascii_case("added") {
+        return "+";
+    }
+    if status.eq_ignore_ascii_case("removed") {
+        return "-";
+    }
+    if status.eq_ignore_ascii_case("renamed") {
+        return "R";
+    }
+    if status.eq_ignore_ascii_case("modified") {
+        return "M";
+    }
+    "*"
+}
+
+fn file_status_color(status: &str) -> Color {
+    if status.eq_ignore_ascii_case("added") {
+        return GITHUB_GREEN;
+    }
+    if status.eq_ignore_ascii_case("removed") {
+        return GITHUB_RED;
+    }
+    if status.eq_ignore_ascii_case("renamed") {
+        return Color::Rgb(33, 136, 255);
+    }
+    if status.eq_ignore_ascii_case("modified") {
+        return Color::Rgb(210, 153, 34);
+    }
+    GITHUB_MUTED
 }
 
 fn pending_issue_span(pending: Option<&str>) -> Span<'static> {

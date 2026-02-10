@@ -24,7 +24,7 @@ use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::app::{App, AppAction, PendingIssueAction, PresetSelection, View};
+use crate::app::{App, AppAction, PendingIssueAction, PresetSelection, PullRequestFile, View};
 use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
 use crate::cli::{parse_args, CliCommand};
 use crate::config::Config;
@@ -155,6 +155,7 @@ fn run_app(
         if app.view() != last_view {
             if matches!(last_view, View::IssueDetail | View::IssueComments) {
                 app.set_comment_syncing(false);
+                app.set_pull_request_files_syncing(false);
             }
             last_view = app.view();
             last_issue_poll = Instant::now();
@@ -216,6 +217,7 @@ fn drive_background_tasks(
     maybe_start_issue_poll(app, last_issue_poll);
     maybe_start_repo_sync(app, token, event_tx.clone())?;
     maybe_start_comment_poll(app, token, event_tx.clone(), last_comment_poll)?;
+    maybe_start_pull_request_files_sync(app, token, event_tx.clone())?;
     if app.view() == View::RepoPicker && app.repos().is_empty() {
         app.set_repos(load_repos(conn)?);
     }
@@ -292,8 +294,8 @@ fn handle_actions(
             app.request_sync();
         }
         AppAction::PickIssue => {
-            let (issue_id, issue_number) = match app.selected_issue_row() {
-                Some(issue) => (issue.id, issue.number),
+            let (issue_id, issue_number, is_pr) = match app.selected_issue_row() {
+                Some(issue) => (issue.id, issue.number, issue.is_pr),
                 None => return Ok(()),
             };
             app.set_current_issue(issue_id, issue_number);
@@ -302,6 +304,9 @@ fn handle_actions(
             app.set_view(View::IssueDetail);
             app.set_comment_syncing(false);
             app.request_comment_sync();
+            if is_pr {
+                app.request_pull_request_files_sync();
+            }
         }
         AppAction::OpenInBrowser => {
             if let Some(url) = issue_url(app) {
@@ -1094,6 +1099,20 @@ fn handle_events(
                 app.set_status(format!("#{} assignees updated", issue_number));
                 app.request_sync();
             }
+            AppEvent::PullRequestFilesUpdated { issue_id, files } => {
+                app.set_pull_request_files_syncing(false);
+                if app.current_issue_id() == Some(issue_id) {
+                    let count = files.len();
+                    app.set_pull_request_files(issue_id, files);
+                    app.set_status(format!("Loaded {} changed files", count));
+                }
+            }
+            AppEvent::PullRequestFilesFailed { issue_id, message } => {
+                app.set_pull_request_files_syncing(false);
+                if app.current_issue_id() == Some(issue_id) {
+                    app.set_status(format!("PR files unavailable: {}", message));
+                }
+            }
             AppEvent::IssueCommentUpdated {
                 issue_number,
                 comment_id,
@@ -1149,6 +1168,14 @@ enum AppEvent {
     SyncFailed { owner: String, repo: String, message: String },
     CommentsUpdated { issue_id: i64, count: usize },
     CommentsFailed { issue_id: i64, message: String },
+    PullRequestFilesUpdated {
+        issue_id: i64,
+        files: Vec<PullRequestFile>,
+    },
+    PullRequestFilesFailed {
+        issue_id: i64,
+        message: String,
+    },
     IssueUpdated { issue_number: i64, message: String },
     IssueLabelsUpdated { issue_number: i64, labels: String },
     IssueAssigneesUpdated { issue_number: i64, assignees: String },
@@ -1241,6 +1268,49 @@ fn maybe_start_comment_poll(
     start_comment_sync(owner, repo, issue_id, issue_number, token.to_string(), event_tx);
     app.set_comment_syncing(true);
     *last_poll = Instant::now();
+    Ok(())
+}
+
+fn maybe_start_pull_request_files_sync(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    if !matches!(app.view(), View::IssueDetail | View::IssueComments) {
+        return Ok(());
+    }
+    if app.pull_request_files_syncing() {
+        return Ok(());
+    }
+    if !app.take_pull_request_files_sync_request() {
+        return Ok(());
+    }
+    if !app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+        return Ok(());
+    }
+
+    let (owner, repo, issue_id, issue_number) = match (
+        app.current_owner(),
+        app.current_repo(),
+        app.current_issue_id(),
+        app.current_issue_number(),
+    ) {
+        (Some(owner), Some(repo), Some(issue_id), Some(issue_number)) => {
+            (owner.to_string(), repo.to_string(), issue_id, issue_number)
+        }
+        _ => return Ok(()),
+    };
+
+    start_pull_request_files_sync(
+        owner,
+        repo,
+        issue_id,
+        issue_number,
+        token.to_string(),
+        event_tx,
+    );
+    app.set_pull_request_files_syncing(true);
+    app.set_status("Loading pull request changes...".to_string());
     Ok(())
 }
 
@@ -1395,6 +1465,70 @@ fn start_comment_sync(
         let _ = prune_comments(&conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
 
         let _ = event_tx.send(AppEvent::CommentsUpdated { issue_id, count });
+    });
+}
+
+fn start_pull_request_files_sync(
+    owner: String,
+    repo: String,
+    issue_id: i64,
+    issue_number: i64,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let result = runtime
+            .block_on(async { client.list_pull_request_files(&owner, &repo, issue_number).await });
+
+        let files = match result {
+            Ok(files) => files,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let mapped = files
+            .into_iter()
+            .map(|file| PullRequestFile {
+                filename: file.filename,
+                status: file.status,
+                additions: file.additions,
+                deletions: file.deletions,
+                patch: file.patch,
+            })
+            .collect::<Vec<PullRequestFile>>();
+        let _ = event_tx.send(AppEvent::PullRequestFilesUpdated {
+            issue_id,
+            files: mapped,
+        });
     });
 }
 

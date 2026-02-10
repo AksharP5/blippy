@@ -47,6 +47,15 @@ pub struct ApiRepo {
     pub owner: ApiUser,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct ApiPullRequestFile {
+    pub filename: String,
+    pub status: String,
+    pub additions: i64,
+    pub deletions: i64,
+    pub patch: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ApiIssuesPage {
     pub issues: Vec<ApiIssue>,
@@ -193,6 +202,37 @@ impl GitHubClient {
             page += 1;
         }
         Ok(comments)
+    }
+
+    pub async fn list_pull_request_files(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<Vec<ApiPullRequestFile>> {
+        let mut page = 1;
+        let mut files = Vec::new();
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/pulls/{}/files",
+                API_BASE, owner, repo, pull_number
+            );
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let batch = response.json::<Vec<ApiPullRequestFile>>().await?;
+            if batch.is_empty() {
+                break;
+            }
+            files.extend(batch);
+            page += 1;
+        }
+        Ok(files)
     }
 
     pub async fn create_comment(

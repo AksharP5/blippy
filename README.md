@@ -99,6 +99,7 @@ cargo test
 - j/k: jump next/previous comment in full comments view
 - e: edit selected comment in full comments view
 - x: delete selected comment in full comments view
+- PR detail: right pane shows changed files + patch snippets (no checkout required)
 - b or Esc: back from issue detail/comments
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
 
