@@ -21,17 +21,17 @@ const GITHUB_GREEN: Color = Color::Rgb(74, 222, 128);
 const GITHUB_RED: Color = Color::Rgb(234, 92, 124);
 const GITHUB_VIOLET: Color = Color::Rgb(145, 171, 255);
 const GITHUB_BG: Color = Color::Rgb(0, 0, 0);
-const GITHUB_PANEL: Color = Color::Rgb(8, 11, 20);
-const GITHUB_PANEL_ALT: Color = Color::Rgb(11, 16, 28);
+const GITHUB_PANEL: Color = Color::Rgb(0, 0, 0);
+const GITHUB_PANEL_ALT: Color = Color::Rgb(0, 0, 0);
 const GITHUB_MUTED: Color = Color::Rgb(124, 138, 175);
 const PANEL_BORDER: Color = Color::Rgb(35, 50, 88);
 const FOCUS_BORDER: Color = Color::Rgb(105, 138, 255);
 const POPUP_BORDER: Color = Color::Rgb(128, 160, 255);
-const POPUP_BG: Color = Color::Rgb(6, 9, 18);
+const POPUP_BG: Color = Color::Rgb(0, 0, 0);
 const OVERLAY_BG: Color = Color::Rgb(0, 0, 0);
 const TEXT_PRIMARY: Color = Color::Rgb(226, 235, 255);
-const SELECT_BG: Color = Color::Rgb(22, 36, 72);
-const VISUAL_RANGE_BG: Color = Color::Rgb(15, 25, 52);
+const SELECT_BG: Color = Color::Rgb(12, 24, 54);
+const VISUAL_RANGE_BG: Color = Color::Rgb(7, 15, 36);
 const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
@@ -249,9 +249,8 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
             Span::styled(
                 item_label,
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(GITHUB_BLUE)
-                    .add_modifier(Modifier::BOLD),
+                    .fg(GITHUB_BLUE)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             ),
             Span::raw("  "),
             Span::styled("(p toggle)", Style::default().fg(GITHUB_MUTED)),
@@ -261,9 +260,8 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                 Span::styled(
                     assignee.clone(),
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(GITHUB_BLUE)
-                        .add_modifier(Modifier::BOLD),
+                        .fg(GITHUB_BLUE)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                 )
             } else {
                 Span::styled(assignee.clone(), Style::default().fg(GITHUB_MUTED))
@@ -528,10 +526,9 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
             Span::raw("  "),
             Span::styled(
-                issue_state.clone(),
+                format!("[{}]", issue_state),
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(issue_state_color(issue_state.as_str()))
+                    .fg(issue_state_color(issue_state.as_str()))
                     .add_modifier(Modifier::BOLD),
             ),
             pending_issue_span(pending),
@@ -1733,14 +1730,13 @@ fn filter_tab(label: &str, count: usize, active: bool, color: Color) -> Span<'st
     let text = format!("{} ({})", label, count);
     if active {
         return Span::styled(
-            text,
+            format!("[{}]", text),
             Style::default()
-                .fg(Color::Black)
-                .bg(color)
-                .add_modifier(Modifier::BOLD),
+                .fg(color)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         );
     }
-    Span::styled(text, Style::default().fg(color))
+    Span::styled(text, Style::default().fg(GITHUB_MUTED))
 }
 
 fn issue_state_color(state: &str) -> Color {
@@ -1989,8 +1985,7 @@ fn pending_issue_span(pending: Option<&str>) -> Span<'static> {
         Some(label) => Span::styled(
             format!("  [{}]", label),
             Style::default()
-                .fg(Color::Black)
-                .bg(GITHUB_VIOLET)
+                .fg(GITHUB_VIOLET)
                 .add_modifier(Modifier::BOLD),
         ),
         None => Span::raw(String::new()),
