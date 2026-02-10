@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT};
 use serde::Deserialize;
 
@@ -69,6 +69,8 @@ pub struct ApiPullRequestSummary {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiPullRequestReviewComment {
     pub id: i64,
+    pub thread_id: Option<String>,
+    pub is_resolved: bool,
     pub path: String,
     pub line: Option<i64>,
     pub side: Option<String>,
@@ -280,29 +282,148 @@ impl GitHubClient {
         repo: &str,
         pull_number: i64,
     ) -> Result<Vec<ApiPullRequestReviewComment>> {
-        let mut page = 1;
+        let query = r#"
+            query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  reviewThreads(first: 100, after: $cursor) {
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
+                    nodes {
+                      id
+                      isResolved
+                      comments(first: 100) {
+                        nodes {
+                          databaseId
+                          path
+                          line
+                          side
+                          body
+                          createdAt
+                          author {
+                            login
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        "#;
+
+        let mut cursor: Option<String> = None;
         let mut comments = Vec::new();
         loop {
-            let url = format!(
-                "{}/repos/{}/{}/pulls/{}/comments",
-                API_BASE, owner, repo, pull_number
-            );
-            let response = self
-                .client
-                .get(url)
-                .bearer_auth(&self.token)
-                .query(&[("per_page", "100"), ("page", &page.to_string())])
-                .send()
-                .await?
-                .error_for_status()?;
-            let batch = response.json::<Vec<ApiPullRequestReviewComment>>().await?;
-            if batch.is_empty() {
+            let payload = serde_json::json!({
+                "owner": owner,
+                "repo": repo,
+                "number": pull_number,
+                "cursor": cursor,
+            });
+            let response = self.graphql(query, payload).await?;
+            let pull_request = &response["data"]["repository"]["pullRequest"];
+            if pull_request.is_null() {
                 break;
             }
-            comments.extend(batch);
-            page += 1;
+            let threads = pull_request["reviewThreads"]["nodes"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            for thread in threads {
+                let thread_id = thread
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string);
+                let is_resolved = thread
+                    .get("isResolved")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+
+                let thread_comments = thread["comments"]["nodes"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                for comment in thread_comments {
+                    let id = match comment
+                        .get("databaseId")
+                        .and_then(serde_json::Value::as_i64)
+                    {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    let path = match comment.get("path").and_then(serde_json::Value::as_str) {
+                        Some(path) => path.to_string(),
+                        None => continue,
+                    };
+                    let author = comment
+                        .get("author")
+                        .and_then(|author| author.get("login"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let created_at = comment
+                        .get("createdAt")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToString::to_string);
+                    comments.push(ApiPullRequestReviewComment {
+                        id,
+                        thread_id: thread_id.clone(),
+                        is_resolved,
+                        path,
+                        line: comment.get("line").and_then(serde_json::Value::as_i64),
+                        side: comment
+                            .get("side")
+                            .and_then(serde_json::Value::as_str)
+                            .map(ToString::to_string),
+                        body: comment
+                            .get("body")
+                            .and_then(serde_json::Value::as_str)
+                            .map(ToString::to_string),
+                        created_at,
+                        user: ApiUser {
+                            login: author,
+                            user_type: None,
+                        },
+                    });
+                }
+            }
+
+            let has_next_page = pull_request["reviewThreads"]["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .unwrap_or(false);
+            if !has_next_page {
+                break;
+            }
+            cursor = pull_request["reviewThreads"]["pageInfo"]["endCursor"]
+                .as_str()
+                .map(ToString::to_string);
         }
         Ok(comments)
+    }
+
+    pub async fn set_pull_request_review_thread_resolved(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        thread_id: &str,
+        resolved: bool,
+    ) -> Result<()> {
+        let mutation = if resolved {
+            "mutation($threadId: ID!) { resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } } }"
+        } else {
+            "mutation($threadId: ID!) { unresolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } } }"
+        };
+        self.graphql(
+            mutation,
+            serde_json::json!({
+                "threadId": thread_id,
+            }),
+        )
+        .await?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -385,6 +506,25 @@ impl GitHubClient {
             .await?
             .error_for_status()?;
         Ok(())
+    }
+
+    async fn graphql(&self, query: &str, variables: serde_json::Value) -> Result<serde_json::Value> {
+        let response = self
+            .client
+            .post(format!("{}/graphql", API_BASE))
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({
+                "query": query,
+                "variables": variables,
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+        let payload = response.json::<serde_json::Value>().await?;
+        if let Some(errors) = payload.get("errors") {
+            return Err(anyhow!("graphql error: {}", errors));
+        }
+        Ok(payload)
     }
 
     pub async fn find_linked_pull_request(

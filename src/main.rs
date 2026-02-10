@@ -418,7 +418,7 @@ fn handle_actions(
             delete_pull_request_review_comment(app, token, event_tx.clone())?;
         }
         AppAction::ResolvePullRequestReviewComment => {
-            resolve_pull_request_review_comment_local(app)?;
+            resolve_pull_request_review_comment(app, token, event_tx.clone())?;
         }
         AppAction::SubmitEditedPullRequestReviewComment => {
             let comment = app.editor().text().to_string();
@@ -796,7 +796,11 @@ fn delete_pull_request_review_comment(
     Ok(())
 }
 
-fn resolve_pull_request_review_comment_local(app: &mut App) -> Result<()> {
+fn resolve_pull_request_review_comment(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
     let comment = match app.selected_pull_request_review_comment() {
         Some(comment) => comment,
         None => {
@@ -804,7 +808,43 @@ fn resolve_pull_request_review_comment_local(app: &mut App) -> Result<()> {
             return Ok(());
         }
     };
-    app.toggle_pull_request_review_comment_resolved_local(comment.id);
+    let thread_id = match comment.thread_id.clone() {
+        Some(thread_id) => thread_id,
+        None => {
+            app.set_status("Selected comment has no resolvable thread".to_string());
+            return Ok(());
+        }
+    };
+    let issue_id = match app.current_issue_id() {
+        Some(issue_id) => issue_id,
+        None => {
+            app.set_status("No pull request selected".to_string());
+            return Ok(());
+        }
+    };
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let resolve = !comment.resolved;
+    start_toggle_pull_request_review_thread_resolution(
+        owner,
+        repo,
+        issue_id,
+        thread_id,
+        resolve,
+        token.to_string(),
+        event_tx,
+    );
+    if resolve {
+        app.set_status("Resolving review thread...".to_string());
+        return Ok(());
+    }
+    app.set_status("Reopening review thread...".to_string());
     Ok(())
 }
 
@@ -1460,7 +1500,7 @@ fn load_issues_for_slug(
         Some(repo_row) => repo_row,
         None => {
             app.set_issues(Vec::new());
-            app.set_status("No cached issues yet. Syncing...".to_string());
+            app.set_status("No cached issues yet. Press r to sync.".to_string());
             app.request_sync();
             return Ok(());
         }
@@ -1726,6 +1766,21 @@ fn handle_events(
                     app.set_status(format!("Review comment delete failed: {}", message));
                 }
             }
+            AppEvent::PullRequestReviewThreadResolutionUpdated { issue_id, resolved } => {
+                if app.current_issue_id() == Some(issue_id) {
+                    app.request_pull_request_review_comments_sync();
+                    if resolved {
+                        app.set_status("Review thread resolved".to_string());
+                    } else {
+                        app.set_status("Review thread reopened".to_string());
+                    }
+                }
+            }
+            AppEvent::PullRequestReviewThreadResolutionFailed { issue_id, message } => {
+                if app.current_issue_id() == Some(issue_id) {
+                    app.set_status(format!("Review thread resolution failed: {}", message));
+                }
+            }
             AppEvent::LinkedPullRequestResolved {
                 issue_number,
                 pull_number,
@@ -1897,6 +1952,14 @@ enum AppEvent {
         comment_id: i64,
     },
     PullRequestReviewCommentDeleteFailed {
+        issue_id: i64,
+        message: String,
+    },
+    PullRequestReviewThreadResolutionUpdated {
+        issue_id: i64,
+        resolved: bool,
+    },
+    PullRequestReviewThreadResolutionFailed {
         issue_id: i64,
         message: String,
     },
@@ -2374,6 +2437,8 @@ fn start_pull_request_review_comments_sync(
                 };
                 Some(PullRequestReviewComment {
                     id: comment.id,
+                    thread_id: comment.thread_id,
+                    resolved: comment.is_resolved,
                     path: comment.path,
                     line,
                     side,
@@ -2580,6 +2645,67 @@ fn start_delete_pull_request_review_comment(
             }
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleteFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+            }
+        }
+    });
+}
+
+fn start_toggle_pull_request_review_thread_resolution(
+    owner: String,
+    repo: String,
+    issue_id: i64,
+    thread_id: String,
+    resolve: bool,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .set_pull_request_review_thread_resolved(
+                    &owner,
+                    &repo,
+                    thread_id.as_str(),
+                    resolve,
+                )
+                .await
+        });
+        match result {
+            Ok(()) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionUpdated {
+                    issue_id,
+                    resolved: resolve,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
                     issue_id,
                     message: error.to_string(),
                 });

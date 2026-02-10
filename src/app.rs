@@ -116,6 +116,8 @@ impl ReviewSide {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestReviewComment {
     pub id: i64,
+    pub thread_id: Option<String>,
+    pub resolved: bool,
     pub path: String,
     pub line: i64,
     pub side: ReviewSide,
@@ -283,7 +285,6 @@ pub struct App {
     pull_request_visual_mode: bool,
     pull_request_visual_anchor: Option<usize>,
     selected_pull_request_review_comment_id: Option<i64>,
-    hidden_pull_request_review_comment_ids: HashSet<i64>,
     editing_pull_request_review_comment_id: Option<i64>,
     pending_review_target: Option<PullRequestReviewTarget>,
     pending_issue_actions: HashMap<i64, PendingIssueAction>,
@@ -365,7 +366,6 @@ impl App {
             pull_request_visual_mode: false,
             pull_request_visual_anchor: None,
             selected_pull_request_review_comment_id: None,
-            hidden_pull_request_review_comment_ids: HashSet::new(),
             editing_pull_request_review_comment_id: None,
             pending_review_target: None,
             pending_issue_actions: HashMap::new(),
@@ -811,10 +811,7 @@ impl App {
             .pull_request_review_comments
             .iter()
             .filter(|comment| {
-                !self
-                    .hidden_pull_request_review_comment_ids
-                    .contains(&comment.id)
-                    && comment.path == target.path
+                comment.path == target.path
                     && comment.side == target.side
                     && comment.line == target.line
             })
@@ -827,21 +824,6 @@ impl App {
             }
         }
         comments.first().copied()
-    }
-
-    pub fn is_pull_request_review_comment_hidden(&self, comment_id: i64) -> bool {
-        self.hidden_pull_request_review_comment_ids
-            .contains(&comment_id)
-    }
-
-    pub fn toggle_pull_request_review_comment_resolved_local(&mut self, comment_id: i64) {
-        if self.hidden_pull_request_review_comment_ids.contains(&comment_id) {
-            self.hidden_pull_request_review_comment_ids.remove(&comment_id);
-            self.status = "Review comment marked unresolved".to_string();
-            return;
-        }
-        self.hidden_pull_request_review_comment_ids.insert(comment_id);
-        self.status = "Review comment resolved locally".to_string();
     }
 
     pub fn update_pull_request_review_comment_body_by_id(
@@ -1426,7 +1408,6 @@ impl App {
         self.pull_request_visual_mode = false;
         self.pull_request_visual_anchor = None;
         self.selected_pull_request_review_comment_id = None;
-        self.hidden_pull_request_review_comment_ids.clear();
         self.editing_pull_request_review_comment_id = None;
         self.pending_review_target = None;
         self.repo_search_mode = false;
@@ -1453,7 +1434,6 @@ impl App {
             self.pull_request_visual_mode = false;
             self.pull_request_visual_anchor = None;
             self.selected_pull_request_review_comment_id = None;
-            self.hidden_pull_request_review_comment_ids.clear();
             self.editing_pull_request_review_comment_id = None;
         }
     }
@@ -2251,10 +2231,7 @@ impl App {
             .pull_request_review_comments
             .iter()
             .filter(|comment| {
-                !self
-                    .hidden_pull_request_review_comment_ids
-                    .contains(&comment.id)
-                    && comment.path == target.path
+                comment.path == target.path
                     && comment.side == target.side
                     && comment.line == target.line
             })
@@ -3556,6 +3533,19 @@ mod tests {
         assert_eq!(
             app.take_action(),
             Some(AppAction::SubmitPullRequestReviewComment)
+        );
+    }
+
+    #[test]
+    fn shift_r_triggers_resolve_review_comment_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::ResolvePullRequestReviewComment)
         );
     }
 
