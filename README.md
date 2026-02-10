@@ -78,7 +78,7 @@ cargo test
 - Ctrl+R: rescan repos
 - / in repo picker: search repos (owner/repo/path/remote)
 - Ctrl+h/j/k/l: switch focus between panes (issues list/preview, issue description/recent comments)
-- j/k or arrow keys: move or scroll focused pane
+- j/k: move or scroll focused pane
 - Ctrl+u / Ctrl+d: page up/down in focused pane
 - gg/G: jump top/bottom in focused pane
 - f: cycle issue filter (open/closed)
@@ -94,7 +94,7 @@ cargo test
 - o: open in browser
 - dd: close issue with preset
 - c: open full comments from issue detail
-- j/k or arrow keys: jump next/previous comment in full comments view
+- j/k: jump next/previous comment in full comments view
 - e: edit selected comment in full comments view
 - x: delete selected comment in full comments view
 - b or Esc: back from issue detail/comments

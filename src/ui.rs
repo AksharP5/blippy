@@ -1072,11 +1072,11 @@ fn help_text(app: &App) -> String {
                 return "Search repos: type query • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+R rescan • j/k or ↑/↓ move • Ctrl+u/d page • gg/G top/bottom • / search • Enter select • q quit"
+            "Ctrl+R rescan • j/k move • Ctrl+u/d page • gg/G top/bottom • / search • Enter select • q quit"
                 .to_string()
         }
         View::RemoteChooser => {
-            "j/k or ↑/↓ move • gg/G top/bottom • Enter select • Ctrl+G repos • q quit"
+            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::Issues => {
@@ -1084,7 +1084,7 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • 1/2 tabs • f cycle • a assignee filter • l labels • Shift+A assignees • m comment • u reopen • dd close issue • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • 1/2 tabs • f cycle • a assignee filter • l labels • Shift+A assignees • m comment • u reopen • dd close issue • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
@@ -1092,15 +1092,15 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • dd close issue • l labels • Shift+A assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
+            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • dd close issue • l labels • Shift+A assignees • m comment • u reopen • Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::LabelPicker => {
-            "Type to filter • j/k or ↑/↓ move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
+            "Type to filter • j/k move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
                 .to_string()
         }
         View::AssigneePicker => {
-            "Type to filter • j/k or ↑/↓ move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
+            "Type to filter • j/k move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
                 .to_string()
         }
         View::CommentPresetPicker => {
