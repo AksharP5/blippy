@@ -201,6 +201,18 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
 
     let visible_issues = app.issues_for_view();
     let (open_count, closed_count) = app.issue_counts();
+    let item_mode = app.work_item_mode();
+    let item_label = item_mode.label();
+    let list_title = if item_mode == crate::app::WorkItemMode::PullRequests {
+        "Pull request list"
+    } else {
+        "Issue list"
+    };
+    let preview_title_text = if item_mode == crate::app::WorkItemMode::PullRequests {
+        "Pull request preview"
+    } else {
+        "Issue preview"
+    };
     let query = app.issue_query().trim();
     let query_label = if app.issue_search_mode() {
         query.to_string()
@@ -212,10 +224,21 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let query_display = ellipsize(query_label.as_str(), 64);
     let assignee = app.assignee_filter_label();
     let visible_count = visible_issues.len();
-    let total_count = app.issues().len();
+    let total_count = open_count + closed_count;
     let header_text = Text::from(vec![
         issue_tabs_line(app.issue_filter(), open_count, closed_count),
         Line::from(vec![
+            Span::styled("mode: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled(
+                item_label,
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(GITHUB_BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("(p toggle)", Style::default().fg(GITHUB_MUTED)),
+            Span::raw("  "),
             Span::styled("assignee: ", Style::default().fg(GITHUB_MUTED)),
             if app.has_assignee_filter() {
                 Span::styled(
@@ -273,12 +296,22 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
 
     let list_focused = app.focus() == Focus::IssuesList;
     let preview_focused = app.focus() == Focus::IssuesPreview;
-    let block = panel_block_with_border("Issue list", focus_border(list_focused));
+    let block = panel_block_with_border(list_title, focus_border(list_focused));
     let items = if visible_issues.is_empty() {
         if app.issues().is_empty() {
-            vec![ListItem::new("No cached issues yet. Run `glyph sync`.")]
+            let message = if item_mode == crate::app::WorkItemMode::PullRequests {
+                "No cached pull requests yet. Syncing..."
+            } else {
+                "No cached issues yet. Syncing..."
+            };
+            vec![ListItem::new(message)]
         } else {
-            vec![ListItem::new("No issues match current filter. Press `f` to switch.")]
+            let message = if item_mode == crate::app::WorkItemMode::PullRequests {
+                "No pull requests match current filter."
+            } else {
+                "No issues match current filter."
+            };
+            vec![ListItem::new(message)]
         }
     } else {
         visible_issues
@@ -296,7 +329,11 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                 };
                 let line1 = Line::from(vec![
                     Span::styled(
-                        format!("#{} ", issue.number),
+                        if issue.is_pr {
+                            format!("PR #{} ", issue.number)
+                        } else {
+                            format!("#{} ", issue.number)
+                        },
                         Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
@@ -351,7 +388,11 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
             let mut lines = Vec::new();
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("#{}", issue.number),
+                    if issue.is_pr {
+                        format!("PR #{}", issue.number)
+                    } else {
+                        format!("#{}", issue.number)
+                    },
                     Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -376,11 +417,15 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
             } else {
                 lines.extend(rendered.lines);
             }
-            ("Issue Preview".to_string(), lines)
+            (preview_title_text.to_string(), lines)
         }
         None => (
-            "Issue Preview".to_string(),
-            vec![Line::from("Select an issue to preview.")],
+            preview_title_text.to_string(),
+            vec![Line::from(if item_mode == crate::app::WorkItemMode::PullRequests {
+                "Select a pull request to preview."
+            } else {
+                "Select an issue to preview."
+            })],
         ),
     };
 
@@ -421,7 +466,11 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         match app.current_issue_row() {
             Some(issue) => (
                 Some(issue.number),
-                format!("#{} {}", issue.number, issue.title),
+                if issue.is_pr {
+                    format!("PR #{} {}", issue.number, issue.title)
+                } else {
+                    format!("#{} {}", issue.number, issue.title)
+                },
                 issue.state.clone(),
                 issue.body.clone(),
                 if issue.assignees.is_empty() {
@@ -630,7 +679,13 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         horizontal: 2,
     });
     let title = match app.current_issue_row() {
-        Some(issue) => format!("Comments #{}", issue.number),
+        Some(issue) => {
+            if issue.is_pr {
+                format!("Comments PR #{}", issue.number)
+            } else {
+                format!("Comments #{}", issue.number)
+            }
+        }
         None => "Comments (j/k jump)".to_string(),
     };
     let selected = if app.comments().is_empty() {
@@ -878,7 +933,12 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
 
 fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = panel_block("Close Issue");
+    let close_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+        "Close Pull Request"
+    } else {
+        "Close Issue"
+    };
+    let block = panel_block(close_title);
     let mut items = Vec::new();
     items.push(ListItem::new("Close without comment"));
     items.push(ListItem::new("Custom message..."));
@@ -940,8 +1000,13 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
 
 fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
+    let close_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+        "Close Pull Request Comment"
+    } else {
+        "Close Issue Comment"
+    };
     let title = match app.editor_mode() {
-        EditorMode::CloseIssue => "Close Issue Comment",
+        EditorMode::CloseIssue => close_editor_title,
         EditorMode::AddComment => "Add Issue Comment",
         EditorMode::EditComment => "Edit Issue Comment",
         EditorMode::AddPreset => "Preset Body",
@@ -1084,15 +1149,15 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • 1/2 tabs • f cycle • a assignee filter • l labels • Shift+A assignees • m comment • u reopen • dd close issue • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • p issues/prs • 1/2 tabs • f cycle • a assignee filter • l labels • Shift+A assignees • m comment • u reopen • dd close issue/pr • v checkout PR • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close issue • l labels • Shift+A assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close issue/pr • l labels • Shift+A assignees • m comment • u reopen • c all comments • v checkout PR • Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • dd close issue • l labels • Shift+A assignees • m comment • u reopen • Esc back • r sync issue+comments • o browser • q quit"
+            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • dd close issue/pr • l labels • Shift+A assignees • m comment • u reopen • v checkout PR • Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1143,9 +1208,10 @@ fn status_context(app: &App) -> String {
         };
         let assignee = ellipsize(app.assignee_filter_label().as_str(), 18);
         let mode = if app.issue_search_mode() { "search" } else { "browse" };
+        let item_mode = app.work_item_mode().label();
         return format!(
-            "repo: {}  |  mode: {}  |  assignee: {}  |  query: {}  |  status: {}",
-            repo, mode, assignee, query, sync
+            "repo: {}  |  mode: {} ({})  |  assignee: {}  |  query: {}  |  status: {}",
+            repo, mode, item_mode, assignee, query, sync
         );
     }
     format!("repo: {}  |  status: {}", repo, sync)

@@ -81,6 +81,7 @@ cargo test
 - j/k: move or scroll focused pane
 - Ctrl+u / Ctrl+d: page up/down in focused pane
 - gg/G: jump top/bottom in focused pane
+- p: toggle issues / pull requests list mode
 - f: cycle issue filter (open/closed)
 - 1/2: switch issue tab (open/closed)
 - a: cycle assignee filter (all/unassigned/users)
@@ -92,7 +93,8 @@ cargo test
 - Enter: open selected issue
 - r: refresh issues/comments
 - o: open in browser
-- dd: close issue with preset
+- v: checkout selected pull request locally (`gh pr checkout`)
+- dd: close selected issue/pull request with preset
 - c: open full comments from issue detail
 - j/k: jump next/previous comment in full comments view
 - e: edit selected comment in full comments view
