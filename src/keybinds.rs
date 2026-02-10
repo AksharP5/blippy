@@ -179,17 +179,17 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
     },
     BindingSpec {
         action: "diff_scroll_left",
-        default: "left",
+        default: "[",
         description: "Pan PR diff left",
     },
     BindingSpec {
         action: "diff_scroll_right",
-        default: "right",
+        default: "]",
         description: "Pan PR diff right",
     },
     BindingSpec {
         action: "diff_scroll_reset",
-        default: "home",
+        default: "0",
         description: "Reset PR diff horizontal pan",
     },
 ];

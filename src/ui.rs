@@ -9,6 +9,7 @@ use crate::app::{
     EditorMode,
     Focus,
     IssueFilter,
+    MouseTarget,
     PullRequestReviewFocus,
     ReviewSide,
     View,
@@ -36,6 +37,7 @@ const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
+    app.clear_mouse_regions();
     frame.render_widget(Block::default().style(Style::default().bg(GITHUB_BG)), area);
     match app.view() {
         View::RepoPicker => draw_repo_picker(frame, app, area),
@@ -52,7 +54,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
 }
 
-fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -157,22 +159,33 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
                 .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
+    let list_area = sections[1].inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     frame.render_stateful_widget(
         list,
-        sections[1].inner(Margin {
-            vertical: 1,
-            horizontal: 2,
-        }),
+        list_area,
         &mut list_state(selected_for_list(
             app.selected_repo(),
             app.filtered_repo_rows().len(),
         )),
     );
 
+    let list_inner = list_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_rows = (list_inner.height as usize) / 2;
+    for index in 0..app.filtered_repo_rows().len().min(max_rows) {
+        let y = list_inner.y.saturating_add((index * 2) as u16);
+        app.register_mouse_region(MouseTarget::RepoRow(index), list_inner.x, y, list_inner.width, 2);
+    }
+
     draw_status(frame, app, footer);
 }
 
-fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_remote_chooser(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let block = panel_block("Choose Remote");
     let items = app
@@ -193,14 +206,25 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
                 .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
+    let list_area = main.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     frame.render_stateful_widget(
         list,
-        main.inner(Margin {
-            vertical: 1,
-            horizontal: 2,
-        }),
+        list_area,
         &mut list_state(app.selected_remote()),
     );
+
+    let list_inner = list_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_rows = list_inner.height as usize;
+    for index in 0..app.remotes().len().min(max_rows) {
+        let y = list_inner.y.saturating_add(index as u16);
+        app.register_mouse_region(MouseTarget::RemoteRow(index), list_inner.x, y, list_inner.width, 1);
+    }
 
     draw_status(frame, app, footer);
 }
@@ -216,7 +240,11 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
         .split(sections[1]);
 
-    let visible_issues = app.issues_for_view();
+    let visible_issues = app
+        .issues_for_view()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
     let (open_count, closed_count) = app.issue_counts();
     let item_mode = app.work_item_mode();
     let item_label = item_mode.label();
@@ -293,6 +321,29 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
             .block(header_block)
             .style(Style::default().fg(TEXT_PRIMARY)),
         header_area,
+    );
+    let header_content = header_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let open_label = format!("1 Open ({})", open_count);
+    let closed_label = format!("2 Closed ({})", closed_count);
+    app.register_mouse_region(
+        MouseTarget::IssueTabOpen,
+        header_content.x,
+        header_content.y,
+        (open_label.len() as u16).saturating_add(3),
+        1,
+    );
+    let closed_x = header_content
+        .x
+        .saturating_add((open_label.len() as u16).saturating_add(5));
+    app.register_mouse_region(
+        MouseTarget::IssueTabClosed,
+        closed_x,
+        header_content.y,
+        (closed_label.len() as u16).saturating_add(3),
+        1,
     );
     if app.issue_search_mode() {
         let content = header_area.inner(Margin {
@@ -380,14 +431,25 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                 .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
+    let issues_list_area = panes[0].inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     frame.render_stateful_widget(
         list,
-        panes[0].inner(Margin {
-            vertical: 1,
-            horizontal: 2,
-        }),
+        issues_list_area,
         &mut list_state(selected_for_list(app.selected_issue(), visible_issues.len())),
     );
+    register_mouse_region(app, MouseTarget::IssuesListPane, issues_list_area);
+    let issues_list_inner = issues_list_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_rows = (issues_list_inner.height as usize) / 2;
+    for index in 0..visible_issues.len().min(max_rows) {
+        let y = issues_list_inner.y.saturating_add((index * 2) as u16);
+        app.register_mouse_region(MouseTarget::IssueRow(index), issues_list_inner.x, y, issues_list_inner.width, 2);
+    }
 
     let (preview_title, preview_lines) = match app.selected_issue_row() {
         Some(issue) => {
@@ -466,6 +528,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(preview_widget, preview_area);
+    register_mouse_region(app, MouseTarget::IssuesPreviewPane, preview_area);
 
     draw_status(frame, app, footer);
 }
@@ -551,15 +614,21 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(PANEL_BORDER))
         .style(Style::default().bg(GITHUB_PANEL));
+    let header_area = sections[0].inner(Margin {
+        vertical: 0,
+        horizontal: 2,
+    });
     frame.render_widget(
         Paragraph::new(header_text)
             .block(header_block)
             .style(Style::default().fg(TEXT_PRIMARY)),
-        sections[0].inner(Margin {
-            vertical: 0,
-            horizontal: 2,
-        }),
+        header_area,
     );
+    let header_content = header_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    app.register_mouse_region(MouseTarget::Back, header_content.x, header_content.y, 8, 1);
 
     let mut body_lines = Vec::new();
     if issue_title.is_empty() {
@@ -711,6 +780,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(body_paragraph, panes[0]);
+    register_mouse_region(app, MouseTarget::IssueBodyPane, panes[0]);
 
     let side_content_width = panes[1].width.saturating_sub(2);
     let side_viewport = panes[1].height.saturating_sub(2) as usize;
@@ -754,6 +824,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .wrap(Wrap { trim: false })
         .scroll((side_scroll, 0));
     frame.render_widget(side_paragraph, panes[1]);
+    register_mouse_region(app, MouseTarget::IssueSidePane, panes[1]);
 
     draw_status(frame, app, footer);
 }
@@ -799,22 +870,30 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(PANEL_BORDER))
         .style(Style::default().bg(GITHUB_PANEL));
+    let header_area = sections[0].inner(Margin {
+        vertical: 0,
+        horizontal: 2,
+    });
     frame.render_widget(
         Paragraph::new(header)
             .block(header_block)
             .style(Style::default().fg(TEXT_PRIMARY)),
-        sections[0].inner(Margin {
-            vertical: 0,
-            horizontal: 2,
-        }),
+        header_area,
     );
+    let header_content = header_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    app.register_mouse_region(MouseTarget::Back, header_content.x, header_content.y, 8, 1);
 
     let block = panel_block(&title);
     let mut lines = Vec::new();
+    let mut comment_header_offsets = Vec::new();
     if app.comments().is_empty() {
         lines.push(Line::from("No comments cached yet."));
     } else {
         for (index, comment) in app.comments().iter().enumerate() {
+            comment_header_offsets.push((index, lines.len() as u16));
             lines.push(comment_header(
                 index + 1,
                 comment.author.as_str(),
@@ -846,6 +925,29 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(paragraph, content_area);
+    register_mouse_region(app, MouseTarget::CommentsPane, content_area);
+    let content_inner = content_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    for (index, offset) in comment_header_offsets {
+        if offset < scroll {
+            continue;
+        }
+        let y = content_inner
+            .y
+            .saturating_add(offset.saturating_sub(scroll));
+        if y >= content_inner.y.saturating_add(content_inner.height) {
+            continue;
+        }
+        app.register_mouse_region(
+            MouseTarget::CommentRow(index),
+            content_inner.x,
+            y,
+            content_inner.width,
+            1,
+        );
+    }
 
     draw_status(frame, app, footer);
 }
@@ -913,7 +1015,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             ),
         ]),
         Line::from(Span::styled(
-            format!("Ctrl+h/l pane • h/l side • ←/→ pan • Home reset pan • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
+            format!("Ctrl+h/l pane • h/l side • [/ ] pan • 0 reset pan • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -922,14 +1024,34 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(PANEL_BORDER))
         .style(Style::default().bg(GITHUB_PANEL));
+    let header_area = sections[0].inner(Margin {
+        vertical: 0,
+        horizontal: 2,
+    });
     frame.render_widget(
         Paragraph::new(header)
             .block(header_block)
             .style(Style::default().fg(TEXT_PRIMARY)),
-        sections[0].inner(Margin {
-            vertical: 0,
-            horizontal: 2,
-        }),
+        header_area,
+    );
+    let header_content = header_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    app.register_mouse_region(MouseTarget::Back, header_content.x, header_content.y.saturating_add(1), 8, 1);
+    app.register_mouse_region(
+        MouseTarget::PullRequestFocusFiles,
+        header_content.x.saturating_add(9),
+        header_content.y.saturating_add(1),
+        9,
+        1,
+    );
+    app.register_mouse_region(
+        MouseTarget::PullRequestFocusDiff,
+        header_content.x.saturating_add(20),
+        header_content.y.saturating_add(1),
+        8,
+        1,
     );
 
     let file_items = if app.pull_request_files().is_empty() {
@@ -996,6 +1118,16 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             app.pull_request_files().len(),
         )),
     );
+    register_mouse_region(app, MouseTarget::PullRequestFilesPane, panes[0]);
+    let files_inner = panes[0].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_file_rows = files_inner.height as usize;
+    for index in 0..app.pull_request_files().len().min(max_file_rows) {
+        let y = files_inner.y.saturating_add(index as u16);
+        app.register_mouse_region(MouseTarget::PullRequestFileRow(index), files_inner.x, y, files_inner.width, 1);
+    }
 
     let diff_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Diff;
     let selected_file = app
@@ -1149,7 +1281,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         .as_ref()
         .map(|(file_name, _)| {
             format!(
-                "Diff: {}  [pan {} | left/right move]",
+                "Diff: {}  [pan {} | [/] move]",
                 file_name,
                 app.pull_request_diff_horizontal_scroll(),
             )
@@ -1165,6 +1297,33 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(paragraph, panes[1]);
+    register_mouse_region(app, MouseTarget::PullRequestDiffPane, panes[1]);
+    let diff_inner = panes[1].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let half = diff_inner.width / 2;
+    for (index, offset) in row_offsets.iter().enumerate() {
+        let offset = match offset {
+            Some(offset) => *offset,
+            None => continue,
+        };
+        if offset < scroll {
+            continue;
+        }
+        let y = diff_inner.y.saturating_add(offset.saturating_sub(scroll));
+        if y >= diff_inner.y.saturating_add(diff_inner.height) {
+            continue;
+        }
+        app.register_mouse_region(MouseTarget::PullRequestDiffRow(index, ReviewSide::Left), diff_inner.x, y, half.max(1), 1);
+        app.register_mouse_region(
+            MouseTarget::PullRequestDiffRow(index, ReviewSide::Right),
+            diff_inner.x.saturating_add(half),
+            y,
+            diff_inner.width.saturating_sub(half).max(1),
+            1,
+        );
+    }
 
     draw_status(frame, app, footer);
 }
@@ -1182,7 +1341,7 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
+        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
         .split(popup_inner);
 
     let filtered = app.filtered_label_indices();
@@ -1250,16 +1409,44 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             filtered.len(),
         )),
     );
+    let labels_inner = sections[1].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_rows = labels_inner.height as usize;
+    for index in 0..filtered.len().min(max_rows) {
+        let y = labels_inner.y.saturating_add(index as u16);
+        app.register_mouse_region(MouseTarget::LabelOption(index), labels_inner.x, y, labels_inner.width, 1);
+    }
 
     let selection = if app.selected_labels_csv().is_empty() {
         "selected: none".to_string()
     } else {
         format!("selected: {}", ellipsize(app.selected_labels_csv().as_str(), 80))
     };
-    let footer = Paragraph::new(selection)
+    let footer = Paragraph::new(Text::from(vec![
+        Line::from(selection),
+        Line::from(vec![
+            Span::styled("[Apply]", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled("[Cancel]", Style::default().fg(GITHUB_MUTED)),
+        ]),
+    ]))
         .style(Style::default().fg(GITHUB_MUTED))
         .block(panel_block_with_border("Selection", POPUP_BORDER));
     frame.render_widget(footer, sections[2]);
+    let footer_content = sections[2].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    app.register_mouse_region(MouseTarget::LabelApply, footer_content.x, footer_content.y.saturating_add(1), 8, 1);
+    app.register_mouse_region(
+        MouseTarget::LabelCancel,
+        footer_content.x.saturating_add(10),
+        footer_content.y.saturating_add(1),
+        10,
+        1,
+    );
 }
 
 fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
@@ -1275,7 +1462,7 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
+        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
         .split(popup_inner);
 
     let filtered = app.filtered_assignee_indices();
@@ -1343,6 +1530,21 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
             filtered.len(),
         )),
     );
+    let assignees_inner = sections[1].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_rows = assignees_inner.height as usize;
+    for index in 0..filtered.len().min(max_rows) {
+        let y = assignees_inner.y.saturating_add(index as u16);
+        app.register_mouse_region(
+            MouseTarget::AssigneeOption(index),
+            assignees_inner.x,
+            y,
+            assignees_inner.width,
+            1,
+        );
+    }
 
     let selection = if app.selected_assignees_csv().is_empty() {
         "selected: none".to_string()
@@ -1352,13 +1554,38 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
             ellipsize(app.selected_assignees_csv().as_str(), 80)
         )
     };
-    let footer = Paragraph::new(selection)
+    let footer = Paragraph::new(Text::from(vec![
+        Line::from(selection),
+        Line::from(vec![
+            Span::styled("[Apply]", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled("[Cancel]", Style::default().fg(GITHUB_MUTED)),
+        ]),
+    ]))
         .style(Style::default().fg(GITHUB_MUTED))
         .block(panel_block_with_border("Selection", POPUP_BORDER));
     frame.render_widget(footer, sections[2]);
+    let footer_content = sections[2].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    app.register_mouse_region(
+        MouseTarget::AssigneeApply,
+        footer_content.x,
+        footer_content.y.saturating_add(1),
+        8,
+        1,
+    );
+    app.register_mouse_region(
+        MouseTarget::AssigneeCancel,
+        footer_content.x.saturating_add(10),
+        footer_content.y.saturating_add(1),
+        10,
+        1,
+    );
 }
 
-fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_preset_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let close_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request"
@@ -1384,19 +1611,29 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
                 .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
+    let list_area = main.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
     frame.render_stateful_widget(
         list,
-        main.inner(Margin {
-            vertical: 1,
-            horizontal: 2,
-        }),
+        list_area,
         &mut list_state(app.selected_preset()),
     );
+    let list_inner = list_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let max_rows = list_inner.height as usize;
+    for index in 0..app.preset_items_len().min(max_rows) {
+        let y = list_inner.y.saturating_add(index as u16);
+        app.register_mouse_region(MouseTarget::PresetOption(index), list_inner.x, y, list_inner.width, 1);
+    }
 
     draw_status(frame, app, footer);
 }
 
-fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_preset_name(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let input_area = main.inner(Margin {
         vertical: 1,
@@ -1425,7 +1662,7 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
     draw_status(frame, app, footer);
 }
 
-fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn draw_comment_editor(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let close_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request Comment"
@@ -1602,6 +1839,10 @@ fn split_area(area: Rect) -> (Rect, Rect) {
     (chunks[0], chunks[1])
 }
 
+fn register_mouse_region(app: &mut App, target: MouseTarget, area: Rect) {
+    app.register_mouse_region(target, area.x, area.y, area.width, area.height);
+}
+
 fn help_text(app: &App) -> String {
     match app.view() {
         View::RepoPicker => {
@@ -1681,7 +1922,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l pane • j/k move file/line • ←/→ pan diff • Home reset pan • w viewed • z collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
+            "Ctrl+h/l pane • j/k move file/line • [/ ] pan diff • 0 reset pan • w viewed • z collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
                 .to_string()
         }
         View::LabelPicker => {

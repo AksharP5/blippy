@@ -58,6 +58,44 @@ pub enum AppAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseTarget {
+    Back,
+    RepoRow(usize),
+    RemoteRow(usize),
+    IssueTabOpen,
+    IssueTabClosed,
+    IssueRow(usize),
+    IssuesListPane,
+    IssuesPreviewPane,
+    IssueBodyPane,
+    IssueSidePane,
+    CommentRow(usize),
+    CommentsPane,
+    PullRequestFilesPane,
+    PullRequestDiffPane,
+    PullRequestFileRow(usize),
+    PullRequestDiffRow(usize, ReviewSide),
+    PullRequestFocusFiles,
+    PullRequestFocusDiff,
+    LabelOption(usize),
+    LabelApply,
+    LabelCancel,
+    AssigneeOption(usize),
+    AssigneeApply,
+    AssigneeCancel,
+    PresetOption(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MouseRegion {
+    target: MouseTarget,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresetSelection {
     CloseWithoutComment,
     CustomMessage,
@@ -350,6 +388,7 @@ pub struct App {
     pending_issue_actions: HashMap<i64, PendingIssueAction>,
     pending_g: bool,
     pending_d: bool,
+    mouse_regions: Vec<MouseRegion>,
     comment_editor: CommentEditorState,
     editor_cancel_view: View,
     editing_comment_id: Option<i64>,
@@ -437,6 +476,7 @@ impl App {
             pending_issue_actions: HashMap::new(),
             pending_g: false,
             pending_d: false,
+            mouse_regions: Vec::new(),
             comment_editor: CommentEditorState::default(),
             editor_cancel_view: View::Issues,
             editing_comment_id: None,
@@ -1196,13 +1236,13 @@ impl App {
             {
                 self.toggle_pull_request_visual_mode();
             }
-            KeyCode::Left if self.view == View::PullRequestFiles => {
+            KeyCode::Char('[') if self.view == View::PullRequestFiles => {
                 self.scroll_pull_request_diff_horizontal(-4);
             }
-            KeyCode::Right if self.view == View::PullRequestFiles => {
+            KeyCode::Char(']') if self.view == View::PullRequestFiles => {
                 self.scroll_pull_request_diff_horizontal(4);
             }
-            KeyCode::Home if self.view == View::PullRequestFiles => {
+            KeyCode::Char('0') if self.view == View::PullRequestFiles => {
                 self.reset_pull_request_diff_horizontal_scroll();
             }
             KeyCode::Char('e') if self.view == View::IssueComments => {
@@ -1322,68 +1362,199 @@ impl App {
     }
 
     pub fn on_mouse(&mut self, event: MouseEvent) {
+        let target = self.mouse_target_at(event.column, event.row);
         match event.kind {
             MouseEventKind::ScrollUp => {
-                self.move_selection_up();
+                self.handle_mouse_scroll(target, false);
             }
             MouseEventKind::ScrollDown => {
-                self.move_selection_down();
+                self.handle_mouse_scroll(target, true);
             }
             MouseEventKind::ScrollLeft => {
-                self.scroll_pull_request_diff_horizontal(-4);
+                self.handle_mouse_scroll_horizontal(target, false);
             }
             MouseEventKind::ScrollRight => {
-                self.scroll_pull_request_diff_horizontal(4);
+                self.handle_mouse_scroll_horizontal(target, true);
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                self.handle_mouse_click(event.column, event.row);
+                self.handle_mouse_click_target(target);
             }
             _ => {}
         }
     }
 
-    fn handle_mouse_click(&mut self, column: u16, row: u16) {
-        if row <= 2 && column <= 12 {
-            match self.view {
-                View::IssueDetail => {
+    fn handle_mouse_scroll(&mut self, target: Option<MouseTarget>, down: bool) {
+        if matches!(
+            target,
+            Some(MouseTarget::IssuesListPane | MouseTarget::IssueRow(_))
+        ) {
+            self.focus = Focus::IssuesList;
+        }
+        if matches!(
+            target,
+            Some(MouseTarget::IssuesPreviewPane)
+        ) {
+            self.focus = Focus::IssuesPreview;
+        }
+        if matches!(
+            target,
+            Some(MouseTarget::IssueBodyPane)
+        ) {
+            self.focus = Focus::IssueBody;
+        }
+        if matches!(
+            target,
+            Some(MouseTarget::IssueSidePane)
+        ) {
+            self.focus = Focus::IssueRecentComments;
+        }
+        if matches!(
+            target,
+            Some(MouseTarget::PullRequestFilesPane | MouseTarget::PullRequestFileRow(_))
+        ) {
+            self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
+        }
+        if matches!(
+            target,
+            Some(MouseTarget::PullRequestDiffPane | MouseTarget::PullRequestDiffRow(_, _))
+        ) {
+            self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        }
+
+        if down {
+            self.move_selection_down();
+            return;
+        }
+        self.move_selection_up();
+    }
+
+    fn handle_mouse_scroll_horizontal(&mut self, target: Option<MouseTarget>, right: bool) {
+        if !matches!(
+            target,
+            Some(MouseTarget::PullRequestDiffPane | MouseTarget::PullRequestDiffRow(_, _))
+        ) {
+            return;
+        }
+        self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        if right {
+            self.scroll_pull_request_diff_horizontal(4);
+            return;
+        }
+        self.scroll_pull_request_diff_horizontal(-4);
+    }
+
+    fn handle_mouse_click_target(&mut self, target: Option<MouseTarget>) {
+        match target {
+            Some(MouseTarget::Back) => {
+                if self.view == View::IssueDetail {
                     self.set_view(View::Issues);
                     return;
                 }
-                View::IssueComments | View::PullRequestFiles => {
+                if self.view == View::IssueComments || self.view == View::PullRequestFiles {
                     self.set_view(View::IssueDetail);
                     return;
                 }
-                View::LabelPicker | View::AssigneePicker => {
+                if matches!(self.view, View::LabelPicker | View::AssigneePicker) {
                     self.set_view(self.editor_cancel_view);
                     return;
                 }
-                View::CommentPresetPicker => {
+                if self.view == View::CommentPresetPicker {
                     self.set_view(View::Issues);
+                }
+            }
+            Some(MouseTarget::RepoRow(index)) => {
+                self.selected_repo = index.min(self.filtered_repo_indices.len().saturating_sub(1));
+                self.action = Some(AppAction::PickRepo);
+            }
+            Some(MouseTarget::RemoteRow(index)) => {
+                self.selected_remote = index.min(self.remotes.len().saturating_sub(1));
+                self.action = Some(AppAction::PickRemote);
+            }
+            Some(MouseTarget::IssueTabOpen) => {
+                self.set_issue_filter(IssueFilter::Open);
+            }
+            Some(MouseTarget::IssueTabClosed) => {
+                self.set_issue_filter(IssueFilter::Closed);
+            }
+            Some(MouseTarget::IssuesListPane) => {
+                self.focus = Focus::IssuesList;
+            }
+            Some(MouseTarget::IssuesPreviewPane) => {
+                self.focus = Focus::IssuesPreview;
+            }
+            Some(MouseTarget::IssueRow(index)) => {
+                self.focus = Focus::IssuesList;
+                self.selected_issue = index.min(self.filtered_issue_indices.len().saturating_sub(1));
+                self.issues_preview_scroll = 0;
+                self.action = Some(AppAction::PickIssue);
+            }
+            Some(MouseTarget::IssueBodyPane) => {
+                self.focus = Focus::IssueBody;
+            }
+            Some(MouseTarget::IssueSidePane) => {
+                self.focus = Focus::IssueRecentComments;
+                if self.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                    self.set_view(View::PullRequestFiles);
                     return;
                 }
-                _ => {}
+                self.reset_issue_comments_scroll();
+                self.set_view(View::IssueComments);
             }
-        }
-
-        if self.view == View::Issues && row <= 2 {
-            if (2..=13).contains(&column) {
-                self.set_issue_filter(IssueFilter::Open);
-                return;
+            Some(MouseTarget::CommentsPane) => {}
+            Some(MouseTarget::CommentRow(index)) => {
+                self.selected_comment = index.min(self.comments.len().saturating_sub(1));
             }
-            if (15..=28).contains(&column) {
-                self.set_issue_filter(IssueFilter::Closed);
-                return;
-            }
-        }
-
-        if self.view == View::PullRequestFiles && row <= 2 {
-            if (14..=24).contains(&column) {
+            Some(MouseTarget::PullRequestFocusFiles) | Some(MouseTarget::PullRequestFilesPane) => {
                 self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
-                return;
             }
-            if (26..=36).contains(&column) {
+            Some(MouseTarget::PullRequestFocusDiff) | Some(MouseTarget::PullRequestDiffPane) => {
                 self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
             }
+            Some(MouseTarget::PullRequestFileRow(index)) => {
+                self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
+                self.selected_pull_request_file = index.min(self.pull_request_files.len().saturating_sub(1));
+                self.selected_pull_request_diff_line = 0;
+                self.pull_request_diff_scroll = 0;
+                self.pull_request_diff_horizontal_scroll = 0;
+                self.pull_request_visual_mode = false;
+                self.pull_request_visual_anchor = None;
+                self.sync_selected_pull_request_review_comment();
+            }
+            Some(MouseTarget::PullRequestDiffRow(index, side)) => {
+                self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+                self.pull_request_review_side = side;
+                self.selected_pull_request_diff_line = index;
+                self.sync_selected_pull_request_review_comment();
+            }
+            Some(MouseTarget::LabelOption(index)) => {
+                if let Some(filtered_index) = self.filtered_label_indices().get(index).copied() {
+                    self.selected_label_option = filtered_index;
+                    self.toggle_selected_label();
+                }
+            }
+            Some(MouseTarget::LabelApply) => {
+                self.action = Some(AppAction::SubmitLabels);
+            }
+            Some(MouseTarget::LabelCancel) => {
+                self.set_view(self.editor_cancel_view);
+            }
+            Some(MouseTarget::AssigneeOption(index)) => {
+                if let Some(filtered_index) = self.filtered_assignee_indices().get(index).copied() {
+                    self.selected_assignee_option = filtered_index;
+                    self.toggle_selected_assignee();
+                }
+            }
+            Some(MouseTarget::AssigneeApply) => {
+                self.action = Some(AppAction::SubmitAssignees);
+            }
+            Some(MouseTarget::AssigneeCancel) => {
+                self.set_view(self.editor_cancel_view);
+            }
+            Some(MouseTarget::PresetOption(index)) => {
+                self.preset_choice = index.min(self.preset_items_len().saturating_sub(1));
+                self.action = Some(AppAction::PickPreset);
+            }
+            None => {}
         }
     }
 
@@ -2000,6 +2171,49 @@ impl App {
 
     pub fn take_action(&mut self) -> Option<AppAction> {
         self.action.take()
+    }
+
+    pub fn clear_mouse_regions(&mut self) {
+        self.mouse_regions.clear();
+    }
+
+    pub fn register_mouse_region(
+        &mut self,
+        target: MouseTarget,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+    ) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        self.mouse_regions.push(MouseRegion {
+            target,
+            x,
+            y,
+            width,
+            height,
+        });
+    }
+
+    fn mouse_target_at(&self, column: u16, row: u16) -> Option<MouseTarget> {
+        let mut index = self.mouse_regions.len();
+        while index > 0 {
+            index -= 1;
+            let region = self.mouse_regions[index];
+            if column < region.x || row < region.y {
+                continue;
+            }
+            if column >= region.x.saturating_add(region.width) {
+                continue;
+            }
+            if row >= region.y.saturating_add(region.height) {
+                continue;
+            }
+            return Some(region.target);
+        }
+        None
     }
 
     fn move_selection_up(&mut self) {
@@ -3394,6 +3608,7 @@ mod tests {
         AppAction,
         Focus,
         IssueFilter,
+        MouseTarget,
         PullRequestFile,
         PullRequestReviewFocus,
         PullRequestReviewTarget,
@@ -4114,8 +4329,9 @@ mod tests {
             }],
         );
         app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        app.register_mouse_region(MouseTarget::PullRequestDiffPane, 0, 0, 120, 40);
 
-        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
         assert_eq!(app.pull_request_diff_horizontal_scroll(), 4);
 
         app.on_mouse(MouseEvent {
@@ -4126,7 +4342,7 @@ mod tests {
         });
         assert_eq!(app.pull_request_diff_horizontal_scroll(), 8);
 
-        app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE));
         assert_eq!(app.pull_request_diff_horizontal_scroll(), 0);
     }
 
@@ -4134,6 +4350,7 @@ mod tests {
     fn mouse_back_click_navigates_to_previous_view() {
         let mut app = App::new(Config::default());
         app.set_view(View::PullRequestFiles);
+        app.register_mouse_region(MouseTarget::Back, 0, 0, 12, 3);
 
         app.on_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -4143,6 +4360,104 @@ mod tests {
         });
 
         assert_eq!(app.view(), View::IssueDetail);
+    }
+
+    #[test]
+    fn mouse_click_issue_row_selects_and_opens_issue() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 12,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+        app.register_mouse_region(MouseTarget::IssueRow(0), 0, 0, 50, 2);
+
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert_eq!(app.take_action(), Some(AppAction::PickIssue));
+    }
+
+    #[test]
+    fn mouse_click_pr_file_row_selects_file() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![
+                PullRequestFile {
+                    filename: "src/a.rs".to_string(),
+                    status: "modified".to_string(),
+                    additions: 1,
+                    deletions: 0,
+                    patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+                },
+                PullRequestFile {
+                    filename: "src/b.rs".to_string(),
+                    status: "modified".to_string(),
+                    additions: 1,
+                    deletions: 0,
+                    patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+                },
+            ],
+        );
+        app.register_mouse_region(MouseTarget::PullRequestFileRow(1), 0, 0, 50, 1);
+
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert_eq!(app.selected_pull_request_file(), 1);
+    }
+
+    #[test]
+    fn mouse_click_diff_row_sets_side_and_line() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 2,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,2 @@\n-old\n+new\n+more".to_string()),
+            }],
+        );
+        app.register_mouse_region(
+            MouseTarget::PullRequestDiffRow(2, ReviewSide::Left),
+            0,
+            0,
+            50,
+            1,
+        );
+
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert_eq!(app.pull_request_review_focus(), PullRequestReviewFocus::Diff);
+        assert_eq!(app.pull_request_review_side(), ReviewSide::Left);
+        assert_eq!(app.selected_pull_request_diff_line(), 2);
     }
 
     #[test]

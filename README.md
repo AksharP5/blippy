@@ -105,10 +105,10 @@ cargo test
 - Enter on PR changes pane: open full-screen PR changes viewer
 - PR review view: Ctrl+h/l switch files/diff, j/k navigate, w mark/unmark file viewed on GitHub, m add inline GitHub review comment
 - PR review view: h/l choose old/new side, z collapse/expand current hunk, Shift+V visual multiline range, e edit, x delete, Shift+R resolve/reopen thread on GitHub, n/p cycle comments on selected line
-- PR review view: Left/Right arrow pans horizontally for long lines, Home resets horizontal pan
+- PR review view: `[`/`]` pan horizontally for long lines, `0` resets horizontal pan
 - Ctrl+y: copy current status message to clipboard
 - b or Esc: back from issue detail/comments
-- Mouse: wheel scrolls lists/diffs, click `[Back]` in headers to navigate back, click Open/Closed tabs in issues header
+- Mouse/trackpad: wheel scrolls lists/diffs, horizontal wheel pans PR diff, click rows to select/open, click `[Back]`, `[Files]`, `[Diff]`, Open/Closed tabs, and picker `[Apply]/[Cancel]`
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
 
 Search supports simple GitHub-like qualifiers:
