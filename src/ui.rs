@@ -1773,7 +1773,7 @@ fn render_split_diff_row(
 
     let mut row_style = Style::default();
     if in_visual_range {
-        row_style = Style::default().bg(Color::Rgb(56, 66, 110));
+        row_style = Style::default().bg(Color::Rgb(64, 68, 83));
     }
     if selected {
         row_style = Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD);
