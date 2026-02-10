@@ -14,6 +14,7 @@ mod ui;
 
 use std::env;
 use std::io::{self, Stdout, Write};
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -2425,29 +2426,52 @@ fn start_pull_request_review_comments_sync(
             }
         };
 
-        let mapped = comments
-            .into_iter()
-            .filter_map(|comment| {
-                let line = comment.line.or(comment.original_line)?;
-                let side_value = comment.side.unwrap_or_else(|| "RIGHT".to_string());
-                let side = if side_value.eq_ignore_ascii_case("left") {
-                    ReviewSide::Left
-                } else {
-                    ReviewSide::Right
-                };
-                Some(PullRequestReviewComment {
-                    id: comment.id,
-                    thread_id: comment.thread_id,
-                    resolved: comment.is_resolved,
-                    path: comment.path,
-                    line,
-                    side,
-                    body: comment.body.unwrap_or_default(),
-                    author: comment.user.login,
-                    created_at: comment.created_at,
+        let mut anchors = HashMap::new();
+        for comment in &comments {
+            let line = comment.line.or(comment.original_line);
+            let side = comment
+                .side
+                .as_ref()
+                .map(|value| {
+                    if value.eq_ignore_ascii_case("left") {
+                        ReviewSide::Left
+                    } else {
+                        ReviewSide::Right
+                    }
                 })
-            })
-            .collect::<Vec<PullRequestReviewComment>>();
+                .unwrap_or(ReviewSide::Right);
+            if let Some(line) = line {
+                anchors.insert(comment.id, (line, side, comment.path.clone()));
+            }
+        }
+
+        let mut mapped = Vec::new();
+        for comment in comments {
+            let anchor = anchors
+                .get(&comment.id)
+                .cloned()
+                .or_else(|| {
+                    comment
+                        .in_reply_to_id
+                        .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
+                });
+            let (line, side, path) = match anchor {
+                Some(anchor) => anchor,
+                None => continue,
+            };
+
+            mapped.push(PullRequestReviewComment {
+                id: comment.id,
+                thread_id: comment.thread_id,
+                resolved: comment.is_resolved,
+                path,
+                line,
+                side,
+                body: comment.body.unwrap_or_default(),
+                author: comment.user.login,
+                created_at: comment.created_at,
+            });
+        }
         let _ = event_tx.send(AppEvent::PullRequestReviewCommentsUpdated {
             issue_id,
             comments: mapped,

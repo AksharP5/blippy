@@ -1772,16 +1772,23 @@ fn render_split_diff_row(
     }
 
     let mut row_style = Style::default();
+    let mut bg_color = None;
     if in_visual_range {
-        row_style = Style::default().bg(Color::Rgb(64, 68, 83));
+        bg_color = Some(Color::Rgb(92, 97, 118));
+        row_style = Style::default().bg(Color::Rgb(92, 97, 118));
     }
     if selected {
+        bg_color = Some(SELECT_BG);
         row_style = Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD);
         if selected_side == ReviewSide::Left {
             left_style = left_style.add_modifier(Modifier::UNDERLINED);
         } else {
             right_style = right_style.add_modifier(Modifier::UNDERLINED);
         }
+    }
+    if let Some(bg) = bg_color {
+        left_style = left_style.bg(bg);
+        right_style = right_style.bg(bg);
     }
 
     let left_cell = format!("{}{}", left_prefix, left_text);
@@ -1803,13 +1810,25 @@ fn render_split_diff_row(
     let mut line = Line::from(vec![
         Span::styled(
             format!("{} ", indicator),
-            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+            match bg_color {
+                Some(bg) => Style::default()
+                    .fg(POPUP_BORDER)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+                None => Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+            },
         ),
         Span::styled(left_cell, left_style),
-        Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+        Span::styled(
+            " | ",
+            match bg_color {
+                Some(bg) => Style::default().fg(PANEL_BORDER).bg(bg),
+                None => Style::default().fg(PANEL_BORDER),
+            },
+        ),
         Span::styled(right_cell, right_style),
     ]);
-    if selected {
+    if selected || in_visual_range {
         line = line.style(row_style);
     }
     line

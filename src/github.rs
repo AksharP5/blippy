@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 const API_BASE: &str = "https://api.github.com";
 const API_VERSION: &str = "2022-11-28";
@@ -69,12 +70,15 @@ pub struct ApiPullRequestSummary {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiPullRequestReviewComment {
     pub id: i64,
+    #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
     pub is_resolved: bool,
     pub path: String,
     pub line: Option<i64>,
     pub original_line: Option<i64>,
     pub side: Option<String>,
+    pub in_reply_to_id: Option<i64>,
     pub body: Option<String>,
     pub created_at: Option<String>,
     pub user: ApiUser,
@@ -283,6 +287,48 @@ impl GitHubClient {
         repo: &str,
         pull_number: i64,
     ) -> Result<Vec<ApiPullRequestReviewComment>> {
+        let thread_map = self
+            .list_pull_request_review_thread_map(owner, repo, pull_number)
+            .await
+            .unwrap_or_default();
+
+        let mut page = 1;
+        let mut comments = Vec::new();
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/pulls/{}/comments",
+                API_BASE, owner, repo, pull_number
+            );
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let batch = response.json::<Vec<ApiPullRequestReviewComment>>().await?;
+            if batch.is_empty() {
+                break;
+            }
+            for mut comment in batch {
+                if let Some((thread_id, resolved)) = thread_map.get(&comment.id) {
+                    comment.thread_id = Some(thread_id.clone());
+                    comment.is_resolved = *resolved;
+                }
+                comments.push(comment);
+            }
+            page += 1;
+        }
+        Ok(comments)
+    }
+
+    async fn list_pull_request_review_thread_map(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<HashMap<i64, (String, bool)>> {
         let query = r#"
             query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
               repository(owner: $owner, name: $repo) {
@@ -298,15 +344,6 @@ impl GitHubClient {
                       comments(first: 100) {
                         nodes {
                           databaseId
-                          path
-                          line
-                          originalLine
-                          diffSide
-                          body
-                          createdAt
-                          author {
-                            login
-                          }
                         }
                       }
                     }
@@ -317,7 +354,7 @@ impl GitHubClient {
         "#;
 
         let mut cursor: Option<String> = None;
-        let mut comments = Vec::new();
+        let mut map = HashMap::new();
         loop {
             let payload = serde_json::json!({
                 "owner": owner,
@@ -335,64 +372,31 @@ impl GitHubClient {
                 .cloned()
                 .unwrap_or_default();
             for thread in threads {
-                let thread_id = thread
+                let thread_id = match thread
                     .get("id")
                     .and_then(serde_json::Value::as_str)
-                    .map(ToString::to_string);
+                    .map(ToString::to_string)
+                {
+                    Some(thread_id) => thread_id,
+                    None => continue,
+                };
                 let is_resolved = thread
                     .get("isResolved")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
-
                 let thread_comments = thread["comments"]["nodes"]
                     .as_array()
                     .cloned()
                     .unwrap_or_default();
                 for comment in thread_comments {
-                    let id = match comment
+                    let comment_id = match comment
                         .get("databaseId")
                         .and_then(serde_json::Value::as_i64)
                     {
-                        Some(id) => id,
+                        Some(comment_id) => comment_id,
                         None => continue,
                     };
-                    let path = match comment.get("path").and_then(serde_json::Value::as_str) {
-                        Some(path) => path.to_string(),
-                        None => continue,
-                    };
-                    let author = comment
-                        .get("author")
-                        .and_then(|author| author.get("login"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let created_at = comment
-                        .get("createdAt")
-                        .and_then(serde_json::Value::as_str)
-                        .map(ToString::to_string);
-                    comments.push(ApiPullRequestReviewComment {
-                        id,
-                        thread_id: thread_id.clone(),
-                        is_resolved,
-                        path,
-                        line: comment.get("line").and_then(serde_json::Value::as_i64),
-                        original_line: comment
-                            .get("originalLine")
-                            .and_then(serde_json::Value::as_i64),
-                        side: comment
-                            .get("diffSide")
-                            .and_then(serde_json::Value::as_str)
-                            .map(ToString::to_string),
-                        body: comment
-                            .get("body")
-                            .and_then(serde_json::Value::as_str)
-                            .map(ToString::to_string),
-                        created_at,
-                        user: ApiUser {
-                            login: author,
-                            user_type: None,
-                        },
-                    });
+                    map.insert(comment_id, (thread_id.clone(), is_resolved));
                 }
             }
 
@@ -406,7 +410,7 @@ impl GitHubClient {
                 .as_str()
                 .map(ToString::to_string);
         }
-        Ok(comments)
+        Ok(map)
     }
 
     pub async fn set_pull_request_review_thread_resolved(
