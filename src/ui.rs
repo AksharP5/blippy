@@ -574,6 +574,19 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
     let mut side_lines = Vec::new();
     if is_pr {
+        side_lines.push(Line::from(Span::styled(
+            "Press Enter for full-screen changes",
+            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+        )));
+        side_lines.push(Line::from(""));
+    } else {
+        side_lines.push(Line::from(Span::styled(
+            "Press Enter for full comments",
+            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+        )));
+        side_lines.push(Line::from(""));
+    }
+    if is_pr {
         if app.pull_request_files_syncing() {
             side_lines.push(Line::from("Loading pull request changes..."));
         } else if app.pull_request_files().is_empty() {
@@ -1374,6 +1387,7 @@ fn help_text(app: &App) -> String {
                 "m comment",
                 "r refresh",
                 "o browser",
+                "Ctrl+y copy status",
                 "Ctrl+G repos",
                 "q quit",
             ];
@@ -1384,29 +1398,30 @@ fn help_text(app: &App) -> String {
             } else {
                 parts.insert(11, "u reopen issue");
                 parts.insert(12, "dd close issue");
+                parts.insert(13, "Shift+O open linked PR");
             }
             parts.join(" • ")
         }
         View::IssueDetail => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+G repos • q quit"
+                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+O open linked PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • q quit"
+                return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
                     .to_string();
             }
-            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • q quit"
+            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+O open linked PR • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
                 .to_string()
         }
         View::PullRequestFiles => {
-            "j/k scroll changes • Ctrl+u/d page • gg/G top/bottom • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r refresh changes • o browser • q quit"
+            "j/k scroll changes • Ctrl+u/d page • gg/G top/bottom • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r refresh changes • o browser • Ctrl+y copy status • q quit"
                 .to_string()
         }
         View::LabelPicker => {

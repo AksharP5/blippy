@@ -93,6 +93,7 @@ cargo test
 - Enter: open selected issue
 - r: refresh issues/comments
 - o: open in browser
+- Shift+O: open linked pull request for selected issue
 - v: checkout selected pull request locally (`gh pr checkout`)
 - dd: close selected issue/pull request with preset
 - c: open full comments from detail view
@@ -101,6 +102,7 @@ cargo test
 - x: delete selected comment in full comments view
 - PR detail: right pane shows changed files + patch snippets (no checkout required)
 - Enter on PR changes pane: open full-screen PR changes viewer
+- Ctrl+y: copy current status message to clipboard
 - b or Esc: back from issue detail/comments
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
 

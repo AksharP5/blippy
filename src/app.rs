@@ -29,6 +29,8 @@ pub enum AppAction {
     PickIssue,
     OpenInBrowser,
     CheckoutPullRequest,
+    OpenLinkedPullRequest,
+    CopyStatus,
     CloseIssue,
     ReopenIssue,
     AddIssueComment,
@@ -621,6 +623,10 @@ impl App {
             return;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if key.code == KeyCode::Char('y') {
+                self.action = Some(AppAction::CopyStatus);
+                return;
+            }
             if key.code == KeyCode::Char('u') {
                 self.page_up();
                 return;
@@ -818,6 +824,18 @@ impl App {
                 ) =>
             {
                 self.action = Some(AppAction::OpenInBrowser);
+            }
+            KeyCode::Char('O')
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    && matches!(
+                        self.view,
+                        View::Issues
+                            | View::IssueDetail
+                            | View::IssueComments
+                            | View::PullRequestFiles
+                    ) =>
+            {
+                self.action = Some(AppAction::OpenLinkedPullRequest);
             }
             KeyCode::Char('v')
                 if matches!(
@@ -1436,6 +1454,18 @@ impl App {
                 self.action = Some(AppAction::PickIssue);
             }
             View::IssueDetail => {
+                if self.focus == Focus::IssueBody {
+                    if self.current_view_issue_is_pull_request() {
+                        self.status =
+                            "Focus changes pane (Ctrl+l), then press Enter for full PR changes"
+                                .to_string();
+                        return;
+                    }
+                    self.status =
+                        "Focus comments pane (Ctrl+l), then press Enter to open full comments"
+                            .to_string();
+                    return;
+                }
                 if self.current_view_issue_is_pull_request()
                     && self.focus == Focus::IssueRecentComments
                 {
@@ -2291,6 +2321,30 @@ mod tests {
     }
 
     #[test]
+    fn enter_on_issue_body_stays_in_detail_view() {
+        let mut app = App::new(Config::default());
+        app.set_issues(vec![IssueRow {
+            id: 45,
+            repo_id: 1,
+            number: 10,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+        app.set_current_issue(45, 10);
+        app.set_view(View::IssueDetail);
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.view(), View::IssueDetail);
+    }
+
+    #[test]
     fn f_cycles_issue_filter() {
         let mut app = App::new(Config::default());
         app.set_view(View::Issues);
@@ -2388,6 +2442,25 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::CheckoutPullRequest));
+    }
+
+    #[test]
+    fn shift_o_triggers_open_linked_pull_request_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT));
+
+        assert_eq!(app.take_action(), Some(AppAction::OpenLinkedPullRequest));
+    }
+
+    #[test]
+    fn ctrl_y_triggers_copy_status_action() {
+        let mut app = App::new(Config::default());
+
+        app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.take_action(), Some(AppAction::CopyStatus));
     }
 
     #[test]

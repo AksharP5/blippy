@@ -235,6 +235,47 @@ impl GitHubClient {
         Ok(files)
     }
 
+    pub async fn find_linked_pull_request_url(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+    ) -> Result<Option<String>> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/timeline",
+            API_BASE, owner, repo, issue_number
+        );
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(&self.token)
+            .query(&[("per_page", "100")])
+            .send()
+            .await?
+            .error_for_status()?;
+        let events = response.json::<Vec<serde_json::Value>>().await?;
+
+        for event in events {
+            let issue = match event.get("source").and_then(|value| value.get("issue")) {
+                Some(issue) => issue,
+                None => continue,
+            };
+            if issue.get("pull_request").is_none() {
+                continue;
+            }
+            let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
+                Some(html_url) => html_url,
+                None => continue,
+            };
+            if !html_url.contains("/pull/") {
+                continue;
+            }
+            return Ok(Some(html_url.to_string()));
+        }
+
+        Ok(None)
+    }
+
     pub async fn create_comment(
         &self,
         owner: &str,
