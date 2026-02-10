@@ -24,7 +24,16 @@ use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::app::{App, AppAction, PendingIssueAction, PresetSelection, PullRequestFile, View};
+use crate::app::{
+    App,
+    AppAction,
+    IssueFilter,
+    PendingIssueAction,
+    PresetSelection,
+    PullRequestFile,
+    View,
+    WorkItemMode,
+};
 use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
 use crate::cli::{parse_args, CliCommand};
 use crate::config::Config;
@@ -1081,6 +1090,38 @@ fn open_linked_pull_request(app: &mut App, token: &str, event_tx: Sender<AppEven
     Ok(())
 }
 
+fn open_pull_request_in_tui(
+    app: &mut App,
+    conn: &rusqlite::Connection,
+    pull_number: i64,
+) -> Result<bool> {
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+
+    let try_filters = [IssueFilter::Open, IssueFilter::Closed];
+    for filter in try_filters {
+        app.set_issue_filter(filter);
+        if !app.select_issue_by_number(pull_number) {
+            continue;
+        }
+
+        let (issue_id, issue_number) = match app.selected_issue_row() {
+            Some(issue) => (issue.id, issue.number),
+            None => return Ok(false),
+        };
+        app.set_current_issue(issue_id, issue_number);
+        app.reset_issue_detail_scroll();
+        load_comments_for_issue(app, conn, issue_id)?;
+        app.set_view(View::IssueDetail);
+        app.set_comment_syncing(false);
+        app.request_comment_sync();
+        app.request_pull_request_files_sync();
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
 fn start_linked_pull_request_lookup(
     owner: String,
     repo: String,
@@ -1115,13 +1156,21 @@ fn start_linked_pull_request_lookup(
 
         let result = runtime.block_on(async {
             client
-                .find_linked_pull_request_url(&owner, &repo, issue_number)
+                .find_linked_pull_request(&owner, &repo, issue_number)
                 .await
         });
 
         match result {
-            Ok(url) => {
-                let _ = event_tx.send(AppEvent::LinkedPullRequestResolved { issue_number, url });
+            Ok(linked) => {
+                let (pull_number, url) = match linked {
+                    Some((pull_number, url)) => (Some(pull_number), Some(url)),
+                    None => (None, None),
+                };
+                let _ = event_tx.send(AppEvent::LinkedPullRequestResolved {
+                    issue_number,
+                    pull_number,
+                    url,
+                });
             }
             Err(error) => {
                 let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
@@ -1375,20 +1424,47 @@ fn handle_events(
                     app.set_status(format!("PR files unavailable: {}", message));
                 }
             }
-            AppEvent::LinkedPullRequestResolved { issue_number, url } => {
-                let url = match url {
-                    Some(url) => url,
+            AppEvent::LinkedPullRequestResolved {
+                issue_number,
+                pull_number,
+                url,
+            } => {
+                let pull_number = match pull_number {
+                    Some(pull_number) => pull_number,
                     None => {
                         app.set_status(format!("No linked pull request found for #{}", issue_number));
                         continue;
                     }
                 };
 
-                if let Err(error) = open_url(url.as_str()) {
-                    app.set_status(format!("Open linked PR failed: {}", error));
+                refresh_current_repo_issues(app, conn)?;
+                if open_pull_request_in_tui(app, conn, pull_number)? {
+                    app.set_status(format!(
+                        "Opened linked pull request #{} in TUI",
+                        pull_number
+                    ));
                     continue;
                 }
-                app.set_status(format!("Opened linked pull request for #{}", issue_number));
+
+                if let Some(url) = url {
+                    if let Err(error) = open_url(url.as_str()) {
+                        app.set_status(format!(
+                            "Linked PR #{} found but not cached; browser open failed: {}",
+                            pull_number, error
+                        ));
+                        continue;
+                    }
+                    app.set_status(format!(
+                        "Linked PR #{} not cached, opened in browser",
+                        pull_number
+                    ));
+                    continue;
+                }
+
+                app.set_status(format!(
+                    "Linked PR #{} found but not cached yet; run refresh",
+                    pull_number
+                ));
             }
             AppEvent::LinkedPullRequestLookupFailed {
                 issue_number,
@@ -1464,6 +1540,7 @@ enum AppEvent {
     },
     LinkedPullRequestResolved {
         issue_number: i64,
+        pull_number: Option<i64>,
         url: Option<String>,
     },
     LinkedPullRequestLookupFailed {

@@ -399,6 +399,27 @@ impl App {
         );
     }
 
+    pub fn set_work_item_mode(&mut self, mode: WorkItemMode) {
+        self.work_item_mode = mode;
+        self.rebuild_issue_filter();
+        self.selected_issue = 0;
+        self.issues_preview_scroll = 0;
+    }
+
+    pub fn select_issue_by_number(&mut self, issue_number: i64) -> bool {
+        let selected = self
+            .filtered_issue_indices
+            .iter()
+            .position(|index| self.issues.get(*index).is_some_and(|issue| issue.number == issue_number));
+        let selected = match selected {
+            Some(selected) => selected,
+            None => return false,
+        };
+        self.selected_issue = selected;
+        self.issues_preview_scroll = 0;
+        true
+    }
+
     pub fn issue_query(&self) -> &str {
         self.issue_query.as_str()
     }
@@ -2431,6 +2452,47 @@ mod tests {
         assert_eq!(app.work_item_mode(), WorkItemMode::PullRequests);
         assert_eq!(app.issues_for_view().len(), 1);
         assert!(app.issues_for_view()[0].is_pr);
+    }
+
+    #[test]
+    fn select_issue_by_number_finds_item_in_filtered_mode() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 11,
+                state: "open".to_string(),
+                title: "Issue".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 22,
+                state: "closed".to_string(),
+                title: "PR".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: true,
+            },
+        ]);
+
+        app.set_work_item_mode(WorkItemMode::PullRequests);
+        app.set_issue_filter(IssueFilter::Closed);
+
+        assert!(app.select_issue_by_number(22));
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(22));
+        assert!(!app.select_issue_by_number(11));
     }
 
     #[test]

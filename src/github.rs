@@ -235,12 +235,12 @@ impl GitHubClient {
         Ok(files)
     }
 
-    pub async fn find_linked_pull_request_url(
+    pub async fn find_linked_pull_request(
         &self,
         owner: &str,
         repo: &str,
         issue_number: i64,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<(i64, String)>> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}/timeline",
             API_BASE, owner, repo, issue_number
@@ -267,10 +267,14 @@ impl GitHubClient {
                 Some(html_url) => html_url,
                 None => continue,
             };
+            let pull_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
+                Some(pull_number) => pull_number,
+                None => continue,
+            };
             if !html_url.contains("/pull/") {
                 continue;
             }
-            return Ok(Some(html_url.to_string()));
+            return Ok(Some((pull_number, html_url.to_string())));
         }
 
         Ok(None)
