@@ -163,6 +163,24 @@ pub fn upsert_comment(_conn: &Connection, _comment: &CommentRow) -> Result<()> {
     Ok(())
 }
 
+pub fn update_comment_body_by_id(_conn: &Connection, _comment_id: i64, _body: &str) -> Result<()> {
+    _conn.execute(
+        "UPDATE comments SET body = ?1 WHERE id = ?2",
+        (_body, _comment_id),
+    )?;
+    _conn.execute(
+        "UPDATE fts_content SET body = ?1 WHERE comment_id = ?2",
+        (_body, _comment_id),
+    )?;
+    Ok(())
+}
+
+pub fn delete_comment_by_id(_conn: &Connection, _comment_id: i64) -> Result<()> {
+    _conn.execute("DELETE FROM comments WHERE id = ?1", [_comment_id])?;
+    _conn.execute("DELETE FROM fts_content WHERE comment_id = ?1", [_comment_id])?;
+    Ok(())
+}
+
 pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
     let mut statement = _conn.prepare(
         "

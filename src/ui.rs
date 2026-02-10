@@ -520,6 +520,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                 start + index + 1,
                 comment.author.as_str(),
                 comment.created_at.as_deref(),
+                false,
             ));
             let rendered_comment = markdown::render(comment.body.as_str());
             if rendered_comment.lines.is_empty() {
@@ -632,9 +633,17 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         Some(issue) => format!("Comments #{}", issue.number),
         None => "Comments (n/p jump)".to_string(),
     };
+    let selected = if app.comments().is_empty() {
+        "none".to_string()
+    } else {
+        format!("{}/{}", app.selected_comment() + 1, app.comments().len())
+    };
     let header = Text::from(vec![
         Line::from(Span::styled(title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD))),
-        Line::from(Span::styled("jump comments with n/p", Style::default().fg(GITHUB_MUTED))),
+        Line::from(Span::styled(
+            format!("jump with n/p or [ ] • selected {} • e edit • x delete", selected),
+            Style::default().fg(GITHUB_MUTED),
+        )),
     ]);
     let header_block = Block::default()
         .borders(Borders::ALL)
@@ -661,6 +670,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
                 index + 1,
                 comment.author.as_str(),
                 comment.created_at.as_deref(),
+                index == app.selected_comment(),
             ));
             let rendered = markdown::render(comment.body.as_str());
             if rendered.lines.is_empty() {
@@ -933,6 +943,7 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
     let title = match app.editor_mode() {
         EditorMode::CloseIssue => "Close Issue Comment",
         EditorMode::AddComment => "Add Issue Comment",
+        EditorMode::EditComment => "Edit Issue Comment",
         EditorMode::AddPreset => "Preset Body",
     };
     let editor_area = main.inner(Margin {
@@ -1081,7 +1092,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • l labels • Shift+A assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
+            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p or [ ] next/prev comment • e edit comment • x delete comment • dd close • l labels • Shift+A assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1229,11 +1240,18 @@ fn ellipsize(input: &str, max: usize) -> String {
     format!("{}...", head)
 }
 
-fn comment_header(index: usize, author: &str, created_at: Option<&str>) -> Line<'static> {
+fn comment_header(index: usize, author: &str, created_at: Option<&str>, selected: bool) -> Line<'static> {
     let mut spans = Vec::new();
+    if selected {
+        spans.push(Span::styled("▸ ", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)));
+    } else {
+        spans.push(Span::raw("  "));
+    }
     spans.push(Span::styled(
         format!("{}  {}", index, author),
-        Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(if selected { Color::White } else { GITHUB_BLUE })
+            .add_modifier(Modifier::BOLD),
     ));
     if let Some(date) = format_comment_date(created_at) {
         spans.push(Span::raw("  "));

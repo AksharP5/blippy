@@ -316,6 +316,20 @@ fn handle_actions(
             app.set_current_issue(issue_id, issue_number);
             app.open_issue_comment_editor(app.view());
         }
+        AppAction::EditIssueComment => {
+            let return_view = app.view();
+            let comment = match app.selected_comment_row() {
+                Some(comment) => comment.clone(),
+                None => {
+                    app.set_status("No comment selected".to_string());
+                    return Ok(());
+                }
+            };
+            app.open_comment_edit_editor(return_view, comment.id, comment.body.as_str());
+        }
+        AppAction::DeleteIssueComment => {
+            delete_issue_comment(app, token, event_tx.clone())?;
+        }
         AppAction::EditLabels => {
             let return_view = app.view();
             let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
@@ -355,6 +369,10 @@ fn handle_actions(
         AppAction::SubmitIssueComment => {
             let comment = app.editor().text().to_string();
             post_issue_comment(app, token, comment, event_tx.clone())?;
+        }
+        AppAction::SubmitEditedComment => {
+            let comment = app.editor().text().to_string();
+            update_issue_comment(app, token, comment, event_tx.clone())?;
         }
         AppAction::SubmitLabels => {
             let labels = app.selected_labels();
@@ -484,6 +502,92 @@ fn post_issue_comment(
     start_add_comment(owner, repo, issue_number, token.to_string(), body, event_tx);
     app.set_view(app.editor_cancel_view());
     app.set_status("Posting comment...".to_string());
+    Ok(())
+}
+
+fn update_issue_comment(
+    app: &mut App,
+    token: &str,
+    body: String,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    if body.trim().is_empty() {
+        app.set_status("Comment cannot be empty".to_string());
+        return Ok(());
+    }
+
+    let comment_id = match app.take_editing_comment_id() {
+        Some(comment_id) => comment_id,
+        None => {
+            app.set_status("No comment selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let issue_number = match issue_number(app) {
+        Some(issue_number) => issue_number,
+        None => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_update_comment(
+        owner,
+        repo,
+        issue_number,
+        comment_id,
+        token.to_string(),
+        body,
+        event_tx,
+    );
+    app.set_view(app.editor_cancel_view());
+    app.set_status("Updating comment...".to_string());
+    Ok(())
+}
+
+fn delete_issue_comment(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
+    let comment = match app.selected_comment_row() {
+        Some(comment) => comment,
+        None => {
+            app.set_status("No comment selected".to_string());
+            return Ok(());
+        }
+    };
+    let issue_number = match issue_number(app) {
+        Some(issue_number) => issue_number,
+        None => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_delete_comment(
+        owner,
+        repo,
+        issue_number,
+        comment.id,
+        comment.issue_id,
+        token.to_string(),
+        event_tx,
+    );
+    app.set_status("Deleting comment...".to_string());
     Ok(())
 }
 
@@ -938,6 +1042,27 @@ fn handle_events(
                 app.set_status(format!("#{} assignees updated", issue_number));
                 app.request_sync();
             }
+            AppEvent::IssueCommentUpdated {
+                issue_number,
+                comment_id,
+                body,
+            } => {
+                app.update_comment_body_by_id(comment_id, body.as_str());
+                app.set_status(format!("#{} comment updated", issue_number));
+                app.request_comment_sync();
+                app.request_sync();
+            }
+            AppEvent::IssueCommentDeleted {
+                issue_number,
+                comment_id,
+                count,
+            } => {
+                app.remove_comment_by_id(comment_id);
+                app.update_issue_comments_count_by_number(issue_number, count as i64);
+                app.set_status(format!("#{} comment deleted", issue_number));
+                app.request_comment_sync();
+                app.request_sync();
+            }
             AppEvent::RepoLabelsSuggested { owner, repo, labels } => {
                 if app.current_owner() == Some(owner.as_str())
                     && app.current_repo() == Some(repo.as_str())
@@ -975,6 +1100,16 @@ enum AppEvent {
     IssueUpdated { issue_number: i64, message: String },
     IssueLabelsUpdated { issue_number: i64, labels: String },
     IssueAssigneesUpdated { issue_number: i64, assignees: String },
+    IssueCommentUpdated {
+        issue_number: i64,
+        comment_id: i64,
+        body: String,
+    },
+    IssueCommentDeleted {
+        issue_number: i64,
+        comment_id: i64,
+        count: usize,
+    },
     RepoLabelsSuggested {
         owner: String,
         repo: String,
@@ -1261,6 +1396,129 @@ fn start_add_comment(
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
                     message: format!("comment failed: {}", error),
+                });
+            }
+        }
+    });
+}
+
+fn start_update_comment(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    comment_id: i64,
+    token: String,
+    body: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment update failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment update failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .update_comment(&owner, &repo, comment_id, body.as_str())
+                .await
+        });
+
+        match result {
+            Ok(()) => {
+                if let Ok(conn) = crate::store::open_db() {
+                    let _ = crate::store::update_comment_body_by_id(&conn, comment_id, body.as_str());
+                }
+                let _ = event_tx.send(AppEvent::IssueCommentUpdated {
+                    issue_number,
+                    comment_id,
+                    body,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment update failed: {}", error),
+                });
+            }
+        }
+    });
+}
+
+fn start_delete_comment(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    comment_id: i64,
+    issue_id: i64,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment delete failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment delete failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime
+            .block_on(async { client.delete_comment(&owner, &repo, comment_id).await });
+
+        match result {
+            Ok(()) => {
+                let mut count = 0usize;
+                if let Ok(conn) = crate::store::open_db() {
+                    let _ = crate::store::delete_comment_by_id(&conn, comment_id);
+                    let comments = crate::store::comments_for_issue(&conn, issue_id).unwrap_or_default();
+                    count = comments.len();
+                    let _ = update_issue_comments_count(&conn, issue_id, count as i64);
+                }
+                let _ = event_tx.send(AppEvent::IssueCommentDeleted {
+                    issue_number,
+                    comment_id,
+                    count,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("comment delete failed: {}", error),
                 });
             }
         }

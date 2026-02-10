@@ -31,6 +31,9 @@ pub enum AppAction {
     ReopenIssue,
     AddIssueComment,
     SubmitIssueComment,
+    EditIssueComment,
+    DeleteIssueComment,
+    SubmitEditedComment,
     EditLabels,
     EditAssignees,
     SubmitLabels,
@@ -182,6 +185,7 @@ pub struct App {
     pending_d: bool,
     comment_editor: CommentEditorState,
     editor_cancel_view: View,
+    editing_comment_id: Option<i64>,
     label_options: Vec<String>,
     label_selected: HashSet<String>,
     selected_label_option: usize,
@@ -241,6 +245,7 @@ impl App {
             pending_d: false,
             comment_editor: CommentEditorState::default(),
             editor_cancel_view: View::Issues,
+            editing_comment_id: None,
             label_options: Vec::new(),
             label_selected: HashSet::new(),
             selected_label_option: 0,
@@ -374,6 +379,14 @@ impl App {
 
     pub fn selected_issue(&self) -> usize {
         self.selected_issue
+    }
+
+    pub fn selected_comment(&self) -> usize {
+        self.selected_comment
+    }
+
+    pub fn selected_comment_row(&self) -> Option<&CommentRow> {
+        self.comments.get(self.selected_comment)
     }
 
     pub fn issue_detail_scroll(&self) -> u16 {
@@ -646,10 +659,18 @@ impl App {
             }
             KeyCode::Char('n') if self.view == View::IssueComments => self.jump_next_comment(),
             KeyCode::Char('p') if self.view == View::IssueComments => self.jump_prev_comment(),
+            KeyCode::Char(']') if self.view == View::IssueComments => self.jump_next_comment(),
+            KeyCode::Char('[') if self.view == View::IssueComments => self.jump_prev_comment(),
             KeyCode::Char('m')
                 if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
             {
                 self.action = Some(AppAction::AddIssueComment);
+            }
+            KeyCode::Char('e') if self.view == View::IssueComments => {
+                self.action = Some(AppAction::EditIssueComment);
+            }
+            KeyCode::Char('x') if self.view == View::IssueComments => {
+                self.action = Some(AppAction::DeleteIssueComment);
             }
             KeyCode::Char('l')
                 if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
@@ -764,6 +785,7 @@ impl App {
     }
 
     pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
+        let selected_comment_id = self.selected_comment_row().map(|comment| comment.id);
         self.comments = comments;
         if self.comments.is_empty() {
             self.selected_comment = 0;
@@ -773,7 +795,9 @@ impl App {
             self.issue_recent_comments_max_scroll = 0;
             return;
         }
-        self.selected_comment = self.comments.len() - 1;
+        self.selected_comment = selected_comment_id
+            .and_then(|comment_id| self.comments.iter().position(|comment| comment.id == comment_id))
+            .unwrap_or(0);
         self.issue_comments_scroll = 0;
         self.issue_recent_comments_scroll = 0;
         self.issue_comments_max_scroll = 0;
@@ -907,6 +931,49 @@ impl App {
         self.rebuild_issue_filter();
     }
 
+    pub fn update_issue_comments_count_by_number(&mut self, issue_number: i64, count: i64) {
+        for issue in &mut self.issues {
+            if issue.number == issue_number {
+                issue.comments_count = count;
+            }
+        }
+    }
+
+    pub fn update_comment_body_by_id(&mut self, comment_id: i64, body: &str) {
+        for comment in &mut self.comments {
+            if comment.id == comment_id {
+                comment.body = body.to_string();
+                return;
+            }
+        }
+    }
+
+    pub fn remove_comment_by_id(&mut self, comment_id: i64) {
+        let removed_index = self
+            .comments
+            .iter()
+            .position(|comment| comment.id == comment_id);
+        let removed_index = match removed_index {
+            Some(index) => index,
+            None => return,
+        };
+
+        self.comments.remove(removed_index);
+        if self.comments.is_empty() {
+            self.selected_comment = 0;
+            self.issue_comments_scroll = 0;
+            return;
+        }
+
+        if self.selected_comment >= self.comments.len() {
+            self.selected_comment = self.comments.len() - 1;
+            return;
+        }
+        if removed_index <= self.selected_comment && self.selected_comment > 0 {
+            self.selected_comment -= 1;
+        }
+    }
+
     pub fn editor(&self) -> &CommentEditorState {
         &self.comment_editor
     }
@@ -920,13 +987,27 @@ impl App {
     }
 
     pub fn open_close_comment_editor(&mut self) {
+        self.editing_comment_id = None;
         self.comment_editor.reset_for_close();
         self.editor_cancel_view = View::CommentPresetPicker;
         self.set_view(View::CommentEditor);
     }
 
     pub fn open_issue_comment_editor(&mut self, return_view: View) {
+        self.editing_comment_id = None;
         self.comment_editor.reset_for_comment();
+        self.editor_cancel_view = return_view;
+        self.set_view(View::CommentEditor);
+    }
+
+    pub fn open_comment_edit_editor(
+        &mut self,
+        return_view: View,
+        comment_id: i64,
+        body: &str,
+    ) {
+        self.editing_comment_id = Some(comment_id);
+        self.comment_editor.reset_for_comment_edit(body);
         self.editor_cancel_view = return_view;
         self.set_view(View::CommentEditor);
     }
@@ -1026,6 +1107,10 @@ impl App {
 
     pub fn editor_cancel_view(&self) -> View {
         self.editor_cancel_view
+    }
+
+    pub fn take_editing_comment_id(&mut self) -> Option<i64> {
+        self.editing_comment_id.take()
     }
 
     pub fn current_issue_id(&self) -> Option<i64> {
@@ -1336,40 +1421,22 @@ impl App {
 
     fn jump_next_comment(&mut self) {
         let offsets = self.comment_offsets();
-        if offsets.is_empty() {
+        if offsets.is_empty() || self.selected_comment + 1 >= offsets.len() {
             return;
         }
-        let current = self.issue_comments_scroll;
-        let mut target = self.issue_comments_max_scroll;
-        let mut index = offsets.len() - 1;
-        for (offset_index, offset) in offsets.iter().enumerate() {
-            if *offset > current {
-                target = *offset;
-                index = offset_index;
-                break;
-            }
-        }
-        self.selected_comment = index;
-        self.issue_comments_scroll = target.min(self.issue_comments_max_scroll);
+        self.selected_comment += 1;
+        self.issue_comments_scroll = offsets[self.selected_comment].min(self.issue_comments_max_scroll);
+        self.status = format!("Comment {}/{}", self.selected_comment + 1, offsets.len());
     }
 
     fn jump_prev_comment(&mut self) {
         let offsets = self.comment_offsets();
-        if offsets.is_empty() {
+        if offsets.is_empty() || self.selected_comment == 0 {
             return;
         }
-        let current = self.issue_comments_scroll;
-        let mut target = 0;
-        let mut index = 0;
-        for (offset_index, offset) in offsets.iter().enumerate() {
-            if *offset >= current {
-                break;
-            }
-            target = *offset;
-            index = offset_index;
-        }
-        self.selected_comment = index;
-        self.issue_comments_scroll = target;
+        self.selected_comment -= 1;
+        self.issue_comments_scroll = offsets[self.selected_comment];
+        self.status = format!("Comment {}/{}", self.selected_comment + 1, offsets.len());
     }
 
     fn comment_offsets(&self) -> Vec<u16> {
@@ -1610,6 +1677,7 @@ impl App {
             View::CommentEditor => {
                 match key.code {
                     KeyCode::Esc => {
+                        self.editing_comment_id = None;
                         self.set_view(self.editor_cancel_view);
                     }
                     KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -1633,6 +1701,9 @@ impl App {
                         }
                         EditorMode::AddComment => {
                             self.action = Some(AppAction::SubmitIssueComment);
+                        }
+                        EditorMode::EditComment => {
+                            self.action = Some(AppAction::SubmitEditedComment);
                         }
                         EditorMode::AddPreset => {
                             self.action = Some(AppAction::SavePreset);
@@ -1857,12 +1928,16 @@ impl App {
 pub enum EditorMode {
     CloseIssue,
     AddComment,
+    EditComment,
     AddPreset,
 }
 
 impl EditorMode {
     fn allows_multiline(self) -> bool {
-        matches!(self, Self::CloseIssue | Self::AddComment | Self::AddPreset)
+        matches!(
+            self,
+            Self::CloseIssue | Self::AddComment | Self::EditComment | Self::AddPreset
+        )
     }
 }
 
@@ -1906,6 +1981,11 @@ impl CommentEditorState {
         self.text.clear();
     }
 
+    pub fn reset_for_comment_edit(&mut self, body: &str) {
+        self.mode = EditorMode::EditComment;
+        self.text = body.to_string();
+    }
+
     pub fn reset_for_preset_name(&mut self) {
         self.mode = EditorMode::AddPreset;
         self.name.clear();
@@ -1937,7 +2017,7 @@ impl CommentEditorState {
 mod tests {
     use super::{App, AppAction, Focus, IssueFilter, View};
     use crate::config::Config;
-    use crate::store::{IssueRow, LocalRepoRow};
+    use crate::store::{CommentRow, IssueRow, LocalRepoRow};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
@@ -2250,6 +2330,52 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
         assert_eq!(app.take_action(), Some(AppAction::AddIssueComment));
+    }
+
+    #[test]
+    fn e_triggers_edit_comment_action_in_comments_view() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueComments);
+        app.set_comments(vec![CommentRow {
+            id: 300,
+            issue_id: 20,
+            author: "dev".to_string(),
+            body: "hello".to_string(),
+            created_at: Some("2024-01-02T01:00:00Z".to_string()),
+            last_accessed_at: None,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::EditIssueComment));
+    }
+
+    #[test]
+    fn x_triggers_delete_comment_action_in_comments_view() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueComments);
+        app.set_comments(vec![CommentRow {
+            id: 301,
+            issue_id: 20,
+            author: "dev".to_string(),
+            body: "hello".to_string(),
+            created_at: Some("2024-01-02T01:00:00Z".to_string()),
+            last_accessed_at: None,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::DeleteIssueComment));
+    }
+
+    #[test]
+    fn enter_submits_edited_comment_editor() {
+        let mut app = App::new(Config::default());
+        app.open_comment_edit_editor(View::IssueComments, 99, "existing");
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitEditedComment));
     }
 
     #[test]
