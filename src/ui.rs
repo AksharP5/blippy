@@ -859,10 +859,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         PullRequestReviewFocus::Files => "files",
         PullRequestReviewFocus::Diff => "diff",
     };
-    let side = match app.pull_request_review_side() {
-        ReviewSide::Left => "old",
-        ReviewSide::Right => "new",
-    };
+    let side = app.pull_request_review_side();
     let visual = if app.pull_request_visual_mode() {
         "visual"
     } else {
@@ -877,10 +874,25 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             title.clone(),
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            format!("Ctrl+h/l pane • h/l side • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
-            Style::default().fg(GITHUB_MUTED),
-        )),
+        Line::from(vec![
+            Span::styled("focus:", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(" "),
+            Span::styled(focused, Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::raw("   "),
+            Span::styled("side:", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(" "),
+            side_chip("old", side == ReviewSide::Left),
+            Span::raw(" "),
+            side_chip("new", side == ReviewSide::Right),
+            Span::raw("   "),
+            Span::styled("mode:", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(" "),
+            Span::styled(visual, Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::raw("   "),
+            Span::styled("range:", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(" "),
+            Span::styled(visual_range, Style::default().fg(TEXT_PRIMARY)),
+        ]),
     ]);
     let header_block = Block::default()
         .borders(Borders::ALL)
@@ -956,6 +968,10 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     let selected_file = app
         .selected_pull_request_file_row()
         .map(|file| (file.filename.clone(), file.patch.clone()));
+    let right_sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(10), Constraint::Length(9)])
+        .split(panes[1]);
     let mut lines = Vec::new();
     let mut row_offsets = Vec::new();
 
@@ -964,7 +980,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     } else if selected_file.is_none() {
         lines.push(Line::from("Select a file to start reviewing."));
     } else {
-        let (file_name, patch) = selected_file.clone().expect("selected file exists");
+        let (_file_name, patch) = selected_file.clone().expect("selected file exists");
         let rows = parse_patch(patch.as_deref());
         if rows.is_empty() {
             lines.push(Line::from(Span::styled(
@@ -990,74 +1006,12 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     left_width,
                     right_width,
                 ));
-
-                let target_right = row
-                    .new_line
-                    .map(|line| app.pull_request_comments_for_path_and_line(
-                        file_name.as_str(),
-                        ReviewSide::Right,
-                        line,
-                    ))
-                    .unwrap_or_default();
-                for comment in target_right {
-                    lines.push(render_inline_review_comment(
-                        comment.author.as_str(),
-                        comment.body.as_str(),
-                        ReviewSide::Right,
-                        comment.resolved,
-                        panel_width,
-                        left_width,
-                        right_width,
-                        app.selected_pull_request_review_comment_id() == Some(comment.id),
-                    ));
-                }
-
-                let target_left = row
-                    .old_line
-                    .map(|line| app.pull_request_comments_for_path_and_line(
-                        file_name.as_str(),
-                        ReviewSide::Left,
-                        line,
-                    ))
-                    .unwrap_or_default();
-                for comment in target_left {
-                    lines.push(render_inline_review_comment(
-                        comment.author.as_str(),
-                        comment.body.as_str(),
-                        ReviewSide::Left,
-                        comment.resolved,
-                        panel_width,
-                        left_width,
-                        right_width,
-                        app.selected_pull_request_review_comment_id() == Some(comment.id),
-                    ));
-                }
-            }
-
-            let unanchored = app.pull_request_unanchored_comments_for_path(file_name.as_str());
-            if !unanchored.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    format!("Unanchored comments ({})", unanchored.len()),
-                    Style::default().fg(GITHUB_MUTED).add_modifier(Modifier::BOLD),
-                )));
-                for comment in unanchored {
-                    lines.push(Line::from(Span::styled(
-                        format!(
-                            "  [thread {}] @{} {}",
-                            comment.id,
-                            comment.author,
-                            ellipsize(comment.body.as_str(), panel_width.saturating_sub(18))
-                        ),
-                        Style::default().fg(POPUP_BORDER),
-                    )));
-                }
             }
         }
     }
 
-    let content_width = panes[1].width.saturating_sub(2);
-    let viewport_height = panes[1].height.saturating_sub(2) as usize;
+    let content_width = right_sections[0].width.saturating_sub(2);
+    let viewport_height = right_sections[0].height.saturating_sub(2) as usize;
     let total_lines = wrapped_line_count(&lines, content_width);
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_pull_request_diff_max_scroll(max_scroll);
@@ -1089,7 +1043,77 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
-    frame.render_widget(paragraph, panes[1]);
+    frame.render_widget(paragraph, right_sections[0]);
+
+    let mut comment_lines = Vec::new();
+    if app.pull_request_review_comments_syncing() {
+        comment_lines.push(Line::from("Loading review comments..."));
+    } else if let Some((file_name, _)) = selected_file.as_ref() {
+        let target = app.selected_pull_request_review_target();
+        if let Some(target) = target {
+            let side_label = if target.side == ReviewSide::Left { "old" } else { "new" };
+            comment_lines.push(Line::from(vec![
+                Span::styled("line ", Style::default().fg(GITHUB_MUTED)),
+                Span::styled(
+                    target.line.to_string(),
+                    Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                side_chip(side_label, true),
+            ]));
+            comment_lines.push(Line::from(""));
+
+            let mut selected_comments = app.pull_request_comments_for_path_and_line(
+                file_name.as_str(),
+                target.side,
+                target.line,
+            );
+            if selected_comments.is_empty() {
+                comment_lines.push(Line::from("No comments on selected line."));
+            } else {
+                selected_comments.sort_by_key(|comment| comment.id);
+                for comment in selected_comments {
+                    let is_selected = app.selected_pull_request_review_comment_id() == Some(comment.id);
+                    comment_lines.extend(render_review_comment_card(
+                        comment.author.as_str(),
+                        comment.body.as_str(),
+                        comment.resolved,
+                        is_selected,
+                        right_sections[1].width.saturating_sub(4) as usize,
+                    ));
+                    comment_lines.push(Line::from(""));
+                }
+            }
+        }
+
+        let unanchored = app.pull_request_unanchored_comments_for_path(file_name.as_str());
+        if !unanchored.is_empty() {
+            if !comment_lines.is_empty() {
+                comment_lines.push(Line::from(""));
+            }
+            comment_lines.push(Line::from(Span::styled(
+                format!("Unanchored in file: {}", unanchored.len()),
+                Style::default().fg(GITHUB_MUTED).add_modifier(Modifier::BOLD),
+            )));
+            for comment in unanchored.into_iter().take(2) {
+                comment_lines.push(Line::from(Span::styled(
+                    format!("  @{} {}", comment.author, ellipsize(comment.body.as_str(), 90)),
+                    Style::default().fg(POPUP_BORDER),
+                )));
+            }
+        }
+    } else {
+        comment_lines.push(Line::from("Select a file to see comments."));
+    }
+
+    let comments_block = panel_block_with_border("Review comments", PANEL_BORDER);
+    frame.render_widget(
+        Paragraph::new(Text::from(comment_lines))
+            .block(comments_block)
+            .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL_ALT))
+            .wrap(Wrap { trim: false }),
+        right_sections[1],
+    );
 
     draw_status(frame, app, footer);
 }
@@ -1821,6 +1845,17 @@ fn render_split_diff_row(
         " "
     };
 
+    let left_rail = if selected_side == ReviewSide::Left {
+        "▌"
+    } else {
+        " "
+    };
+    let right_rail = if selected_side == ReviewSide::Right {
+        "▌"
+    } else {
+        " "
+    };
+
     let mut line = Line::from(vec![
         Span::styled(
             format!("{} ", indicator),
@@ -1832,6 +1867,15 @@ fn render_split_diff_row(
                 None => Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
             },
         ),
+        Span::styled(
+            format!("{}", left_rail),
+            match bg_color {
+                Some(bg) => Style::default().fg(POPUP_BORDER).bg(bg),
+                None => Style::default().fg(POPUP_BORDER),
+            }
+            .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
         Span::styled(left_cell, left_style),
         Span::styled(
             " | ",
@@ -1840,6 +1884,15 @@ fn render_split_diff_row(
                 None => Style::default().fg(PANEL_BORDER),
             },
         ),
+        Span::styled(
+            format!("{}", right_rail),
+            match bg_color {
+                Some(bg) => Style::default().fg(POPUP_BORDER).bg(bg),
+                None => Style::default().fg(POPUP_BORDER),
+            }
+            .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
         Span::styled(right_cell, right_style),
     ]);
     if selected || in_visual_range {
@@ -1848,54 +1901,60 @@ fn render_split_diff_row(
     line
 }
 
-fn render_inline_review_comment(
+fn side_chip(label: &str, active: bool) -> Span<'static> {
+    if active {
+        return Span::styled(
+            format!(" {} ", label),
+            Style::default()
+                .fg(Color::Black)
+                .bg(POPUP_BORDER)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+    Span::styled(
+        format!(" {} ", label),
+        Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL_ALT),
+    )
+}
+
+fn render_review_comment_card(
     author: &str,
     body: &str,
-    side: ReviewSide,
     resolved: bool,
-    width: usize,
-    left_width: usize,
-    right_width: usize,
     selected: bool,
-) -> Line<'static> {
-    let side_label = match side {
-        ReviewSide::Left => "old",
-        ReviewSide::Right => "new",
-    };
-    let prefix = if selected { ">" } else { " " };
-    let resolved_label = if resolved { "done" } else { "open" };
-    let text = format!(
-        "{} [{} {} @{}] {}",
-        prefix,
-        side_label,
-        resolved_label,
-        author,
-        ellipsize(body, width.saturating_sub(24))
-    );
-
-    let muted_left = " ".repeat(left_width);
-    let muted_right = " ".repeat(right_width);
-    let comment_width = width.saturating_sub(8);
-    let text = ellipsize(text.as_str(), comment_width);
-    let mut line = if side == ReviewSide::Left {
-        let left_text = format!("{:width$}", text, width = left_width);
-        Line::from(vec![
-            Span::styled(left_text, Style::default().fg(POPUP_BORDER)),
-            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
-            Span::styled(muted_right, Style::default().fg(GITHUB_MUTED)),
-        ])
+    width: usize,
+) -> Vec<Line<'static>> {
+    let state = if resolved { "resolved" } else { "open" };
+    let mut lines = Vec::new();
+    let border = if selected {
+        "┏"
     } else {
-        let right_text = format!("{:width$}", text, width = right_width);
-        Line::from(vec![
-            Span::styled(muted_left, Style::default().fg(GITHUB_MUTED)),
-            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
-            Span::styled(right_text, Style::default().fg(POPUP_BORDER)),
-        ])
+        "┌"
     };
+    lines.push(Line::from(Span::styled(
+        format!("{} {}", border, "─".repeat(width.saturating_sub(2))),
+        Style::default().fg(POPUP_BORDER),
+    )));
+    lines.push(Line::from(vec![
+        Span::styled("│ ", Style::default().fg(POPUP_BORDER)),
+        Span::styled(author.to_string(), Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(state, Style::default().fg(GITHUB_MUTED)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("│ ", Style::default().fg(POPUP_BORDER)),
+        Span::styled(ellipsize(body, width.saturating_sub(4)), Style::default().fg(TEXT_PRIMARY)),
+    ]));
+    lines.push(Line::from(Span::styled(
+        format!("└ {}", "─".repeat(width.saturating_sub(2))),
+        Style::default().fg(POPUP_BORDER),
+    )));
     if selected {
-        line = line.style(Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD));
+        for line in &mut lines {
+            *line = line.clone().style(Style::default().bg(SELECT_BG));
+        }
     }
-    line
+    lines
 }
 
 fn file_status_symbol(status: &str) -> &'static str {
