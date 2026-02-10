@@ -631,7 +631,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     });
     let title = match app.current_issue_row() {
         Some(issue) => format!("Comments #{}", issue.number),
-        None => "Comments (n/p jump)".to_string(),
+        None => "Comments (j/k jump)".to_string(),
     };
     let selected = if app.comments().is_empty() {
         "none".to_string()
@@ -641,7 +641,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     let header = Text::from(vec![
         Line::from(Span::styled(title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD))),
         Line::from(Span::styled(
-            format!("jump with n/p or [ ] • selected {} • e edit • x delete", selected),
+            format!("j/k jump comments • selected {} • e edit • x delete", selected),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -1084,15 +1084,15 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a assignee filter • l labels • Shift+A assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a assignee filter • l labels • Shift+A assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close issue • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • l labels • Shift+A assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close issue • l labels • Shift+A assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p or [ ] next/prev comment • e edit comment • x delete comment • dd close • l labels • Shift+A assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
+            "j/k or ↑/↓ next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • dd close issue • l labels • Shift+A assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::LabelPicker => {

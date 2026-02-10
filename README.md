@@ -94,7 +94,7 @@ cargo test
 - o: open in browser
 - dd: close issue with preset
 - c: open full comments from issue detail
-- n/p or [ ]: jump next/previous comment in full comments view
+- j/k or arrow keys: jump next/previous comment in full comments view
 - e: edit selected comment in full comments view
 - x: delete selected comment in full comments view
 - b or Esc: back from issue detail/comments

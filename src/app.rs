@@ -650,6 +650,7 @@ impl App {
                     self.pending_d = false;
                 } else {
                     self.pending_d = true;
+                    self.status = "Press d again to close issue".to_string();
                 }
             }
             KeyCode::Char('G') => self.jump_bottom(),
@@ -657,10 +658,6 @@ impl App {
                 self.reset_issue_comments_scroll();
                 self.set_view(View::IssueComments);
             }
-            KeyCode::Char('n') if self.view == View::IssueComments => self.jump_next_comment(),
-            KeyCode::Char('p') if self.view == View::IssueComments => self.jump_prev_comment(),
-            KeyCode::Char(']') if self.view == View::IssueComments => self.jump_next_comment(),
-            KeyCode::Char('[') if self.view == View::IssueComments => self.jump_prev_comment(),
             KeyCode::Char('m')
                 if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
             {
@@ -1177,7 +1174,7 @@ impl App {
                 self.issue_detail_scroll = self.issue_detail_scroll.saturating_sub(1);
             }
             View::IssueComments => {
-                self.issue_comments_scroll = self.issue_comments_scroll.saturating_sub(1);
+                self.jump_prev_comment();
             }
             View::CommentPresetPicker => {
                 if self.preset_choice > 0 {
@@ -1249,8 +1246,7 @@ impl App {
                 self.issue_detail_scroll = self.issue_detail_scroll.saturating_add(1).min(max);
             }
             View::IssueComments => {
-                let max = self.issue_comments_max_scroll;
-                self.issue_comments_scroll = self.issue_comments_scroll.saturating_add(1).min(max);
+                self.jump_next_comment();
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -1333,7 +1329,10 @@ impl App {
                 }
                 self.issue_detail_scroll = 0;
             }
-            View::IssueComments => self.issue_comments_scroll = 0,
+            View::IssueComments => {
+                self.selected_comment = 0;
+                self.issue_comments_scroll = 0;
+            }
             View::CommentPresetPicker => self.preset_choice = 0,
             View::LabelPicker => {
                 if let Some(index) = self.filtered_label_indices().first() {
@@ -1381,6 +1380,9 @@ impl App {
                 self.issue_detail_scroll = self.issue_detail_max_scroll;
             }
             View::IssueComments => {
+                if !self.comments.is_empty() {
+                    self.selected_comment = self.comments.len() - 1;
+                }
                 self.issue_comments_scroll = self.issue_comments_max_scroll;
             }
             View::CommentPresetPicker => {
@@ -2366,6 +2368,37 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::DeleteIssueComment));
+    }
+
+    #[test]
+    fn j_and_k_navigate_comments_in_full_comments_view() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueComments);
+        app.set_comments(vec![
+            CommentRow {
+                id: 401,
+                issue_id: 20,
+                author: "dev".to_string(),
+                body: "one".to_string(),
+                created_at: Some("2024-01-02T01:00:00Z".to_string()),
+                last_accessed_at: None,
+            },
+            CommentRow {
+                id: 402,
+                issue_id: 20,
+                author: "dev".to_string(),
+                body: "two".to_string(),
+                created_at: Some("2024-01-02T01:01:00Z".to_string()),
+                last_accessed_at: None,
+            },
+        ]);
+
+        assert_eq!(app.selected_comment(), 0);
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.selected_comment(), 1);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.selected_comment(), 0);
     }
 
     #[test]
