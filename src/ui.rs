@@ -16,21 +16,22 @@ use crate::app::{
 use crate::markdown;
 use crate::pr_diff::{parse_patch, DiffKind};
 
-const GITHUB_BLUE: Color = Color::Rgb(170, 215, 187);
-const GITHUB_GREEN: Color = Color::Rgb(142, 214, 165);
-const GITHUB_RED: Color = Color::Rgb(236, 137, 145);
-const GITHUB_VIOLET: Color = Color::Rgb(210, 176, 255);
-const GITHUB_BG: Color = Color::Rgb(11, 15, 20);
-const GITHUB_PANEL: Color = Color::Rgb(17, 22, 29);
-const GITHUB_PANEL_ALT: Color = Color::Rgb(21, 27, 35);
-const GITHUB_MUTED: Color = Color::Rgb(127, 138, 152);
-const PANEL_BORDER: Color = Color::Rgb(43, 52, 64);
-const FOCUS_BORDER: Color = Color::Rgb(182, 227, 185);
-const POPUP_BORDER: Color = Color::Rgb(208, 181, 255);
-const POPUP_BG: Color = Color::Rgb(18, 24, 32);
-const OVERLAY_BG: Color = Color::Rgb(9, 12, 18);
-const TEXT_PRIMARY: Color = Color::Rgb(230, 234, 240);
-const SELECT_BG: Color = Color::Rgb(34, 48, 58);
+const GITHUB_BLUE: Color = Color::Rgb(65, 105, 225);
+const GITHUB_GREEN: Color = Color::Rgb(74, 222, 128);
+const GITHUB_RED: Color = Color::Rgb(234, 92, 124);
+const GITHUB_VIOLET: Color = Color::Rgb(145, 171, 255);
+const GITHUB_BG: Color = Color::Rgb(0, 0, 0);
+const GITHUB_PANEL: Color = Color::Rgb(8, 11, 20);
+const GITHUB_PANEL_ALT: Color = Color::Rgb(11, 16, 28);
+const GITHUB_MUTED: Color = Color::Rgb(124, 138, 175);
+const PANEL_BORDER: Color = Color::Rgb(35, 50, 88);
+const FOCUS_BORDER: Color = Color::Rgb(105, 138, 255);
+const POPUP_BORDER: Color = Color::Rgb(128, 160, 255);
+const POPUP_BG: Color = Color::Rgb(6, 9, 18);
+const OVERLAY_BG: Color = Color::Rgb(0, 0, 0);
+const TEXT_PRIMARY: Color = Color::Rgb(226, 235, 255);
+const SELECT_BG: Color = Color::Rgb(22, 36, 72);
+const VISUAL_RANGE_BG: Color = Color::Rgb(15, 25, 52);
 const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
@@ -878,7 +879,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            format!("Ctrl+h/l pane • h/l side • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
+            format!("Ctrl+h/l pane • h/l side • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -904,7 +905,17 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             .iter()
             .map(|file| {
                 let comment_count = app.pull_request_comments_count_for_path(file.filename.as_str());
+                let viewed = app.pull_request_file_is_viewed(file.filename.as_str());
                 ListItem::new(Line::from(vec![
+                    Span::styled(
+                        if viewed { "✓" } else { "·" },
+                        if viewed {
+                            Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(GITHUB_MUTED)
+                        },
+                    ),
+                    Span::raw(" "),
                     Span::styled(
                         file_status_symbol(file.status.as_str()),
                         Style::default().fg(file_status_color(file.status.as_str())),
@@ -972,16 +983,55 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                 Style::default().fg(GITHUB_MUTED),
             )));
         } else {
+            row_offsets = vec![None; rows.len()];
             let panel_width = panes[1].width.saturating_sub(2) as usize;
             let cells_width = panel_width.saturating_sub(2);
             let left_width = cells_width.saturating_sub(5) / 2;
             let right_width = cells_width.saturating_sub(left_width + 3);
             let visual_range = app.pull_request_visual_range();
             for (index, row) in rows.iter().enumerate() {
-                row_offsets.push(lines.len() as u16);
+                if app.pull_request_diff_row_hidden(file_name.as_str(), rows.as_slice(), index) {
+                    continue;
+                }
+                row_offsets[index] = Some(lines.len() as u16);
                 let selected = index == app.selected_pull_request_diff_line();
                 let in_visual_range = visual_range
                     .is_some_and(|(start, end)| index >= start && index <= end);
+
+                if row.kind == DiffKind::Hunk
+                    && app.pull_request_hunk_is_collapsed(file_name.as_str(), index)
+                {
+                    let hidden_lines = app.pull_request_hunk_hidden_line_count(
+                        file_name.as_str(),
+                        rows.as_slice(),
+                        index,
+                    );
+                    let indicator = if selected {
+                        match app.pull_request_review_side() {
+                            ReviewSide::Left => "L",
+                            ReviewSide::Right => "R",
+                        }
+                    } else if in_visual_range {
+                        "V"
+                    } else {
+                        "▶"
+                    };
+                    let mut style = Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD);
+                    if in_visual_range {
+                        style = style.bg(VISUAL_RANGE_BG);
+                    }
+                    if selected {
+                        style = style.bg(SELECT_BG);
+                    }
+                    let text = format!(
+                        " {} {}  [{} lines hidden]",
+                        indicator,
+                        ellipsize(row.raw.as_str(), panel_width.saturating_sub(24)),
+                        hidden_lines,
+                    );
+                    lines.push(Line::from(Span::styled(text, style)));
+                    continue;
+                }
 
                 lines.push(render_split_diff_row(
                     row,
@@ -1047,7 +1097,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
 
     let selected_row_offset = row_offsets
         .get(app.selected_pull_request_diff_line())
-        .copied()
+        .and_then(|offset| *offset)
         .unwrap_or(0);
     let mut scroll = app.pull_request_diff_scroll();
     if selected_row_offset < scroll {
@@ -1384,17 +1434,27 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let help = help_text(app);
     let mut lines = Vec::new();
     if !status.is_empty() {
-        lines.push(Line::from(status));
+        lines.push(Line::from(vec![
+            Span::styled("status ", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(status, Style::default().fg(TEXT_PRIMARY)),
+        ]));
     }
-    lines.push(Line::from(context));
-    lines.push(Line::from(help));
+    lines.push(Line::from(vec![
+        Span::styled("context ", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
+        Span::styled(context, Style::default().fg(GITHUB_MUTED)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("keys ", Style::default().fg(GITHUB_VIOLET).add_modifier(Modifier::BOLD)),
+        Span::styled(help, Style::default().fg(GITHUB_MUTED)),
+    ]));
     let text = Text::from(lines);
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
-        .style(Style::default().fg(GITHUB_MUTED).bg(GITHUB_BG))
+        .style(Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL))
         .block(
             Block::default()
                 .borders(Borders::TOP)
+                .style(Style::default().bg(GITHUB_PANEL))
                 .border_style(Style::default().fg(PANEL_BORDER)),
         );
     frame.render_widget(paragraph, area.inner(Margin { vertical: 0, horizontal: 2 }));
@@ -1431,15 +1491,20 @@ fn panel_block_with_border(title: &str, border: Color) -> Block<'_> {
     } else {
         GITHUB_BLUE
     };
+    let border_type = if border == FOCUS_BORDER {
+        BorderType::Thick
+    } else {
+        BorderType::Rounded
+    };
     Block::default()
         .title(Line::from(Span::styled(
-            title.to_string(),
+            format!(" {} ", title),
             Style::default()
                 .fg(title_color)
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(border_type)
         .style(Style::default().bg(GITHUB_PANEL).fg(TEXT_PRIMARY))
         .border_style(Style::default().fg(border))
 }
@@ -1574,7 +1639,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l pane • j/k move file/line • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc back • q quit"
+            "Ctrl+h/l pane • j/k move file/line • w viewed • z collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc back • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1775,8 +1840,8 @@ fn render_split_diff_row(
     let mut row_style = Style::default();
     let mut bg_color = None;
     if in_visual_range {
-        bg_color = Some(Color::Rgb(48, 56, 66));
-        row_style = Style::default().bg(Color::Rgb(48, 56, 66));
+        bg_color = Some(VISUAL_RANGE_BG);
+        row_style = Style::default().bg(VISUAL_RANGE_BG);
     }
     if selected {
         bg_color = Some(SELECT_BG);

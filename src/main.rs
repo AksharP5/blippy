@@ -14,7 +14,7 @@ mod ui;
 
 use std::env;
 use std::io::{self, Stdout, Write};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -420,6 +420,9 @@ fn handle_actions(
         }
         AppAction::ResolvePullRequestReviewComment => {
             resolve_pull_request_review_comment(app, token, event_tx.clone())?;
+        }
+        AppAction::TogglePullRequestFileViewed => {
+            toggle_pull_request_file_viewed(app, token, event_tx.clone())?;
         }
         AppAction::SubmitEditedPullRequestReviewComment => {
             let comment = app.editor().text().to_string();
@@ -846,6 +849,55 @@ fn resolve_pull_request_review_comment(
         return Ok(());
     }
     app.set_status("Reopening review thread...".to_string());
+    Ok(())
+}
+
+fn toggle_pull_request_file_viewed(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    let (path, viewed) = match app.selected_pull_request_file_view_toggle() {
+        Some(toggle) => toggle,
+        None => {
+            app.set_status("No changed file selected".to_string());
+            return Ok(());
+        }
+    };
+    let issue_id = match app.current_issue_id() {
+        Some(issue_id) => issue_id,
+        None => {
+            app.set_status("No pull request selected".to_string());
+            return Ok(());
+        }
+    };
+    let pull_request_id = match app.pull_request_id() {
+        Some(pull_request_id) => pull_request_id.to_string(),
+        None => {
+            app.request_pull_request_files_sync();
+            app.set_status("Loading pull request metadata...".to_string());
+            return Ok(());
+        }
+    };
+    if !matches!((app.current_owner(), app.current_repo()), (Some(_), Some(_))) {
+        app.set_status("No repo selected".to_string());
+        return Ok(());
+    }
+
+    app.set_pull_request_file_viewed(path.as_str(), viewed);
+    start_set_pull_request_file_viewed(
+        issue_id,
+        pull_request_id,
+        path.clone(),
+        viewed,
+        token.to_string(),
+        event_tx,
+    );
+    if viewed {
+        app.set_status(format!("Marking {} viewed on GitHub...", path));
+        return Ok(());
+    }
+    app.set_status(format!("Marking {} unviewed on GitHub...", path));
     Ok(())
 }
 
@@ -1699,11 +1751,17 @@ fn handle_events(
                 app.set_status(format!("#{} assignees updated", issue_number));
                 app.request_sync();
             }
-            AppEvent::PullRequestFilesUpdated { issue_id, files } => {
+            AppEvent::PullRequestFilesUpdated {
+                issue_id,
+                files,
+                pull_request_id,
+                viewed_files,
+            } => {
                 app.set_pull_request_files_syncing(false);
                 if app.current_issue_id() == Some(issue_id) {
                     let count = files.len();
                     app.set_pull_request_files(issue_id, files);
+                    app.set_pull_request_view_state(pull_request_id, viewed_files);
                     app.set_status(format!("Loaded {} changed files", count));
                 }
             }
@@ -1780,6 +1838,31 @@ fn handle_events(
             AppEvent::PullRequestReviewThreadResolutionFailed { issue_id, message } => {
                 if app.current_issue_id() == Some(issue_id) {
                     app.set_status(format!("Review thread resolution failed: {}", message));
+                }
+            }
+            AppEvent::PullRequestFileViewedUpdated {
+                issue_id,
+                path,
+                viewed,
+            } => {
+                if app.current_issue_id() == Some(issue_id) {
+                    app.set_pull_request_file_viewed(path.as_str(), viewed);
+                    if viewed {
+                        app.set_status(format!("Marked {} viewed on GitHub", path));
+                    } else {
+                        app.set_status(format!("Marked {} unviewed on GitHub", path));
+                    }
+                }
+            }
+            AppEvent::PullRequestFileViewedUpdateFailed {
+                issue_id,
+                path,
+                viewed,
+                message,
+            } => {
+                if app.current_issue_id() == Some(issue_id) {
+                    app.set_pull_request_file_viewed(path.as_str(), !viewed);
+                    app.set_status(format!("GitHub view state failed for {}: {}", path, message));
                 }
             }
             AppEvent::LinkedPullRequestResolved {
@@ -1919,6 +2002,8 @@ enum AppEvent {
     PullRequestFilesUpdated {
         issue_id: i64,
         files: Vec<PullRequestFile>,
+        pull_request_id: Option<String>,
+        viewed_files: HashSet<String>,
     },
     PullRequestFilesFailed {
         issue_id: i64,
@@ -1962,6 +2047,17 @@ enum AppEvent {
     },
     PullRequestReviewThreadResolutionFailed {
         issue_id: i64,
+        message: String,
+    },
+    PullRequestFileViewedUpdated {
+        issue_id: i64,
+        path: String,
+        viewed: bool,
+    },
+    PullRequestFileViewedUpdateFailed {
+        issue_id: i64,
+        path: String,
+        viewed: bool,
         message: String,
     },
     LinkedPullRequestResolved {
@@ -2359,6 +2455,14 @@ fn start_pull_request_files_sync(
             }
         };
 
+        let (pull_request_id, viewed_files) = runtime
+            .block_on(async {
+                client
+                    .pull_request_file_view_state(&owner, &repo, issue_number)
+                    .await
+            })
+            .unwrap_or((None, HashSet::new()));
+
         let mapped = files
             .into_iter()
             .map(|file| PullRequestFile {
@@ -2372,6 +2476,8 @@ fn start_pull_request_files_sync(
         let _ = event_tx.send(AppEvent::PullRequestFilesUpdated {
             issue_id,
             files: mapped,
+            pull_request_id,
+            viewed_files,
         });
     });
 }
@@ -2736,6 +2842,70 @@ fn start_toggle_pull_request_review_thread_resolution(
                 });
             }
         }
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_set_pull_request_file_viewed(
+    issue_id: i64,
+    pull_request_id: String,
+    path: String,
+    viewed: bool,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
+                    issue_id,
+                    path,
+                    viewed,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
+                    issue_id,
+                    path,
+                    viewed,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .set_pull_request_file_viewed(
+                    pull_request_id.as_str(),
+                    path.as_str(),
+                    viewed,
+                )
+                .await
+        });
+        if result.is_ok() {
+            let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdated {
+                issue_id,
+                path,
+                viewed,
+            });
+            return;
+        }
+        let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
+            issue_id,
+            path,
+            viewed,
+            message: result.err().map(|error| error.to_string()).unwrap_or_default(),
+        });
     });
 }
 

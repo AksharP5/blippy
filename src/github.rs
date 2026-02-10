@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const API_BASE: &str = "https://api.github.com";
 const API_VERSION: &str = "2022-11-28";
@@ -261,6 +261,138 @@ impl GitHubClient {
             page += 1;
         }
         Ok(files)
+    }
+
+    pub async fn pull_request_file_view_state(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<(Option<String>, HashSet<String>)> {
+        let query = r#"
+            query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  id
+                  files(first: 100, after: $cursor) {
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
+                    nodes {
+                      path
+                      viewerViewedState
+                    }
+                  }
+                }
+              }
+            }
+        "#;
+        let id_only_query = r#"
+            query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  id
+                }
+              }
+            }
+        "#;
+
+        let mut cursor: Option<String> = None;
+        let mut pull_request_id: Option<String> = None;
+        let mut viewed_files = HashSet::new();
+
+        loop {
+            let payload = serde_json::json!({
+                "owner": owner,
+                "repo": repo,
+                "number": pull_number,
+                "cursor": cursor,
+            });
+            let response = match self.graphql(query, payload).await {
+                Ok(response) => response,
+                Err(_) => {
+                    let fallback = self
+                        .graphql(
+                            id_only_query,
+                            serde_json::json!({
+                                "owner": owner,
+                                "repo": repo,
+                                "number": pull_number,
+                            }),
+                        )
+                        .await?;
+                    let pull_request_id = fallback["data"]["repository"]["pullRequest"]
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToString::to_string);
+                    return Ok((pull_request_id, HashSet::new()));
+                }
+            };
+            let pull_request = &response["data"]["repository"]["pullRequest"];
+            if pull_request.is_null() {
+                return Ok((None, HashSet::new()));
+            }
+
+            if pull_request_id.is_none() {
+                pull_request_id = pull_request
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string);
+            }
+
+            let files = pull_request["files"]["nodes"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            for file in files {
+                let path = match file.get("path").and_then(serde_json::Value::as_str) {
+                    Some(path) => path,
+                    None => continue,
+                };
+                let viewed = file
+                    .get("viewerViewedState")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|state| state.eq_ignore_ascii_case("VIEWED"));
+                if viewed {
+                    viewed_files.insert(path.to_string());
+                }
+            }
+
+            let has_next_page = pull_request["files"]["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .unwrap_or(false);
+            if !has_next_page {
+                break;
+            }
+            cursor = pull_request["files"]["pageInfo"]["endCursor"]
+                .as_str()
+                .map(ToString::to_string);
+        }
+
+        Ok((pull_request_id, viewed_files))
+    }
+
+    pub async fn set_pull_request_file_viewed(
+        &self,
+        pull_request_id: &str,
+        path: &str,
+        viewed: bool,
+    ) -> Result<()> {
+        let mutation = if viewed {
+            "mutation($pullRequestId: ID!, $path: String!) { markFileAsViewed(input: { pullRequestId: $pullRequestId, path: $path }) { clientMutationId } }"
+        } else {
+            "mutation($pullRequestId: ID!, $path: String!) { unmarkFileAsViewed(input: { pullRequestId: $pullRequestId, path: $path }) { clientMutationId } }"
+        };
+        self.graphql(
+            mutation,
+            serde_json::json!({
+                "pullRequestId": pull_request_id,
+                "path": path,
+            }),
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn pull_request_head_sha(

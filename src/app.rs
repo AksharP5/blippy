@@ -45,6 +45,7 @@ pub enum AppAction {
     EditPullRequestReviewComment,
     DeletePullRequestReviewComment,
     ResolvePullRequestReviewComment,
+    TogglePullRequestFileViewed,
     SubmitEditedPullRequestReviewComment,
     EditLabels,
     EditAssignees,
@@ -149,6 +150,58 @@ pub enum PendingIssueAction {
     Reopening,
     UpdatingLabels,
     UpdatingAssignees,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiffHunkRange {
+    start: usize,
+    end: usize,
+}
+
+fn pull_request_hunk_end(rows: &[crate::pr_diff::DiffRow], hunk_start: usize) -> Option<usize> {
+    let row = rows.get(hunk_start)?;
+    if row.kind != DiffKind::Hunk {
+        return None;
+    }
+    let mut index = hunk_start + 1;
+    while index < rows.len() {
+        if rows[index].kind == DiffKind::Hunk {
+            return Some(index.saturating_sub(1));
+        }
+        index += 1;
+    }
+    Some(rows.len().saturating_sub(1))
+}
+
+fn pull_request_hunk_range_for_row(
+    rows: &[crate::pr_diff::DiffRow],
+    row_index: usize,
+) -> Option<DiffHunkRange> {
+    if rows.is_empty() {
+        return None;
+    }
+    let row_index = row_index.min(rows.len() - 1);
+    let mut hunk_start = None;
+    let mut index = row_index;
+    loop {
+        if rows[index].kind == DiffKind::Hunk {
+            hunk_start = Some(index);
+            break;
+        }
+        if index == 0 {
+            break;
+        }
+        index -= 1;
+    }
+    let hunk_start = hunk_start?;
+    let hunk_end = pull_request_hunk_end(rows, hunk_start)?;
+    if row_index > hunk_end {
+        return None;
+    }
+    Some(DiffHunkRange {
+        start: hunk_start,
+        end: hunk_end,
+    })
 }
 
 impl PendingIssueAction {
@@ -275,7 +328,10 @@ pub struct App {
     current_issue_number: Option<i64>,
     linked_pull_requests: HashMap<i64, Option<i64>>,
     pull_request_files_issue_id: Option<i64>,
+    pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
+    pull_request_viewed_files: HashSet<String>,
+    pull_request_collapsed_hunks: HashMap<String, HashSet<usize>>,
     pull_request_review_comments: Vec<PullRequestReviewComment>,
     pull_request_review_focus: PullRequestReviewFocus,
     selected_pull_request_file: usize,
@@ -356,7 +412,10 @@ impl App {
             current_issue_number: None,
             linked_pull_requests: HashMap::new(),
             pull_request_files_issue_id: None,
+            pull_request_id: None,
             pull_request_files: Vec::new(),
+            pull_request_viewed_files: HashSet::new(),
+            pull_request_collapsed_hunks: HashMap::new(),
             pull_request_review_comments: Vec::new(),
             pull_request_review_focus: PullRequestReviewFocus::Files,
             selected_pull_request_file: 0,
@@ -726,6 +785,70 @@ impl App {
         &self.pull_request_files
     }
 
+    pub fn pull_request_id(&self) -> Option<&str> {
+        self.pull_request_id.as_deref()
+    }
+
+    pub fn pull_request_file_is_viewed(&self, file_path: &str) -> bool {
+        self.pull_request_viewed_files.contains(file_path)
+    }
+
+    pub fn pull_request_hunk_is_collapsed(&self, file_path: &str, hunk_start: usize) -> bool {
+        self.pull_request_collapsed_hunks
+            .get(file_path)
+            .is_some_and(|collapsed| collapsed.contains(&hunk_start))
+    }
+
+    pub fn pull_request_diff_row_hidden(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+        row_index: usize,
+    ) -> bool {
+        self.pull_request_diff_row_hidden_for_file(file_path, rows, row_index)
+    }
+
+    pub fn pull_request_hunk_hidden_line_count(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+        hunk_start: usize,
+    ) -> usize {
+        if !self.pull_request_hunk_is_collapsed(file_path, hunk_start) {
+            return 0;
+        }
+        let hunk_end = match pull_request_hunk_end(rows, hunk_start) {
+            Some(hunk_end) => hunk_end,
+            None => return 0,
+        };
+        hunk_end.saturating_sub(hunk_start)
+    }
+
+    pub fn set_pull_request_file_viewed(&mut self, file_path: &str, viewed: bool) {
+        if viewed {
+            self.pull_request_viewed_files.insert(file_path.to_string());
+            return;
+        }
+        self.pull_request_viewed_files.remove(file_path);
+    }
+
+    pub fn selected_pull_request_file_view_toggle(&self) -> Option<(String, bool)> {
+        let file = self.selected_pull_request_file_row()?;
+        let viewed = self.pull_request_file_is_viewed(file.filename.as_str());
+        Some((file.filename.clone(), !viewed))
+    }
+
+    pub fn set_pull_request_view_state(
+        &mut self,
+        pull_request_id: Option<String>,
+        viewed_files: HashSet<String>,
+    ) {
+        self.pull_request_id = pull_request_id;
+        self.pull_request_viewed_files = viewed_files;
+        self.pull_request_viewed_files
+            .retain(|file_path| self.pull_request_files.iter().any(|file| file.filename == *file_path));
+    }
+
     pub fn pull_request_review_comments(&self) -> &[PullRequestReviewComment] {
         &self.pull_request_review_comments
     }
@@ -1018,6 +1141,12 @@ impl App {
             {
                 self.action = Some(AppAction::AddIssueComment);
             }
+            KeyCode::Char('w') if self.view == View::PullRequestFiles => {
+                self.action = Some(AppAction::TogglePullRequestFileViewed);
+            }
+            KeyCode::Char('z') if self.view == View::PullRequestFiles => {
+                self.toggle_selected_pull_request_hunk_collapsed();
+            }
             KeyCode::Char('m') if self.view == View::PullRequestFiles => {
                 self.action = Some(AppAction::AddPullRequestReviewComment);
             }
@@ -1246,7 +1375,15 @@ impl App {
 
     pub fn set_pull_request_files(&mut self, issue_id: i64, files: Vec<PullRequestFile>) {
         self.pull_request_files_issue_id = Some(issue_id);
+        self.pull_request_id = None;
         self.pull_request_files = files;
+        let mut active_file_paths = HashSet::new();
+        for file in &self.pull_request_files {
+            active_file_paths.insert(file.filename.clone());
+        }
+        self.pull_request_viewed_files.clear();
+        self.pull_request_collapsed_hunks
+            .retain(|file_path, _| active_file_paths.contains(file_path));
         self.selected_pull_request_file = 0;
         self.selected_pull_request_diff_line = 0;
         self.pull_request_diff_scroll = 0;
@@ -1278,6 +1415,19 @@ impl App {
         if focus == PullRequestReviewFocus::Files {
             self.pull_request_visual_mode = false;
             self.pull_request_visual_anchor = None;
+        }
+        if focus == PullRequestReviewFocus::Diff {
+            let selected_file = self.selected_pull_request_file_row().map(|file| {
+                (file.filename.clone(), file.patch.clone())
+            });
+            if let Some((file_path, patch)) = selected_file {
+                let rows = parse_patch(patch.as_deref());
+                self.selected_pull_request_diff_line = self.nearest_visible_pull_request_diff_line(
+                    file_path.as_str(),
+                    rows.as_slice(),
+                    self.selected_pull_request_diff_line,
+                );
+            }
         }
         self.sync_selected_pull_request_review_comment();
     }
@@ -1410,7 +1560,10 @@ impl App {
         self.current_issue_number = None;
         self.linked_pull_requests.clear();
         self.pull_request_files_issue_id = None;
+        self.pull_request_id = None;
         self.pull_request_files.clear();
+        self.pull_request_viewed_files.clear();
+        self.pull_request_collapsed_hunks.clear();
         self.pull_request_review_comments.clear();
         self.selected_pull_request_file = 0;
         self.selected_pull_request_diff_line = 0;
@@ -1436,7 +1589,10 @@ impl App {
         self.pending_review_target = None;
         if self.pull_request_files_issue_id != Some(issue_id) {
             self.pull_request_files_issue_id = None;
+            self.pull_request_id = None;
             self.pull_request_files.clear();
+            self.pull_request_viewed_files.clear();
+            self.pull_request_collapsed_hunks.clear();
             self.pull_request_review_comments.clear();
             self.selected_pull_request_file = 0;
             self.selected_pull_request_diff_line = 0;
@@ -1779,8 +1935,33 @@ impl App {
                     self.sync_selected_pull_request_review_comment();
                     return;
                 }
-                if self.selected_pull_request_diff_line > 0 {
-                    self.selected_pull_request_diff_line -= 1;
+                let selected_file = self
+                    .selected_pull_request_file_row()
+                    .map(|file| (file.filename.clone(), file.patch.clone()));
+                let (file_path, patch) = match selected_file {
+                    Some(selected_file) => selected_file,
+                    None => {
+                        self.sync_selected_pull_request_review_comment();
+                        return;
+                    }
+                };
+                let rows = parse_patch(patch.as_deref());
+                if rows.is_empty() {
+                    self.sync_selected_pull_request_review_comment();
+                    return;
+                }
+                let current = self.nearest_visible_pull_request_diff_line(
+                    file_path.as_str(),
+                    rows.as_slice(),
+                    self.selected_pull_request_diff_line,
+                );
+                self.selected_pull_request_diff_line = current;
+                if let Some(previous) = self.previous_visible_pull_request_diff_line(
+                    file_path.as_str(),
+                    rows.as_slice(),
+                    current,
+                ) {
+                    self.selected_pull_request_diff_line = previous;
                 }
                 self.sync_selected_pull_request_review_comment();
             }
@@ -1868,13 +2049,33 @@ impl App {
                     self.sync_selected_pull_request_review_comment();
                     return;
                 }
-                let rows_len = self.selected_pull_request_diff_rows_len();
-                if rows_len == 0 {
+                let selected_file = self
+                    .selected_pull_request_file_row()
+                    .map(|file| (file.filename.clone(), file.patch.clone()));
+                let (file_path, patch) = match selected_file {
+                    Some(selected_file) => selected_file,
+                    None => {
+                        self.sync_selected_pull_request_review_comment();
+                        return;
+                    }
+                };
+                let rows = parse_patch(patch.as_deref());
+                if rows.is_empty() {
                     self.sync_selected_pull_request_review_comment();
                     return;
                 }
-                if self.selected_pull_request_diff_line + 1 < rows_len {
-                    self.selected_pull_request_diff_line += 1;
+                let current = self.nearest_visible_pull_request_diff_line(
+                    file_path.as_str(),
+                    rows.as_slice(),
+                    self.selected_pull_request_diff_line,
+                );
+                self.selected_pull_request_diff_line = current;
+                if let Some(next) = self.next_visible_pull_request_diff_line(
+                    file_path.as_str(),
+                    rows.as_slice(),
+                    current,
+                ) {
+                    self.selected_pull_request_diff_line = next;
                 }
                 self.sync_selected_pull_request_review_comment();
             }
@@ -2064,9 +2265,17 @@ impl App {
                     self.sync_selected_pull_request_review_comment();
                     return;
                 }
-                let rows_len = self.selected_pull_request_diff_rows_len();
-                if rows_len > 0 {
-                    self.selected_pull_request_diff_line = rows_len - 1;
+                let selected_file = self
+                    .selected_pull_request_file_row()
+                    .map(|file| (file.filename.clone(), file.patch.clone()));
+                if let Some((file_path, patch)) = selected_file {
+                    let rows = parse_patch(patch.as_deref());
+                    if let Some(last_visible) = self.last_visible_pull_request_diff_line(
+                        file_path.as_str(),
+                        rows.as_slice(),
+                    ) {
+                        self.selected_pull_request_diff_line = last_visible;
+                    }
                     self.pull_request_diff_scroll = self.pull_request_diff_max_scroll;
                 }
                 self.sync_selected_pull_request_review_comment();
@@ -2137,6 +2346,174 @@ impl App {
             line += 1;
         }
         offsets
+    }
+
+    fn pull_request_diff_row_hidden_for_file(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+        row_index: usize,
+    ) -> bool {
+        if row_index >= rows.len() {
+            return false;
+        }
+        let collapsed_hunks = match self.pull_request_collapsed_hunks.get(file_path) {
+            Some(collapsed_hunks) => collapsed_hunks,
+            None => return false,
+        };
+        for hunk_start in collapsed_hunks {
+            let hunk_end = match pull_request_hunk_end(rows, *hunk_start) {
+                Some(hunk_end) => hunk_end,
+                None => continue,
+            };
+            if row_index > *hunk_start && row_index <= hunk_end {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn nearest_visible_pull_request_diff_line(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+        row_index: usize,
+    ) -> usize {
+        if rows.is_empty() {
+            return 0;
+        }
+        let row_index = row_index.min(rows.len() - 1);
+        if !self.pull_request_diff_row_hidden_for_file(file_path, rows, row_index) {
+            return row_index;
+        }
+        let hunk_range = match pull_request_hunk_range_for_row(rows, row_index) {
+            Some(hunk_range) => hunk_range,
+            None => return row_index,
+        };
+        hunk_range.start
+    }
+
+    fn next_visible_pull_request_diff_line(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+        row_index: usize,
+    ) -> Option<usize> {
+        if rows.is_empty() {
+            return None;
+        }
+        let mut index = row_index.min(rows.len() - 1).saturating_add(1);
+        while index < rows.len() {
+            if !self.pull_request_diff_row_hidden_for_file(file_path, rows, index) {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn previous_visible_pull_request_diff_line(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+        row_index: usize,
+    ) -> Option<usize> {
+        if rows.is_empty() {
+            return None;
+        }
+        let mut index = row_index.min(rows.len() - 1);
+        while index > 0 {
+            index -= 1;
+            if !self.pull_request_diff_row_hidden_for_file(file_path, rows, index) {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    fn last_visible_pull_request_diff_line(
+        &self,
+        file_path: &str,
+        rows: &[crate::pr_diff::DiffRow],
+    ) -> Option<usize> {
+        if rows.is_empty() {
+            return None;
+        }
+        let mut index = rows.len();
+        while index > 0 {
+            index -= 1;
+            if !self.pull_request_diff_row_hidden_for_file(file_path, rows, index) {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    fn toggle_selected_pull_request_hunk_collapsed(&mut self) {
+        if self.pull_request_review_focus != PullRequestReviewFocus::Diff {
+            self.status = "Focus the diff pane to collapse sections".to_string();
+            return;
+        }
+
+        let selected_file = match self.selected_pull_request_file_row() {
+            Some(file) => (file.filename.clone(), file.patch.clone()),
+            None => {
+                self.status = "No file selected".to_string();
+                return;
+            }
+        };
+        let file_path = selected_file.0;
+        let rows = parse_patch(selected_file.1.as_deref());
+        if rows.is_empty() {
+            self.status = "No diff section to collapse".to_string();
+            return;
+        }
+
+        let selected_line = self
+            .selected_pull_request_diff_line
+            .min(rows.len().saturating_sub(1));
+        let hunk_range = match pull_request_hunk_range_for_row(rows.as_slice(), selected_line) {
+            Some(hunk_range) => hunk_range,
+            None => {
+                self.status = "No hunk at this line".to_string();
+                return;
+            }
+        };
+
+        let mut collapsed = true;
+        let mut remove_entry = false;
+        {
+            let collapsed_hunks = self
+                .pull_request_collapsed_hunks
+                .entry(file_path.clone())
+                .or_default();
+            if !collapsed_hunks.insert(hunk_range.start) {
+                collapsed_hunks.remove(&hunk_range.start);
+                collapsed = false;
+            }
+            if collapsed_hunks.is_empty() {
+                remove_entry = true;
+            }
+        }
+        if remove_entry {
+            self.pull_request_collapsed_hunks.remove(file_path.as_str());
+        }
+
+        self.selected_pull_request_diff_line = hunk_range.start;
+        self.pull_request_visual_mode = false;
+        self.pull_request_visual_anchor = None;
+        self.sync_selected_pull_request_review_comment();
+
+        if collapsed {
+            let hidden_lines = hunk_range.end.saturating_sub(hunk_range.start);
+            self.status = format!(
+                "Collapsed {} lines in {}",
+                hidden_lines,
+                file_path
+            );
+            return;
+        }
+        self.status = format!("Expanded section in {}", file_path);
     }
 
     fn toggle_pull_request_visual_mode(&mut self) {
@@ -3561,6 +3938,91 @@ mod tests {
             app.take_action(),
             Some(AppAction::ResolvePullRequestReviewComment)
         );
+    }
+
+    #[test]
+    fn w_emits_toggle_pull_request_file_viewed_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+            }],
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::TogglePullRequestFileViewed));
+    }
+
+    #[test]
+    fn selected_pull_request_file_view_toggle_flips_current_state() {
+        let mut app = App::new(Config::default());
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+            }],
+        );
+
+        let (path, viewed) = app
+            .selected_pull_request_file_view_toggle()
+            .expect("toggle payload");
+        assert_eq!(path, "src/main.rs");
+        assert!(viewed);
+
+        app.set_pull_request_file_viewed("src/main.rs", true);
+        let (_, viewed) = app
+            .selected_pull_request_file_view_toggle()
+            .expect("toggle payload");
+        assert!(!viewed);
+    }
+
+    #[test]
+    fn z_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 4,
+                deletions: 2,
+                patch: Some(
+                    "@@ -1,1 +1,4 @@\n old\n+new-a\n+new-b\n+new-c\n@@ -10,1 +10,1 @@\n-old-two\n+new-two"
+                        .to_string(),
+                ),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.selected_pull_request_diff_line(), 2);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+
+        assert_eq!(app.selected_pull_request_diff_line(), 0);
+        assert!(app.pull_request_hunk_is_collapsed("src/main.rs", 0));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.selected_pull_request_diff_line(), 5);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+
+        assert!(!app.pull_request_hunk_is_collapsed("src/main.rs", 0));
     }
 
     #[test]
