@@ -327,7 +327,8 @@ fn handle_actions(
             };
             app.set_current_issue(issue_id, issue_number);
             let labels = selected_issue_labels(app).unwrap_or_default();
-            app.open_issue_labels_editor(return_view, labels.as_str());
+            let options = label_options_for_repo(app);
+            app.open_label_picker(return_view, options, labels.as_str());
         }
         AppAction::EditAssignees => {
             let return_view = app.view();
@@ -340,18 +341,19 @@ fn handle_actions(
             };
             app.set_current_issue(issue_id, issue_number);
             let assignees = selected_issue_assignees(app).unwrap_or_default();
-            app.open_issue_assignees_editor(return_view, assignees.as_str());
+            let options = assignee_options_for_repo(app);
+            app.open_assignee_picker(return_view, options, assignees.as_str());
         }
         AppAction::SubmitIssueComment => {
             let comment = app.editor().text().to_string();
             post_issue_comment(app, token, comment, event_tx.clone())?;
         }
         AppAction::SubmitLabels => {
-            let labels = parse_csv_values(app.editor().text(), false);
+            let labels = app.selected_labels();
             update_issue_labels(app, token, labels, event_tx.clone())?;
         }
         AppAction::SubmitAssignees => {
-            let assignees = parse_csv_values(app.editor().text(), true);
+            let assignees = app.selected_assignees();
             update_issue_assignees(app, token, assignees, event_tx.clone())?;
         }
         AppAction::CloseIssue => {
@@ -622,6 +624,35 @@ fn selected_issue_assignees(app: &App) -> Option<String> {
     None
 }
 
+fn label_options_for_repo(app: &App) -> Vec<String> {
+    let mut labels = app
+        .issues()
+        .iter()
+        .flat_map(|issue| issue.labels.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<String>>();
+    labels.sort_by_key(|value| value.to_ascii_lowercase());
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    labels
+}
+
+fn assignee_options_for_repo(app: &App) -> Vec<String> {
+    let mut assignees = app
+        .issues()
+        .iter()
+        .flat_map(|issue| issue.assignees.split(','))
+        .map(str::trim)
+        .map(|value| value.trim_start_matches('@'))
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<String>>();
+    assignees.sort_by_key(|value| value.to_ascii_lowercase());
+    assignees.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    assignees
+}
+
 fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
     let mut values = Vec::new();
     for raw in input.split(',') {
@@ -647,6 +678,8 @@ fn issue_number(app: &App) -> Option<i64> {
     match app.view() {
         View::IssueDetail
         | View::IssueComments
+        | View::LabelPicker
+        | View::AssigneePicker
         | View::CommentPresetPicker
         | View::CommentPresetName
         | View::CommentEditor => app.current_issue_number(),

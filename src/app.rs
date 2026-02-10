@@ -14,6 +14,8 @@ pub enum View {
     Issues,
     IssueDetail,
     IssueComments,
+    LabelPicker,
+    AssigneePicker,
     CommentPresetPicker,
     CommentPresetName,
     CommentEditor,
@@ -189,6 +191,12 @@ pub struct App {
     pending_d: bool,
     comment_editor: CommentEditorState,
     editor_cancel_view: View,
+    label_options: Vec<String>,
+    label_selected: HashSet<String>,
+    selected_label_option: usize,
+    assignee_options: Vec<String>,
+    assignee_selected: HashSet<String>,
+    selected_assignee_option: usize,
     preset_choice: usize,
 }
 
@@ -240,6 +248,12 @@ impl App {
             pending_d: false,
             comment_editor: CommentEditorState::default(),
             editor_cancel_view: View::Issues,
+            label_options: Vec::new(),
+            label_selected: HashSet::new(),
+            selected_label_option: 0,
+            assignee_options: Vec::new(),
+            assignee_selected: HashSet::new(),
+            selected_assignee_option: 0,
             preset_choice: 0,
         }
     }
@@ -382,6 +396,31 @@ impl App {
 
     pub fn selected_preset(&self) -> usize {
         self.preset_choice
+    }
+
+    pub fn label_options(&self) -> &[String] {
+        &self.label_options
+    }
+
+    pub fn selected_label_option(&self) -> usize {
+        self.selected_label_option
+    }
+
+    pub fn label_option_selected(&self, label: &str) -> bool {
+        self.label_selected.contains(&label.to_ascii_lowercase())
+    }
+
+    pub fn assignee_options(&self) -> &[String] {
+        &self.assignee_options
+    }
+
+    pub fn selected_assignee_option(&self) -> usize {
+        self.selected_assignee_option
+    }
+
+    pub fn assignee_option_selected(&self, assignee: &str) -> bool {
+        self.assignee_selected
+            .contains(&assignee.to_ascii_lowercase())
     }
 
     pub fn set_selected_preset(&mut self, index: usize) {
@@ -571,10 +610,9 @@ impl App {
             {
                 self.action = Some(AppAction::EditLabels);
             }
-            KeyCode::Char('A') if self.view == View::Issues => {
-                self.action = Some(AppAction::EditAssignees);
-            }
-            KeyCode::Char('a') if matches!(self.view, View::IssueDetail | View::IssueComments) => {
+            KeyCode::Char('s')
+                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
                 self.action = Some(AppAction::EditAssignees);
             }
             KeyCode::Char('u')
@@ -582,11 +620,32 @@ impl App {
             {
                 self.action = Some(AppAction::ReopenIssue);
             }
+            KeyCode::Char(' ') if self.view == View::LabelPicker => {
+                self.toggle_selected_label();
+            }
+            KeyCode::Char(' ') if self.view == View::AssigneePicker => {
+                self.toggle_selected_assignee();
+            }
+            KeyCode::Char('c') if self.view == View::LabelPicker => {
+                self.label_selected.clear();
+            }
+            KeyCode::Char('c') if self.view == View::AssigneePicker => {
+                self.assignee_selected.clear();
+            }
+            KeyCode::Enter if self.view == View::LabelPicker => {
+                self.action = Some(AppAction::SubmitLabels);
+            }
+            KeyCode::Enter if self.view == View::AssigneePicker => {
+                self.action = Some(AppAction::SubmitAssignees);
+            }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
                 self.set_view(View::Issues);
             }
             KeyCode::Char('b') if self.view == View::IssueComments => {
                 self.set_view(View::IssueDetail);
+            }
+            KeyCode::Char('b') if matches!(self.view, View::LabelPicker | View::AssigneePicker) => {
+                self.set_view(self.editor_cancel_view);
             }
             KeyCode::Esc if self.view == View::IssueDetail => {
                 self.set_view(View::Issues);
@@ -596,6 +655,9 @@ impl App {
             }
             KeyCode::Esc if self.view == View::CommentPresetPicker => {
                 self.set_view(View::Issues);
+            }
+            KeyCode::Esc if matches!(self.view, View::LabelPicker | View::AssigneePicker) => {
+                self.set_view(self.editor_cancel_view);
             }
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
@@ -829,16 +891,70 @@ impl App {
         self.set_view(View::CommentEditor);
     }
 
-    pub fn open_issue_labels_editor(&mut self, return_view: View, labels: &str) {
-        self.comment_editor.reset_for_labels(labels);
+    pub fn open_label_picker(
+        &mut self,
+        return_view: View,
+        options: Vec<String>,
+        current_labels: &str,
+    ) {
         self.editor_cancel_view = return_view;
-        self.set_view(View::CommentEditor);
+        self.label_options = options;
+        self.selected_label_option = 0;
+        self.label_selected = Self::csv_set(current_labels);
+        self.set_view(View::LabelPicker);
     }
 
-    pub fn open_issue_assignees_editor(&mut self, return_view: View, assignees: &str) {
-        self.comment_editor.reset_for_assignees(assignees);
+    pub fn open_assignee_picker(
+        &mut self,
+        return_view: View,
+        options: Vec<String>,
+        current_assignees: &str,
+    ) {
         self.editor_cancel_view = return_view;
-        self.set_view(View::CommentEditor);
+        self.assignee_options = options;
+        self.selected_assignee_option = 0;
+        self.assignee_selected = Self::csv_set(current_assignees);
+        self.set_view(View::AssigneePicker);
+    }
+
+    pub fn selected_labels_csv(&self) -> String {
+        let mut values = self
+            .label_options
+            .iter()
+            .filter(|label| self.label_option_selected(label.as_str()))
+            .cloned()
+            .collect::<Vec<String>>();
+        values.sort_by_key(|value| value.to_ascii_lowercase());
+        values.join(",")
+    }
+
+    pub fn selected_labels(&self) -> Vec<String> {
+        self.selected_labels_csv()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+    }
+
+    pub fn selected_assignees_csv(&self) -> String {
+        let mut values = self
+            .assignee_options
+            .iter()
+            .filter(|assignee| self.assignee_option_selected(assignee.as_str()))
+            .cloned()
+            .collect::<Vec<String>>();
+        values.sort_by_key(|value| value.to_ascii_lowercase());
+        values.join(",")
+    }
+
+    pub fn selected_assignees(&self) -> Vec<String> {
+        self.selected_assignees_csv()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
     }
 
     pub fn editor_cancel_view(&self) -> View {
@@ -916,7 +1032,19 @@ impl App {
                     self.preset_choice -= 1;
                 }
             }
-            View::CommentPresetName | View::CommentEditor => {}
+            View::LabelPicker => {
+                if self.selected_label_option > 0 {
+                    self.selected_label_option -= 1;
+                }
+            }
+            View::AssigneePicker => {
+                if self.selected_assignee_option > 0 {
+                    self.selected_assignee_option -= 1;
+                }
+            }
+            View::CommentPresetName
+            | View::CommentEditor
+                => {}
         }
     }
 
@@ -964,7 +1092,19 @@ impl App {
                     self.preset_choice += 1;
                 }
             }
-            View::CommentPresetName | View::CommentEditor => {}
+            View::LabelPicker => {
+                if self.selected_label_option + 1 < self.label_options.len() {
+                    self.selected_label_option += 1;
+                }
+            }
+            View::AssigneePicker => {
+                if self.selected_assignee_option + 1 < self.assignee_options.len() {
+                    self.selected_assignee_option += 1;
+                }
+            }
+            View::CommentPresetName
+            | View::CommentEditor
+                => {}
         }
     }
 
@@ -987,7 +1127,10 @@ impl App {
             View::CommentPresetPicker => {
                 self.action = Some(AppAction::PickPreset);
             }
-            View::CommentPresetName | View::CommentEditor => {}
+            View::CommentPresetName
+            | View::CommentEditor
+            | View::LabelPicker
+            | View::AssigneePicker => {}
         }
     }
 
@@ -1012,7 +1155,11 @@ impl App {
             }
             View::IssueComments => self.issue_comments_scroll = 0,
             View::CommentPresetPicker => self.preset_choice = 0,
-            View::CommentPresetName | View::CommentEditor => {}
+            View::LabelPicker => self.selected_label_option = 0,
+            View::AssigneePicker => self.selected_assignee_option = 0,
+            View::CommentPresetName
+            | View::CommentEditor
+                => {}
         }
     }
 
@@ -1054,7 +1201,19 @@ impl App {
                     self.preset_choice = max - 1;
                 }
             }
-            View::CommentPresetName | View::CommentEditor => {}
+            View::LabelPicker => {
+                if !self.label_options.is_empty() {
+                    self.selected_label_option = self.label_options.len() - 1;
+                }
+            }
+            View::AssigneePicker => {
+                if !self.assignee_options.is_empty() {
+                    self.selected_assignee_option = self.assignee_options.len() - 1;
+                }
+            }
+            View::CommentPresetName
+            | View::CommentEditor
+                => {}
         }
     }
 
@@ -1209,7 +1368,7 @@ impl App {
     }
 
     fn cycle_assignee_filter(&mut self, forward: bool) {
-        let options = self.assignee_options();
+        let options = self.assignee_filter_options();
         if options.is_empty() {
             self.assignee_filter = AssigneeFilter::All;
             self.rebuild_issue_filter();
@@ -1238,7 +1397,7 @@ impl App {
         );
     }
 
-    fn assignee_options(&self) -> Vec<AssigneeFilter> {
+    fn assignee_filter_options(&self) -> Vec<AssigneeFilter> {
         let mut users = self
             .issues
             .iter()
@@ -1278,6 +1437,39 @@ impl App {
             .split(',')
             .map(str::trim)
             .any(|assignee| assignee.eq_ignore_ascii_case(user))
+    }
+
+    fn csv_set(input: &str) -> HashSet<String> {
+        input
+            .split(',')
+            .map(str::trim)
+            .map(|value| value.to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect::<HashSet<String>>()
+    }
+
+    fn toggle_selected_label(&mut self) {
+        let label = match self.label_options.get(self.selected_label_option) {
+            Some(label) => label.to_ascii_lowercase(),
+            None => return,
+        };
+        if self.label_selected.contains(label.as_str()) {
+            self.label_selected.remove(label.as_str());
+            return;
+        }
+        self.label_selected.insert(label);
+    }
+
+    fn toggle_selected_assignee(&mut self) {
+        let assignee = match self.assignee_options.get(self.selected_assignee_option) {
+            Some(assignee) => assignee.to_ascii_lowercase(),
+            None => return,
+        };
+        if self.assignee_selected.contains(assignee.as_str()) {
+            self.assignee_selected.remove(assignee.as_str());
+            return;
+        }
+        self.assignee_selected.insert(assignee);
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
@@ -1327,12 +1519,6 @@ impl App {
                         }
                         EditorMode::AddPreset => {
                             self.action = Some(AppAction::SavePreset);
-                        }
-                        EditorMode::EditLabels => {
-                            self.action = Some(AppAction::SubmitLabels);
-                        }
-                        EditorMode::EditAssignees => {
-                            self.action = Some(AppAction::SubmitAssignees);
                         }
                     },
                     KeyCode::Backspace => self.comment_editor.backspace_text(),
@@ -1532,8 +1718,6 @@ pub enum EditorMode {
     CloseIssue,
     AddComment,
     AddPreset,
-    EditLabels,
-    EditAssignees,
 }
 
 impl EditorMode {
@@ -1586,16 +1770,6 @@ impl CommentEditorState {
         self.mode = EditorMode::AddPreset;
         self.name.clear();
         self.text.clear();
-    }
-
-    pub fn reset_for_labels(&mut self, labels: &str) {
-        self.mode = EditorMode::EditLabels;
-        self.text = labels.to_string();
-    }
-
-    pub fn reset_for_assignees(&mut self, assignees: &str) {
-        self.mode = EditorMode::EditAssignees;
-        self.text = assignees.to_string();
     }
 
     pub fn append_name(&mut self, ch: char) {
@@ -2281,7 +2455,7 @@ mod tests {
     }
 
     #[test]
-    fn a_triggers_edit_assignees_action_in_detail() {
+    fn s_triggers_edit_assignees_action_in_detail() {
         let mut app = App::new(Config::default());
         app.set_issues(vec![IssueRow {
             id: 1,
@@ -2299,14 +2473,18 @@ mod tests {
         app.set_current_issue(1, 1);
         app.set_view(View::IssueDetail);
 
-        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
         assert_eq!(app.take_action(), Some(AppAction::EditAssignees));
     }
 
     #[test]
-    fn labels_editor_enter_submits() {
+    fn labels_picker_enter_submits() {
         let mut app = App::new(Config::default());
-        app.open_issue_labels_editor(View::Issues, "bug,triage");
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "triage".to_string()],
+            "bug,triage",
+        );
 
         app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));

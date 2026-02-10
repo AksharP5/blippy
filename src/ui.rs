@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{App, EditorMode, Focus, IssueFilter, View};
@@ -27,6 +27,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         View::Issues => draw_issues(frame, app, area),
         View::IssueDetail => draw_issue_detail(frame, app, area),
         View::IssueComments => draw_issue_comments(frame, app, area),
+        View::LabelPicker => draw_label_picker(frame, app, area),
+        View::AssigneePicker => draw_assignee_picker(frame, app, area),
         View::CommentPresetPicker => draw_preset_picker(frame, app, area),
         View::CommentPresetName => draw_preset_name(frame, app, area),
         View::CommentEditor => draw_comment_editor(frame, app, area),
@@ -698,6 +700,153 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     draw_status(frame, app, footer);
 }
 
+fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+    draw_modal_background(frame, app, area);
+    let popup = centered_rect(70, 70, area);
+    frame.render_widget(Clear, popup);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
+        .split(popup);
+
+    let header = Paragraph::new(Text::from(vec![
+        Line::from(Span::styled(
+            "Edit Labels",
+            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Space toggle • Enter apply • c clear • Esc cancel",
+            Style::default().fg(GITHUB_MUTED),
+        )),
+    ]))
+    .block(panel_block("Labels"));
+    frame.render_widget(header, sections[0]);
+
+    let items = if app.label_options().is_empty() {
+        vec![ListItem::new("No labels discovered in this repo yet.")]
+    } else {
+        app.label_options()
+            .iter()
+            .map(|label| {
+                let checked = if app.label_option_selected(label.as_str()) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(checked, Style::default().fg(GITHUB_BLUE)),
+                    Span::raw(" "),
+                    Span::raw(label.clone()),
+                ]))
+            })
+            .collect::<Vec<ListItem>>()
+    };
+    let list = List::new(items)
+        .block(panel_block("Available labels"))
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .highlight_symbol("▸ ")
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_stateful_widget(
+        list,
+        sections[1],
+        &mut list_state(selected_for_list(
+            app.selected_label_option(),
+            app.label_options().len(),
+        )),
+    );
+
+    let selection = if app.selected_labels_csv().is_empty() {
+        "selected: none".to_string()
+    } else {
+        format!("selected: {}", ellipsize(app.selected_labels_csv().as_str(), 80))
+    };
+    let footer = Paragraph::new(selection)
+        .style(Style::default().fg(GITHUB_MUTED))
+        .block(panel_block("Selection"));
+    frame.render_widget(footer, sections[2]);
+}
+
+fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+    draw_modal_background(frame, app, area);
+    let popup = centered_rect(70, 70, area);
+    frame.render_widget(Clear, popup);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
+        .split(popup);
+
+    let header = Paragraph::new(Text::from(vec![
+        Line::from(Span::styled(
+            "Edit Assignees",
+            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Space toggle • Enter apply • c clear • Esc cancel",
+            Style::default().fg(GITHUB_MUTED),
+        )),
+    ]))
+    .block(panel_block("Assignees"));
+    frame.render_widget(header, sections[0]);
+
+    let items = if app.assignee_options().is_empty() {
+        vec![ListItem::new("No assignees discovered in this repo yet.")]
+    } else {
+        app.assignee_options()
+            .iter()
+            .map(|assignee| {
+                let checked = if app.assignee_option_selected(assignee.as_str()) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(checked, Style::default().fg(GITHUB_BLUE)),
+                    Span::raw(" "),
+                    Span::raw(assignee.clone()),
+                ]))
+            })
+            .collect::<Vec<ListItem>>()
+    };
+    let list = List::new(items)
+        .block(panel_block("Available assignees"))
+        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .highlight_symbol("▸ ")
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_stateful_widget(
+        list,
+        sections[1],
+        &mut list_state(selected_for_list(
+            app.selected_assignee_option(),
+            app.assignee_options().len(),
+        )),
+    );
+
+    let selection = if app.selected_assignees_csv().is_empty() {
+        "selected: none".to_string()
+    } else {
+        format!(
+            "selected: {}",
+            ellipsize(app.selected_assignees_csv().as_str(), 80)
+        )
+    };
+    let footer = Paragraph::new(selection)
+        .style(Style::default().fg(GITHUB_MUTED))
+        .block(panel_block("Selection"));
+    frame.render_widget(footer, sections[2]);
+}
+
 fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
     let block = panel_block("Close Issue");
@@ -766,8 +915,6 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         EditorMode::CloseIssue => "Close Issue Comment",
         EditorMode::AddComment => "Add Issue Comment",
         EditorMode::AddPreset => "Preset Body",
-        EditorMode::EditLabels => "Edit Labels",
-        EditorMode::EditAssignees => "Edit Assignees",
     };
     let editor_area = main.inner(Margin {
         vertical: 1,
@@ -847,6 +994,39 @@ fn focus_border(focused: bool) -> Color {
     }
 }
 
+fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
+    match app.editor_cancel_view() {
+        View::Issues => draw_issues(frame, app, area),
+        View::IssueDetail => draw_issue_detail(frame, app, area),
+        View::IssueComments => draw_issue_comments(frame, app, area),
+        _ => {
+            let (main, footer) = split_area(area);
+            frame.render_widget(panel_block("Glyph"), main);
+            draw_status(frame, app, footer);
+        }
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1]);
+    horizontal[1]
+}
+
 fn split_area(area: Rect) -> (Rect, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -874,16 +1054,22 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a/A assignee filter • l labels • Shift+a assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a/A assignee filter • l labels • s assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • l labels • a assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • l labels • s assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • l labels • a assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
+            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • l labels • s assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
+        }
+        View::LabelPicker => {
+            "j/k move • space toggle • c clear • Enter apply • Esc cancel".to_string()
+        }
+        View::AssigneePicker => {
+            "j/k move • space toggle • c clear • Enter apply • Esc cancel".to_string()
         }
         View::CommentPresetPicker => {
             "j/k move • gg/G top/bottom • Enter select • Esc cancel • q quit".to_string()
@@ -895,9 +1081,6 @@ fn help_text(app: &App) -> String {
             if app.editor_mode() == EditorMode::AddPreset {
                 return "Type preset body • Enter save • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
                     .to_string();
-            }
-            if matches!(app.editor_mode(), EditorMode::EditLabels | EditorMode::EditAssignees) {
-                return "Type comma-separated values • Enter submit • Esc cancel".to_string();
             }
             "Type message • Enter submit • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
                 .to_string()

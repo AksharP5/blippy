@@ -87,7 +87,7 @@ cargo test
 - /: search issues by number/title/body/labels/assignees (Enter keep, Esc clear)
 - m: add comment to selected issue
 - l: edit issue labels (comma-separated)
-- Shift+a (issues list) or a (detail/comments): edit assignees (comma-separated)
+- s: edit issue assignees
 - u: reopen selected closed issue
 - Enter: open selected issue
 - r: refresh issues/comments
