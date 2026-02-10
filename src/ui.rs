@@ -172,13 +172,19 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
         )),
     );
 
+    register_mouse_region(app, MouseTarget::RepoListPane, list_area);
     let list_inner = list_area.inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
     let max_rows = (list_inner.height as usize) / 2;
-    for index in 0..app.filtered_repo_rows().len().min(max_rows) {
-        let y = list_inner.y.saturating_add((index * 2) as u16);
+    let filtered_len = app.filtered_repo_rows().len();
+    let selected = selected_for_list(app.selected_repo(), filtered_len);
+    let start = list_window_start(selected, filtered_len, max_rows);
+    let visible = filtered_len.saturating_sub(start).min(max_rows);
+    for row in 0..visible {
+        let index = start + row;
+        let y = list_inner.y.saturating_add((row * 2) as u16);
         app.register_mouse_region(MouseTarget::RepoRow(index), list_inner.x, y, list_inner.width, 2);
     }
 
@@ -216,13 +222,19 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         &mut list_state(app.selected_remote()),
     );
 
+    register_mouse_region(app, MouseTarget::RemoteListPane, list_area);
     let list_inner = list_area.inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
     let max_rows = list_inner.height as usize;
-    for index in 0..app.remotes().len().min(max_rows) {
-        let y = list_inner.y.saturating_add(index as u16);
+    let remotes_len = app.remotes().len();
+    let selected = selected_for_list(app.selected_remote(), remotes_len);
+    let start = list_window_start(selected, remotes_len, max_rows);
+    let visible = remotes_len.saturating_sub(start).min(max_rows);
+    for row in 0..visible {
+        let index = start + row;
+        let y = list_inner.y.saturating_add(row as u16);
         app.register_mouse_region(MouseTarget::RemoteRow(index), list_inner.x, y, list_inner.width, 1);
     }
 
@@ -1707,17 +1719,26 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     draw_status(frame, app, footer);
 }
 
-fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     let status = app.status();
     let context = status_context(app);
     let help = help_text(app);
     let mut lines = Vec::new();
+    let mut status_line = vec![Span::styled(
+        "[Repos] ",
+        Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+    )];
     if !status.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("status ", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
-            Span::styled(status, Style::default().fg(TEXT_PRIMARY)),
-        ]));
+        status_line.push(Span::styled(
+            "status ",
+            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        ));
+        status_line.push(Span::styled(status, Style::default().fg(TEXT_PRIMARY)));
     }
+    if status.is_empty() {
+        status_line.push(Span::styled("status ready", Style::default().fg(GITHUB_MUTED)));
+    }
+    lines.push(Line::from(status_line));
     lines.push(Line::from(vec![
         Span::styled("context ", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
         Span::styled(context, Style::default().fg(GITHUB_MUTED)),
@@ -1736,7 +1757,18 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 .style(Style::default().bg(GITHUB_PANEL))
                 .border_style(Style::default().fg(PANEL_BORDER)),
         );
-    frame.render_widget(paragraph, area.inner(Margin { vertical: 0, horizontal: 2 }));
+    let status_area = area.inner(Margin {
+        vertical: 0,
+        horizontal: 2,
+    });
+    frame.render_widget(paragraph, status_area);
+    app.register_mouse_region(
+        MouseTarget::RepoPicker,
+        status_area.x,
+        status_area.y.saturating_add(1),
+        10,
+        1,
+    );
 }
 
 fn panel_block(title: &str) -> Block<'_> {
@@ -1997,6 +2029,14 @@ fn selected_for_list(selected: usize, len: usize) -> usize {
         return 0;
     }
     selected.min(len - 1)
+}
+
+fn list_window_start(selected: usize, len: usize, viewport_items: usize) -> usize {
+    if len == 0 || viewport_items == 0 {
+        return 0;
+    }
+    let selected = selected_for_list(selected, len);
+    selected.saturating_sub(viewport_items.saturating_sub(1))
 }
 
 fn issue_tabs_line(filter: IssueFilter, open_count: usize, closed_count: usize) -> Line<'static> {

@@ -108,7 +108,7 @@ cargo test
 - PR review view: `[`/`]` pan horizontally for long lines, `0` resets horizontal pan
 - Ctrl+y: copy current status message to clipboard
 - b or Esc: back from issue detail/comments
-- Mouse/trackpad: wheel scrolls lists/diffs, horizontal wheel pans PR diff, click rows to select/open, click `[Back]`, `[Files]`, `[Diff]`, Open/Closed tabs, and picker `[Apply]/[Cancel]`
+- Mouse/trackpad: wheel scrolls lists/diffs, horizontal wheel pans PR diff, click rows to select/open, click global `[Repos]`, click `[Back]`, `[Files]`, `[Diff]`, Open/Closed tabs, and picker `[Apply]/[Cancel]`
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
 
 Search supports simple GitHub-like qualifiers:

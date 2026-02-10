@@ -59,8 +59,11 @@ pub enum AppAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseTarget {
+    RepoPicker,
     Back,
+    RepoListPane,
     RepoRow(usize),
+    RemoteListPane,
     RemoteRow(usize),
     IssueTabOpen,
     IssueTabClosed,
@@ -1099,10 +1102,7 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.repo_query.clear();
-                self.repo_search_mode = false;
-                self.rebuild_repo_picker_filter();
-                self.set_view(View::RepoPicker);
+                self.open_repo_picker();
             }
             KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::RepoPicker => {
                 self.repo_search_mode = true;
@@ -1376,7 +1376,7 @@ impl App {
             MouseEventKind::ScrollRight => {
                 self.handle_mouse_scroll_horizontal(target, true);
             }
-            MouseEventKind::Down(MouseButton::Left) => {
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
                 self.handle_mouse_click_target(target);
             }
             _ => {}
@@ -1384,39 +1384,62 @@ impl App {
     }
 
     fn handle_mouse_scroll(&mut self, target: Option<MouseTarget>, down: bool) {
+        let Some(target) = target else {
+            return;
+        };
+        if matches!(target, MouseTarget::RepoListPane | MouseTarget::RepoRow(_)) {
+            if self.view == View::RepoPicker {
+                if down {
+                    self.move_selection_down();
+                    return;
+                }
+                self.move_selection_up();
+            }
+            return;
+        }
+        if matches!(target, MouseTarget::RemoteListPane | MouseTarget::RemoteRow(_)) {
+            if self.view == View::RemoteChooser {
+                if down {
+                    self.move_selection_down();
+                    return;
+                }
+                self.move_selection_up();
+            }
+            return;
+        }
         if matches!(
             target,
-            Some(MouseTarget::IssuesListPane | MouseTarget::IssueRow(_))
+            MouseTarget::IssuesListPane | MouseTarget::IssueRow(_)
         ) {
             self.focus = Focus::IssuesList;
         }
         if matches!(
             target,
-            Some(MouseTarget::IssuesPreviewPane)
+            MouseTarget::IssuesPreviewPane
         ) {
             self.focus = Focus::IssuesPreview;
         }
         if matches!(
             target,
-            Some(MouseTarget::IssueBodyPane)
+            MouseTarget::IssueBodyPane
         ) {
             self.focus = Focus::IssueBody;
         }
         if matches!(
             target,
-            Some(MouseTarget::IssueSidePane)
+            MouseTarget::IssueSidePane
         ) {
             self.focus = Focus::IssueRecentComments;
         }
         if matches!(
             target,
-            Some(MouseTarget::PullRequestFilesPane | MouseTarget::PullRequestFileRow(_))
+            MouseTarget::PullRequestFilesPane | MouseTarget::PullRequestFileRow(_)
         ) {
             self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
         }
         if matches!(
             target,
-            Some(MouseTarget::PullRequestDiffPane | MouseTarget::PullRequestDiffRow(_, _))
+            MouseTarget::PullRequestDiffPane | MouseTarget::PullRequestDiffRow(_, _)
         ) {
             self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
         }
@@ -1462,14 +1485,19 @@ impl App {
                     self.set_view(View::Issues);
                 }
             }
+            Some(MouseTarget::RepoPicker) => {
+                self.open_repo_picker();
+            }
             Some(MouseTarget::RepoRow(index)) => {
                 self.selected_repo = index.min(self.filtered_repo_indices.len().saturating_sub(1));
                 self.action = Some(AppAction::PickRepo);
             }
+            Some(MouseTarget::RepoListPane) => {}
             Some(MouseTarget::RemoteRow(index)) => {
                 self.selected_remote = index.min(self.remotes.len().saturating_sub(1));
                 self.action = Some(AppAction::PickRemote);
             }
+            Some(MouseTarget::RemoteListPane) => {}
             Some(MouseTarget::IssueTabOpen) => {
                 self.set_issue_filter(IssueFilter::Open);
             }
@@ -1560,6 +1588,13 @@ impl App {
 
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    fn open_repo_picker(&mut self) {
+        self.repo_query.clear();
+        self.repo_search_mode = false;
+        self.rebuild_repo_picker_filter();
+        self.set_view(View::RepoPicker);
     }
 
     pub fn set_view(&mut self, view: View) {
@@ -4360,6 +4395,22 @@ mod tests {
         });
 
         assert_eq!(app.view(), View::IssueDetail);
+    }
+
+    #[test]
+    fn mouse_click_repo_picker_region_opens_repo_picker() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.register_mouse_region(MouseTarget::RepoPicker, 0, 0, 8, 1);
+
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert_eq!(app.view(), View::RepoPicker);
     }
 
     #[test]
