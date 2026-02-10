@@ -82,7 +82,7 @@ cargo test
 - Ctrl+u / Ctrl+d: page up/down in focused pane
 - gg/G: jump top/bottom in focused pane
 - f: cycle issue filter (open/closed)
-- 1/2: switch issue tab (open/closed), or use `[` and `]`
+- 1/2: switch issue tab (open/closed)
 - a: cycle assignee filter (all/unassigned/users)
 - /: search issues by number/title/body/labels/assignees (Enter keep, Esc clear)
 - m: add comment to selected issue

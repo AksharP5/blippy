@@ -109,13 +109,6 @@ impl IssueFilter {
         }
     }
 
-    fn prev(self) -> Self {
-        match self {
-            Self::Open => Self::Closed,
-            Self::Closed => Self::Open,
-        }
-    }
-
     fn from_key(ch: char) -> Option<Self> {
         match ch {
             '1' => Some(Self::Open),
@@ -592,12 +585,6 @@ impl App {
             }
             KeyCode::Char('a') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.cycle_assignee_filter(true);
-            }
-            KeyCode::Char('[') if key.modifiers.is_empty() && self.view == View::Issues => {
-                self.set_issue_filter(self.issue_filter.prev());
-            }
-            KeyCode::Char(']') if key.modifiers.is_empty() && self.view == View::Issues => {
-                self.set_issue_filter(self.issue_filter.next());
             }
             KeyCode::Char(ch)
                 if key.modifiers.is_empty()
@@ -2115,6 +2102,33 @@ mod tests {
         assert_eq!(app.issue_filter(), IssueFilter::Open);
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
+    }
+
+    #[test]
+    fn issue_filter_uses_1_and_2_shortcuts() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Closed);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Open);
+    }
+
+    #[test]
+    fn bracket_keys_do_not_change_issue_filter() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Closed);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Closed);
+
+        app.on_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        assert_eq!(app.issue_filter(), IssueFilter::Closed);
     }
 
     #[test]

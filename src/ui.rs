@@ -1084,7 +1084,7 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a assignee filter • l labels • Shift+A assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close issue • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • 1/2 tabs • f cycle • a assignee filter • l labels • Shift+A assignees • m comment • u reopen • dd close issue • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
@@ -1174,8 +1174,6 @@ fn issue_tabs_line(filter: IssueFilter, open_count: usize, closed_count: usize) 
         filter == IssueFilter::Closed,
         GITHUB_RED,
     ));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled("([ ] cycle)", Style::default().fg(GITHUB_MUTED)));
     Line::from(spans)
 }
 
