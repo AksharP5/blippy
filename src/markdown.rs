@@ -2,13 +2,13 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-const TEXT: Color = Color::Rgb(192, 202, 245);
-const MUTED: Color = Color::Rgb(134, 143, 188);
-const ACCENT_PURPLE: Color = Color::Rgb(187, 154, 247);
-const ACCENT_BLUE: Color = Color::Rgb(122, 162, 247);
-const ACCENT_CYAN: Color = Color::Rgb(125, 207, 255);
-const ACCENT_GREEN: Color = Color::Rgb(158, 206, 106);
-const CODE_BG: Color = Color::Rgb(31, 35, 53);
+const TEXT: Color = Color::Rgb(226, 231, 238);
+const MUTED: Color = Color::Rgb(119, 131, 149);
+const ACCENT_PURPLE: Color = Color::Rgb(212, 171, 255);
+const ACCENT_BLUE: Color = Color::Rgb(171, 229, 179);
+const ACCENT_CYAN: Color = Color::Rgb(180, 223, 164);
+const ACCENT_GREEN: Color = Color::Rgb(129, 199, 132);
+const CODE_BG: Color = Color::Rgb(20, 26, 34);
 
 #[derive(Debug, Default)]
 pub struct RenderedMarkdown {

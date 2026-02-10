@@ -16,21 +16,22 @@ use crate::app::{
 use crate::markdown;
 use crate::pr_diff::{parse_patch, DiffKind};
 
-const GITHUB_BLUE: Color = Color::Rgb(111, 179, 255);
-const GITHUB_GREEN: Color = Color::Rgb(126, 211, 140);
-const GITHUB_RED: Color = Color::Rgb(255, 120, 122);
-const GITHUB_VIOLET: Color = Color::Rgb(157, 141, 255);
-const GITHUB_BG: Color = Color::Rgb(10, 14, 20);
-const GITHUB_PANEL: Color = Color::Rgb(15, 20, 28);
-const GITHUB_PANEL_ALT: Color = Color::Rgb(20, 26, 36);
-const GITHUB_MUTED: Color = Color::Rgb(110, 123, 148);
-const PANEL_BORDER: Color = Color::Rgb(45, 58, 78);
-const FOCUS_BORDER: Color = Color::Rgb(89, 179, 255);
-const POPUP_BORDER: Color = Color::Rgb(142, 196, 255);
-const POPUP_BG: Color = Color::Rgb(18, 24, 33);
-const OVERLAY_BG: Color = Color::Rgb(8, 12, 18);
-const TEXT_PRIMARY: Color = Color::Rgb(224, 231, 240);
-const SELECT_BG: Color = Color::Rgb(37, 63, 94);
+const GITHUB_BLUE: Color = Color::Rgb(170, 215, 187);
+const GITHUB_GREEN: Color = Color::Rgb(142, 214, 165);
+const GITHUB_RED: Color = Color::Rgb(236, 137, 145);
+const GITHUB_VIOLET: Color = Color::Rgb(210, 176, 255);
+const GITHUB_BG: Color = Color::Rgb(11, 15, 20);
+const GITHUB_PANEL: Color = Color::Rgb(17, 22, 29);
+const GITHUB_PANEL_ALT: Color = Color::Rgb(21, 27, 35);
+const GITHUB_MUTED: Color = Color::Rgb(127, 138, 152);
+const PANEL_BORDER: Color = Color::Rgb(43, 52, 64);
+const FOCUS_BORDER: Color = Color::Rgb(182, 227, 185);
+const POPUP_BORDER: Color = Color::Rgb(208, 181, 255);
+const POPUP_BG: Color = Color::Rgb(18, 24, 32);
+const OVERLAY_BG: Color = Color::Rgb(9, 12, 18);
+const TEXT_PRIMARY: Color = Color::Rgb(230, 234, 240);
+const SELECT_BG: Color = Color::Rgb(34, 48, 58);
+const COMMENT_BG: Color = Color::Rgb(20, 28, 30);
 const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
@@ -1001,6 +1002,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                 let selected = index == app.selected_pull_request_diff_line();
                 let in_visual_range = visual_range
                     .is_some_and(|(start, end)| index >= start && index <= end);
+
                 lines.push(render_split_diff_row(
                     row,
                     selected,
@@ -1009,28 +1011,6 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     left_width,
                     right_width,
                 ));
-
-                let target_right = row
-                    .new_line
-                    .map(|line| {
-                        app.pull_request_comments_for_path_and_line(
-                            file_name.as_str(),
-                            ReviewSide::Right,
-                            line,
-                        )
-                    })
-                    .unwrap_or_default();
-                for comment in target_right {
-                    lines.push(render_compact_inline_comment(
-                        comment.author.as_str(),
-                        comment.body.as_str(),
-                        comment.resolved,
-                        ReviewSide::Right,
-                        app.selected_pull_request_review_comment_id() == Some(comment.id),
-                        left_width,
-                        right_width,
-                    ));
-                }
 
                 let target_left = row
                     .old_line
@@ -1043,7 +1023,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     })
                     .unwrap_or_default();
                 for comment in target_left {
-                    lines.push(render_compact_inline_comment(
+                    lines.push(render_inline_comment_row(
                         comment.author.as_str(),
                         comment.body.as_str(),
                         comment.resolved,
@@ -1053,18 +1033,39 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                         right_width,
                     ));
                 }
+
+                let target_right = row
+                    .new_line
+                    .map(|line| {
+                        app.pull_request_comments_for_path_and_line(
+                            file_name.as_str(),
+                            ReviewSide::Right,
+                            line,
+                        )
+                    })
+                    .unwrap_or_default();
+                for comment in target_right {
+                    lines.push(render_inline_comment_row(
+                        comment.author.as_str(),
+                        comment.body.as_str(),
+                        comment.resolved,
+                        ReviewSide::Right,
+                        app.selected_pull_request_review_comment_id() == Some(comment.id),
+                        left_width,
+                        right_width,
+                    ));
+                }
             }
 
             let unanchored = app.pull_request_unanchored_comments_for_path(file_name.as_str());
             if !unanchored.is_empty() {
-                lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    format!("Unanchored comments in file: {}", unanchored.len()),
+                    format!("unanchored: {}", unanchored.len()),
                     Style::default().fg(GITHUB_MUTED).add_modifier(Modifier::BOLD),
                 )));
                 for comment in unanchored.into_iter().take(2) {
                     lines.push(Line::from(Span::styled(
-                        format!("  @{} {}", comment.author, ellipsize(comment.body.as_str(), panel_width.saturating_sub(10))),
+                        format!("  @{} {}", comment.author, ellipsize(comment.body.as_str(), 100)),
                         Style::default().fg(POPUP_BORDER),
                     )));
                 }
@@ -1804,8 +1805,8 @@ fn render_split_diff_row(
     let mut row_style = Style::default();
     let mut bg_color = None;
     if in_visual_range {
-        bg_color = Some(Color::Rgb(92, 97, 118));
-        row_style = Style::default().bg(Color::Rgb(92, 97, 118));
+        bg_color = Some(Color::Rgb(48, 56, 66));
+        row_style = Style::default().bg(Color::Rgb(48, 56, 66));
     }
     if selected {
         bg_color = Some(SELECT_BG);
@@ -1893,6 +1894,58 @@ fn render_split_diff_row(
     line
 }
 
+fn render_inline_comment_row(
+    author: &str,
+    body: &str,
+    resolved: bool,
+    side: ReviewSide,
+    selected: bool,
+    left_width: usize,
+    right_width: usize,
+) -> Line<'static> {
+    let state = if resolved { "done" } else { "open" };
+    let label = format!("c {} @{}: {}", state, author, body);
+    let line_width = if side == ReviewSide::Left {
+        left_width
+    } else {
+        right_width
+    };
+    let content = ellipsize(label.as_str(), line_width.saturating_sub(3));
+    let prefix = if selected { ">" } else { " " };
+    let text = format!("{} {}", prefix, content);
+
+    let comment_style = Style::default().fg(POPUP_BORDER).bg(COMMENT_BG);
+    let selected_style = Style::default()
+        .fg(TEXT_PRIMARY)
+        .bg(SELECT_BG)
+        .add_modifier(Modifier::BOLD);
+
+    let mut line = if side == ReviewSide::Left {
+        let left = format!("{:width$}", text, width = left_width);
+        let right = " ".repeat(right_width);
+        Line::from(vec![
+            Span::styled("  ", Style::default().bg(GITHUB_PANEL_ALT)),
+            Span::styled(left, comment_style),
+            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+            Span::styled(right, Style::default().fg(GITHUB_MUTED)),
+        ])
+    } else {
+        let left = " ".repeat(left_width);
+        let right = format!("{:width$}", text, width = right_width);
+        Line::from(vec![
+            Span::styled("  ", Style::default().bg(GITHUB_PANEL_ALT)),
+            Span::styled(left, Style::default().fg(GITHUB_MUTED)),
+            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+            Span::styled(right, comment_style),
+        ])
+    };
+
+    if selected {
+        line = line.style(selected_style);
+    }
+    line
+}
+
 fn side_chip(label: &str, active: bool) -> Span<'static> {
     if active {
         return Span::styled(
@@ -1916,22 +1969,22 @@ fn render_diff_column_header(
 ) -> Line<'static> {
     let left_title = format!("{:width$}", " old", width = left_width);
     let right_title = format!("{:width$}", " new", width = right_width);
-    let left_style = if selected_side == ReviewSide::Left {
-        Style::default()
-            .fg(TEXT_PRIMARY)
-            .bg(Color::Rgb(29, 50, 76))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL_ALT)
-    };
-    let right_style = if selected_side == ReviewSide::Right {
-        Style::default()
-            .fg(TEXT_PRIMARY)
-            .bg(Color::Rgb(29, 50, 76))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL_ALT)
-    };
+            let left_style = if selected_side == ReviewSide::Left {
+                Style::default()
+                    .fg(TEXT_PRIMARY)
+            .bg(Color::Rgb(39, 58, 45))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL_ALT)
+            };
+            let right_style = if selected_side == ReviewSide::Right {
+                Style::default()
+                    .fg(TEXT_PRIMARY)
+            .bg(Color::Rgb(39, 58, 45))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL_ALT)
+            };
 
     Line::from(vec![
         Span::styled("  ", Style::default().bg(GITHUB_PANEL_ALT)),
@@ -1941,52 +1994,6 @@ fn render_diff_column_header(
         Span::styled(" ", right_style),
         Span::styled(right_title, right_style),
     ])
-}
-
-fn render_compact_inline_comment(
-    author: &str,
-    body: &str,
-    resolved: bool,
-    side: ReviewSide,
-    selected: bool,
-    left_width: usize,
-    right_width: usize,
-) -> Line<'static> {
-    let side_label = if side == ReviewSide::Left { "old" } else { "new" };
-    let state = if resolved { "done" } else { "open" };
-    let text = format!("c {} {} @{}: {}", side_label, state, author, body);
-    let line_width = if side == ReviewSide::Left {
-        left_width
-    } else {
-        right_width
-    };
-    let content = ellipsize(text.as_str(), line_width.saturating_sub(2));
-    let comment_style = Style::default().fg(POPUP_BORDER).bg(Color::Rgb(24, 34, 48));
-    let selected_style = Style::default().fg(TEXT_PRIMARY).bg(SELECT_BG).add_modifier(Modifier::BOLD);
-
-    let mut line = if side == ReviewSide::Left {
-        let left = format!("{:width$}", format!("> {}", content), width = left_width);
-        let right = " ".repeat(right_width);
-        Line::from(vec![
-            Span::styled("  ", Style::default().bg(GITHUB_PANEL_ALT)),
-            Span::styled(left, comment_style),
-            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
-            Span::styled(right, Style::default().fg(GITHUB_MUTED)),
-        ])
-    } else {
-        let left = " ".repeat(left_width);
-        let right = format!("{:width$}", format!("> {}", content), width = right_width);
-        Line::from(vec![
-            Span::styled("  ", Style::default().bg(GITHUB_PANEL_ALT)),
-            Span::styled(left, Style::default().fg(GITHUB_MUTED)),
-            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
-            Span::styled(right, comment_style),
-        ])
-    };
-    if selected {
-        line = line.style(selected_style);
-    }
-    line
 }
 
 fn file_status_symbol(status: &str) -> &'static str {
