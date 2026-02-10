@@ -35,15 +35,105 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
 fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let (main, footer) = split_area(area);
-    let block = panel_block("Repositories");
-    let items = if app.repos().is_empty() {
-        vec![ListItem::new("No repos found. Run `glyph sync` or press Ctrl+R to rescan.")]
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(0)])
+        .split(main);
+
+    let query = app.repo_query().trim();
+    let query_display = if query.is_empty() {
+        "none".to_string()
     } else {
-        app.repos()
+        ellipsize(query, 64)
+    };
+    let grouped_count = app.repo_picker_entries().len();
+    let total_remotes = app.repos().len();
+    let header = Text::from(vec![
+        Line::from(vec![
+            Span::styled("Repositories", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} groups", grouped_count),
+                Style::default().fg(Color::White),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} remotes", total_remotes),
+                Style::default().fg(GITHUB_MUTED),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("search: ", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(query_display.clone()),
+            Span::raw("  "),
+            Span::styled("(/ to search)", Style::default().fg(GITHUB_MUTED)),
+        ]),
+    ]);
+    let header_area = sections[0].inner(Margin {
+        vertical: 0,
+        horizontal: 2,
+    });
+    frame.render_widget(
+        Paragraph::new(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(PANEL_BORDER))
+                    .style(Style::default().bg(GITHUB_PANEL)),
+            )
+            .style(Style::default().fg(Color::White)),
+        header_area,
+    );
+    if app.repo_search_mode() {
+        let content = header_area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        if content.width > 0 && content.height > 1 {
+            let cursor_x = content
+                .x
+                .saturating_add((8 + query_display.chars().count()) as u16)
+                .min(content.x.saturating_add(content.width.saturating_sub(1)));
+            let cursor_y = content.y.saturating_add(1);
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
+
+    let block = panel_block("Repository Groups");
+    let items = if app.repo_picker_entries().is_empty() {
+        if app.repos().is_empty() {
+            vec![ListItem::new("No repos found. Run `glyph sync` or press Ctrl+R to rescan.")]
+        } else {
+            vec![ListItem::new("No repos match current search. Press Esc to clear.")]
+        }
+    } else {
+        app.repo_picker_entries()
             .iter()
             .map(|repo| {
-                let label = format!("{} / {} ({})", repo.owner, repo.repo, repo.remote_name);
-                ListItem::new(label)
+                let line1 = Line::from(vec![
+                    Span::styled(
+                        format!("{} / {}", repo.owner, repo.repo),
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("{} remotes", repo.remotes),
+                        Style::default().fg(GITHUB_MUTED),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("{} paths", repo.paths),
+                        Style::default().fg(GITHUB_MUTED),
+                    ),
+                ]);
+                let last_seen = repo
+                    .last_seen
+                    .as_deref()
+                    .map(|value| format!("last seen {}", value.replace('T', " ")))
+                    .unwrap_or_else(|| "last seen unknown".to_string());
+                let line2 = Line::from(last_seen).style(Style::default().fg(GITHUB_MUTED));
+                ListItem::new(vec![line1, line2])
             })
             .collect()
     };
@@ -59,11 +149,14 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
         );
     frame.render_stateful_widget(
         list,
-        main.inner(Margin {
+        sections[1].inner(Margin {
             vertical: 1,
             horizontal: 2,
         }),
-        &mut list_state(app.selected_repo()),
+        &mut list_state(selected_for_list(
+            app.selected_repo(),
+            app.repo_picker_entries().len(),
+        )),
     );
 
     draw_status(frame, app, footer);
@@ -673,6 +766,8 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         EditorMode::CloseIssue => "Close Issue Comment",
         EditorMode::AddComment => "Add Issue Comment",
         EditorMode::AddPreset => "Preset Body",
+        EditorMode::EditLabels => "Edit Labels",
+        EditorMode::EditAssignees => "Edit Assignees",
     };
     let editor_area = main.inner(Margin {
         vertical: 1,
@@ -763,7 +858,11 @@ fn split_area(area: Rect) -> (Rect, Rect) {
 fn help_text(app: &App) -> String {
     match app.view() {
         View::RepoPicker => {
-            "Ctrl+R rescan • j/k or ↑/↓ move • gg/G top/bottom • Enter select • q quit"
+            if app.repo_search_mode() {
+                return "Search repos: type query • Enter keep • Esc clear • Ctrl+u clear"
+                    .to_string();
+            }
+            "Ctrl+R rescan • j/k or ↑/↓ move • Ctrl+u/d page • gg/G top/bottom • / search • Enter select • q quit"
                 .to_string()
         }
         View::RemoteChooser => {
@@ -775,15 +874,15 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a/A assignee • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a/A assignee filter • l labels • Shift+a assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • l labels • a assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
+            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • l labels • a assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::CommentPresetPicker => {
@@ -796,6 +895,9 @@ fn help_text(app: &App) -> String {
             if app.editor_mode() == EditorMode::AddPreset {
                 return "Type preset body • Enter save • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
                     .to_string();
+            }
+            if matches!(app.editor_mode(), EditorMode::EditLabels | EditorMode::EditAssignees) {
+                return "Type comma-separated values • Enter submit • Esc cancel".to_string();
             }
             "Type message • Enter submit • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
                 .to_string()

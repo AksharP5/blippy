@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use crate::config::{CommentDefault, Config};
@@ -29,6 +29,10 @@ pub enum AppAction {
     ReopenIssue,
     AddIssueComment,
     SubmitIssueComment,
+    EditLabels,
+    EditAssignees,
+    SubmitLabels,
+    SubmitAssignees,
     PickPreset,
     SavePreset,
     SubmitComment,
@@ -67,6 +71,17 @@ pub enum AssigneeFilter {
 pub enum PendingIssueAction {
     Closing,
     Reopening,
+    UpdatingLabels,
+    UpdatingAssignees,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoPickerEntry {
+    pub owner: String,
+    pub repo: String,
+    pub paths: usize,
+    pub remotes: usize,
+    pub last_seen: Option<String>,
 }
 
 impl PendingIssueAction {
@@ -74,6 +89,8 @@ impl PendingIssueAction {
         match self {
             Self::Closing => "closing...",
             Self::Reopening => "reopening...",
+            Self::UpdatingLabels => "updating labels...",
+            Self::UpdatingAssignees => "updating assignees...",
         }
     }
 }
@@ -141,6 +158,9 @@ pub struct App {
     selected_comment: usize,
     issue_filter: IssueFilter,
     assignee_filter: AssigneeFilter,
+    repo_query: String,
+    repo_search_mode: bool,
+    repo_entries: Vec<RepoPickerEntry>,
     issue_query: String,
     issue_search_mode: bool,
     filtered_issue_indices: Vec<usize>,
@@ -189,6 +209,9 @@ impl App {
             selected_comment: 0,
             issue_filter: IssueFilter::Open,
             assignee_filter: AssigneeFilter::All,
+            repo_query: String::new(),
+            repo_search_mode: false,
+            repo_entries: Vec::new(),
             issue_query: String::new(),
             issue_search_mode: false,
             filtered_issue_indices: Vec::new(),
@@ -231,6 +254,18 @@ impl App {
 
     pub fn repos(&self) -> &[LocalRepoRow] {
         &self.repos
+    }
+
+    pub fn repo_picker_entries(&self) -> &[RepoPickerEntry] {
+        &self.repo_entries
+    }
+
+    pub fn repo_query(&self) -> &str {
+        self.repo_query.as_str()
+    }
+
+    pub fn repo_search_mode(&self) -> bool {
+        self.repo_search_mode
     }
 
     pub fn remotes(&self) -> &[RemoteInfo] {
@@ -315,6 +350,11 @@ impl App {
         self.selected_repo
     }
 
+    pub fn selected_repo_slug(&self) -> Option<(String, String)> {
+        let entry = self.repo_entries.get(self.selected_repo)?;
+        Some((entry.owner.clone(), entry.repo.clone()))
+    }
+
     pub fn selected_remote(&self) -> usize {
         self.selected_remote
     }
@@ -394,6 +434,11 @@ impl App {
             self.handle_editor_key(key);
             return;
         }
+        if self.view == View::RepoPicker && self.repo_search_mode {
+            if self.handle_repo_search_key(key) {
+                return;
+            }
+        }
         if self.view == View::Issues && self.issue_search_mode {
             if self.handle_issue_search_key(key) {
                 return;
@@ -432,6 +477,10 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.set_view(View::RepoPicker);
+            }
+            KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::RepoPicker => {
+                self.repo_search_mode = true;
+                self.status = "Search repos".to_string();
             }
             KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.issue_search_mode = true;
@@ -517,6 +566,17 @@ impl App {
             {
                 self.action = Some(AppAction::AddIssueComment);
             }
+            KeyCode::Char('l')
+                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
+                self.action = Some(AppAction::EditLabels);
+            }
+            KeyCode::Char('A') if self.view == View::Issues => {
+                self.action = Some(AppAction::EditAssignees);
+            }
+            KeyCode::Char('a') if matches!(self.view, View::IssueDetail | View::IssueComments) => {
+                self.action = Some(AppAction::EditAssignees);
+            }
             KeyCode::Char('u')
                 if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
             {
@@ -560,13 +620,19 @@ impl App {
             View::IssueDetail => self.focus = Focus::IssueBody,
             _ => {
                 self.issue_search_mode = false;
+                if self.view != View::RepoPicker {
+                    self.repo_search_mode = false;
+                }
             }
         }
     }
 
     pub fn set_repos(&mut self, repos: Vec<LocalRepoRow>) {
         self.repos = repos;
-        self.selected_repo = 0;
+        self.rebuild_repo_picker_entries();
+        if self.selected_repo >= self.repo_entries.len() {
+            self.selected_repo = self.repo_entries.len().saturating_sub(1);
+        }
     }
 
     pub fn set_remotes(&mut self, remotes: Vec<RemoteInfo>) {
@@ -698,6 +764,7 @@ impl App {
         self.current_repo = Some(repo.to_string());
         self.current_issue_id = None;
         self.current_issue_number = None;
+        self.repo_search_mode = false;
         self.assignee_filter = AssigneeFilter::All;
         self.issue_query.clear();
         self.issue_search_mode = false;
@@ -720,6 +787,24 @@ impl App {
         }
     }
 
+    pub fn update_issue_labels_by_number(&mut self, issue_number: i64, labels: &str) {
+        for issue in &mut self.issues {
+            if issue.number == issue_number {
+                issue.labels = labels.to_string();
+            }
+        }
+        self.rebuild_issue_filter();
+    }
+
+    pub fn update_issue_assignees_by_number(&mut self, issue_number: i64, assignees: &str) {
+        for issue in &mut self.issues {
+            if issue.number == issue_number {
+                issue.assignees = assignees.to_string();
+            }
+        }
+        self.rebuild_issue_filter();
+    }
+
     pub fn editor(&self) -> &CommentEditorState {
         &self.comment_editor
     }
@@ -740,6 +825,18 @@ impl App {
 
     pub fn open_issue_comment_editor(&mut self, return_view: View) {
         self.comment_editor.reset_for_comment();
+        self.editor_cancel_view = return_view;
+        self.set_view(View::CommentEditor);
+    }
+
+    pub fn open_issue_labels_editor(&mut self, return_view: View, labels: &str) {
+        self.comment_editor.reset_for_labels(labels);
+        self.editor_cancel_view = return_view;
+        self.set_view(View::CommentEditor);
+    }
+
+    pub fn open_issue_assignees_editor(&mut self, return_view: View, assignees: &str) {
+        self.comment_editor.reset_for_assignees(assignees);
         self.editor_cancel_view = return_view;
         self.set_view(View::CommentEditor);
     }
@@ -826,7 +923,7 @@ impl App {
     fn move_selection_down(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if self.selected_repo + 1 < self.repos.len() {
+                if self.selected_repo + 1 < self.repo_entries.len() {
                     self.selected_repo += 1;
                 }
             }
@@ -922,8 +1019,8 @@ impl App {
     fn jump_bottom(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if !self.repos.is_empty() {
-                    self.selected_repo = self.repos.len() - 1;
+                if !self.repo_entries.is_empty() {
+                    self.selected_repo = self.repo_entries.len() - 1;
                 }
             }
             View::RemoteChooser => {
@@ -1207,13 +1304,19 @@ impl App {
                         self.set_view(self.editor_cancel_view);
                     }
                     KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        self.comment_editor.newline()
+                        if self.comment_editor.mode().allows_multiline() {
+                            self.comment_editor.newline()
+                        }
                     }
                     KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
-                        self.comment_editor.newline()
+                        if self.comment_editor.mode().allows_multiline() {
+                            self.comment_editor.newline()
+                        }
                     }
                     KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.comment_editor.newline()
+                        if self.comment_editor.mode().allows_multiline() {
+                            self.comment_editor.newline()
+                        }
                     }
                     KeyCode::Enter => match self.comment_editor.mode() {
                         EditorMode::CloseIssue => {
@@ -1224,6 +1327,12 @@ impl App {
                         }
                         EditorMode::AddPreset => {
                             self.action = Some(AppAction::SavePreset);
+                        }
+                        EditorMode::EditLabels => {
+                            self.action = Some(AppAction::SubmitLabels);
+                        }
+                        EditorMode::EditAssignees => {
+                            self.action = Some(AppAction::SubmitAssignees);
                         }
                     },
                     KeyCode::Backspace => self.comment_editor.backspace_text(),
@@ -1267,6 +1376,42 @@ impl App {
                 self.rebuild_issue_filter();
                 self.issues_preview_scroll = 0;
                 self.update_search_status();
+            }
+            _ => {}
+        }
+        true
+    }
+
+    fn handle_repo_search_key(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
+            self.repo_query.clear();
+            self.rebuild_repo_picker_entries();
+            self.selected_repo = 0;
+            self.status = "Repo search cleared".to_string();
+            return true;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.repo_search_mode = false;
+                self.repo_query.clear();
+                self.rebuild_repo_picker_entries();
+                self.selected_repo = 0;
+                self.status = String::new();
+            }
+            KeyCode::Enter => {
+                self.repo_search_mode = false;
+                self.status = format!("{} repos", self.repo_entries.len());
+            }
+            KeyCode::Backspace => {
+                self.repo_query.pop();
+                self.rebuild_repo_picker_entries();
+                self.selected_repo = 0;
+            }
+            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+                self.repo_query.push(ch);
+                self.rebuild_repo_picker_entries();
+                self.selected_repo = 0;
             }
             _ => {}
         }
@@ -1317,6 +1462,69 @@ impl App {
             _ => false,
         }
     }
+
+    fn rebuild_repo_picker_entries(&mut self) {
+        #[derive(Default)]
+        struct RepoGroup {
+            owner: String,
+            repo: String,
+            paths: HashSet<String>,
+            remotes: HashSet<String>,
+            last_seen: Option<String>,
+            order: usize,
+            matches_query: bool,
+        }
+
+        let query = self.repo_query.trim().to_ascii_lowercase();
+        let mut groups = HashMap::<String, RepoGroup>::new();
+
+        for (index, repo) in self.repos.iter().enumerate() {
+            let key = format!("{}/{}", repo.owner, repo.repo);
+            let group = groups.entry(key).or_insert_with(|| RepoGroup {
+                owner: repo.owner.clone(),
+                repo: repo.repo.clone(),
+                order: index,
+                ..RepoGroup::default()
+            });
+
+            group.paths.insert(repo.path.clone());
+            group.remotes.insert(repo.remote_name.clone());
+            if group.last_seen.is_none() {
+                group.last_seen = repo.last_seen.clone();
+            }
+
+            if query.is_empty() {
+                group.matches_query = true;
+                continue;
+            }
+
+            let haystack = format!(
+                "{} {} {} {} {}",
+                repo.owner, repo.repo, repo.path, repo.remote_name, repo.url
+            )
+            .to_ascii_lowercase();
+            if haystack.contains(query.as_str()) {
+                group.matches_query = true;
+            }
+        }
+
+        let mut entries = groups
+            .into_values()
+            .filter(|group| group.matches_query)
+            .collect::<Vec<RepoGroup>>();
+        entries.sort_by_key(|group| group.order);
+
+        self.repo_entries = entries
+            .into_iter()
+            .map(|group| RepoPickerEntry {
+                owner: group.owner,
+                repo: group.repo,
+                paths: group.paths.len(),
+                remotes: group.remotes.len(),
+                last_seen: group.last_seen,
+            })
+            .collect::<Vec<RepoPickerEntry>>();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1324,6 +1532,14 @@ pub enum EditorMode {
     CloseIssue,
     AddComment,
     AddPreset,
+    EditLabels,
+    EditAssignees,
+}
+
+impl EditorMode {
+    fn allows_multiline(self) -> bool {
+        matches!(self, Self::CloseIssue | Self::AddComment | Self::AddPreset)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1372,6 +1588,16 @@ impl CommentEditorState {
         self.text.clear();
     }
 
+    pub fn reset_for_labels(&mut self, labels: &str) {
+        self.mode = EditorMode::EditLabels;
+        self.text = labels.to_string();
+    }
+
+    pub fn reset_for_assignees(&mut self, assignees: &str) {
+        self.mode = EditorMode::EditAssignees;
+        self.text = assignees.to_string();
+    }
+
     pub fn append_name(&mut self, ch: char) {
         self.name.push(ch);
     }
@@ -1397,7 +1623,7 @@ impl CommentEditorState {
 mod tests {
     use super::{App, AppAction, Focus, IssueFilter, View};
     use crate::config::Config;
-    use crate::store::IssueRow;
+    use crate::store::{IssueRow, LocalRepoRow};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
@@ -1955,5 +2181,134 @@ mod tests {
 
         app.set_issue_filter(IssueFilter::Closed);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(11));
+    }
+
+    #[test]
+    fn repo_picker_groups_same_owner_repo() {
+        let mut app = App::new(Config::default());
+        app.set_repos(vec![
+            LocalRepoRow {
+                path: "/tmp/one".to_string(),
+                remote_name: "origin".to_string(),
+                owner: "acme".to_string(),
+                repo: "glyph".to_string(),
+                url: "https://github.com/acme/glyph.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+            LocalRepoRow {
+                path: "/tmp/two".to_string(),
+                remote_name: "upstream".to_string(),
+                owner: "acme".to_string(),
+                repo: "glyph".to_string(),
+                url: "https://github.com/acme/glyph.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+            LocalRepoRow {
+                path: "/tmp/three".to_string(),
+                remote_name: "origin".to_string(),
+                owner: "other".to_string(),
+                repo: "core".to_string(),
+                url: "https://github.com/other/core.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+        ]);
+
+        assert_eq!(app.repo_picker_entries().len(), 2);
+        assert_eq!(app.repo_picker_entries()[0].owner, "acme");
+        assert_eq!(app.repo_picker_entries()[0].repo, "glyph");
+        assert_eq!(app.repo_picker_entries()[0].paths, 2);
+    }
+
+    #[test]
+    fn repo_picker_search_filters_entries() {
+        let mut app = App::new(Config::default());
+        app.set_repos(vec![
+            LocalRepoRow {
+                path: "/tmp/one".to_string(),
+                remote_name: "origin".to_string(),
+                owner: "acme".to_string(),
+                repo: "glyph".to_string(),
+                url: "https://github.com/acme/glyph.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+            LocalRepoRow {
+                path: "/tmp/two".to_string(),
+                remote_name: "origin".to_string(),
+                owner: "other".to_string(),
+                repo: "core".to_string(),
+                url: "https://github.com/other/core.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+        ]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for ch in "acme".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        assert_eq!(app.repo_picker_entries().len(), 1);
+        assert_eq!(app.repo_picker_entries()[0].owner, "acme");
+
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.repo_picker_entries().len(), 2);
+    }
+
+    #[test]
+    fn l_triggers_edit_labels_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 1,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: "bug".to_string(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::EditLabels));
+    }
+
+    #[test]
+    fn a_triggers_edit_assignees_action_in_detail() {
+        let mut app = App::new(Config::default());
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 1,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: "alex".to_string(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+        app.set_current_issue(1, 1);
+        app.set_view(View::IssueDetail);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::EditAssignees));
+    }
+
+    #[test]
+    fn labels_editor_enter_submits() {
+        let mut app = App::new(Config::default());
+        app.open_issue_labels_editor(View::Issues, "bug,triage");
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
     }
 }

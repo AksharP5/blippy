@@ -265,8 +265,8 @@ fn handle_actions(
 
     match action {
         AppAction::PickRepo => {
-            let (owner, repo) = match app.repos().get(app.selected_repo()) {
-                Some(repo) => (repo.owner.clone(), repo.repo.clone()),
+            let (owner, repo) = match app.selected_repo_slug() {
+                Some(target) => target,
                 None => return Ok(()),
             };
             load_issues_for_slug(app, conn, &owner, &repo)?;
@@ -316,9 +316,43 @@ fn handle_actions(
             app.set_current_issue(issue_id, issue_number);
             app.open_issue_comment_editor(app.view());
         }
+        AppAction::EditLabels => {
+            let return_view = app.view();
+            let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
+                Some(issue) => issue,
+                None => {
+                    app.set_status("No issue selected".to_string());
+                    return Ok(());
+                }
+            };
+            app.set_current_issue(issue_id, issue_number);
+            let labels = selected_issue_labels(app).unwrap_or_default();
+            app.open_issue_labels_editor(return_view, labels.as_str());
+        }
+        AppAction::EditAssignees => {
+            let return_view = app.view();
+            let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
+                Some(issue) => issue,
+                None => {
+                    app.set_status("No issue selected".to_string());
+                    return Ok(());
+                }
+            };
+            app.set_current_issue(issue_id, issue_number);
+            let assignees = selected_issue_assignees(app).unwrap_or_default();
+            app.open_issue_assignees_editor(return_view, assignees.as_str());
+        }
         AppAction::SubmitIssueComment => {
             let comment = app.editor().text().to_string();
             post_issue_comment(app, token, comment, event_tx.clone())?;
+        }
+        AppAction::SubmitLabels => {
+            let labels = parse_csv_values(app.editor().text(), false);
+            update_issue_labels(app, token, labels, event_tx.clone())?;
+        }
+        AppAction::SubmitAssignees => {
+            let assignees = parse_csv_values(app.editor().text(), true);
+            update_issue_assignees(app, token, assignees, event_tx.clone())?;
         }
         AppAction::CloseIssue => {
             if let Some((issue_id, issue_number, _)) = selected_issue_for_action(app) {
@@ -443,6 +477,80 @@ fn post_issue_comment(
     Ok(())
 }
 
+fn update_issue_labels(
+    app: &mut App,
+    token: &str,
+    labels: Vec<String>,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    let issue_number = match issue_number(app) {
+        Some(issue_number) => issue_number,
+        None => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let labels_display = labels.join(",");
+    start_update_labels(
+        owner,
+        repo,
+        issue_number,
+        token.to_string(),
+        labels,
+        event_tx,
+        labels_display,
+    );
+    app.set_pending_issue_action(issue_number, PendingIssueAction::UpdatingLabels);
+    app.set_view(app.editor_cancel_view());
+    app.set_status(format!("Updating labels for #{}...", issue_number));
+    Ok(())
+}
+
+fn update_issue_assignees(
+    app: &mut App,
+    token: &str,
+    assignees: Vec<String>,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    let issue_number = match issue_number(app) {
+        Some(issue_number) => issue_number,
+        None => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let assignees_display = assignees.join(",");
+    start_update_assignees(
+        owner,
+        repo,
+        issue_number,
+        token.to_string(),
+        assignees,
+        event_tx,
+        assignees_display,
+    );
+    app.set_pending_issue_action(issue_number, PendingIssueAction::UpdatingAssignees);
+    app.set_view(app.editor_cancel_view());
+    app.set_status(format!("Updating assignees for #{}...", issue_number));
+    Ok(())
+}
+
 fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
     let (issue_id, issue_number, issue_state) = match selected_issue_for_action(app) {
         Some(issue) => issue,
@@ -492,6 +600,47 @@ fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<String>)> {
     }
 
     None
+}
+
+fn selected_issue_labels(app: &App) -> Option<String> {
+    if app.view() == View::Issues {
+        return app.selected_issue_row().map(|issue| issue.labels.clone());
+    }
+    if matches!(app.view(), View::IssueDetail | View::IssueComments | View::CommentEditor) {
+        return app.current_issue_row().map(|issue| issue.labels.clone());
+    }
+    None
+}
+
+fn selected_issue_assignees(app: &App) -> Option<String> {
+    if app.view() == View::Issues {
+        return app.selected_issue_row().map(|issue| issue.assignees.clone());
+    }
+    if matches!(app.view(), View::IssueDetail | View::IssueComments | View::CommentEditor) {
+        return app.current_issue_row().map(|issue| issue.assignees.clone());
+    }
+    None
+}
+
+fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
+    let mut values = Vec::new();
+    for raw in input.split(',') {
+        let mut value = raw.trim().to_string();
+        if strip_at {
+            value = value.trim_start_matches('@').to_string();
+        }
+        if value.is_empty() {
+            continue;
+        }
+        if values
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(value.as_str()))
+        {
+            continue;
+        }
+        values.push(value);
+    }
+    values
 }
 
 fn issue_number(app: &App) -> Option<i64> {
@@ -713,6 +862,8 @@ fn handle_events(
                     || message.starts_with("close failed")
                     || message.starts_with("reopened")
                     || message.starts_with("reopen failed")
+                    || message.starts_with("label update failed")
+                    || message.starts_with("assignee update failed")
                 {
                     app.clear_pending_issue_action(issue_number);
                 }
@@ -727,6 +878,24 @@ fn handle_events(
                 if app.current_issue_number() == Some(issue_number) {
                     app.request_comment_sync();
                 }
+            }
+            AppEvent::IssueLabelsUpdated {
+                issue_number,
+                labels,
+            } => {
+                app.clear_pending_issue_action(issue_number);
+                app.update_issue_labels_by_number(issue_number, labels.as_str());
+                app.set_status(format!("#{} labels updated", issue_number));
+                app.request_sync();
+            }
+            AppEvent::IssueAssigneesUpdated {
+                issue_number,
+                assignees,
+            } => {
+                app.clear_pending_issue_action(issue_number);
+                app.update_issue_assignees_by_number(issue_number, assignees.as_str());
+                app.set_status(format!("#{} assignees updated", issue_number));
+                app.request_sync();
             }
         }
     }
@@ -755,6 +924,8 @@ enum AppEvent {
     CommentsUpdated { issue_id: i64, count: usize },
     CommentsFailed { issue_id: i64, message: String },
     IssueUpdated { issue_number: i64, message: String },
+    IssueLabelsUpdated { issue_number: i64, labels: String },
+    IssueAssigneesUpdated { issue_number: i64, assignees: String },
 }
 
 fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
@@ -1042,6 +1213,118 @@ fn start_add_comment(
     });
 }
 
+fn start_update_labels(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    token: String,
+    labels: Vec<String>,
+    event_tx: Sender<AppEvent>,
+    labels_display: String,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("label update failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("label update failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .update_issue_labels(&owner, &repo, issue_number, &labels)
+                .await
+        });
+        match result {
+            Ok(()) => {
+                let _ = event_tx.send(AppEvent::IssueLabelsUpdated {
+                    issue_number,
+                    labels: labels_display,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("label update failed: {}", error),
+                });
+            }
+        }
+    });
+}
+
+fn start_update_assignees(
+    owner: String,
+    repo: String,
+    issue_number: i64,
+    token: String,
+    assignees: Vec<String>,
+    event_tx: Sender<AppEvent>,
+    assignees_display: String,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("assignee update failed: {}", error),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("assignee update failed: {}", error),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .update_issue_assignees(&owner, &repo, issue_number, &assignees)
+                .await
+        });
+        match result {
+            Ok(()) => {
+                let _ = event_tx.send(AppEvent::IssueAssigneesUpdated {
+                    issue_number,
+                    assignees: assignees_display,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::IssueUpdated {
+                    issue_number,
+                    message: format!("assignee update failed: {}", error),
+                });
+            }
+        }
+    });
+}
+
 fn start_reopen_issue(
     owner: String,
     repo: String,
@@ -1197,5 +1480,22 @@ impl Drop for TerminalGuard {
             DisableMouseCapture
         );
         let _ = self.terminal.show_cursor();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_csv_values;
+
+    #[test]
+    fn parse_csv_values_trims_dedupes_and_strips_at() {
+        let values = parse_csv_values(" @alex,alex, sam , ,@Sam", true);
+        assert_eq!(values, vec!["alex".to_string(), "sam".to_string()]);
+    }
+
+    #[test]
+    fn parse_csv_values_keeps_label_case() {
+        let values = parse_csv_values("bug,needs-triage,BUG", false);
+        assert_eq!(values, vec!["bug".to_string(), "needs-triage".to_string()]);
     }
 }

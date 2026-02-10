@@ -255,4 +255,46 @@ impl GitHubClient {
             .error_for_status()?;
         Ok(())
     }
+
+    pub async fn update_issue_labels(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+        labels: &[String],
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/labels",
+            API_BASE, owner, repo, issue_number
+        );
+        self.client
+            .put(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"labels": labels}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn update_issue_assignees(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: i64,
+        assignees: &[String],
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            API_BASE, owner, repo, issue_number
+        );
+        self.client
+            .patch(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"assignees": assignees}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
 }

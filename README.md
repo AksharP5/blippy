@@ -76,6 +76,7 @@ cargo test
 ## Navigation
 - Ctrl+G: open repo picker
 - Ctrl+R: rescan repos
+- / in repo picker: search repo groups (owner/repo/path/remote)
 - Ctrl+h/j/k/l: switch focus between panes (issues list/preview, issue description/recent comments)
 - j/k or arrow keys: move or scroll focused pane
 - Ctrl+u / Ctrl+d: page up/down in focused pane
@@ -85,6 +86,8 @@ cargo test
 - a/A: cycle assignee filter (all/unassigned/users)
 - /: search issues by number/title/body/labels/assignees (Enter keep, Esc clear)
 - m: add comment to selected issue
+- l: edit issue labels (comma-separated)
+- Shift+a (issues list) or a (detail/comments): edit assignees (comma-separated)
 - u: reopen selected closed issue
 - Enter: open selected issue
 - r: refresh issues/comments
