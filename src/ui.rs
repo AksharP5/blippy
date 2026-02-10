@@ -4,8 +4,17 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, EditorMode, Focus, IssueFilter, View};
+use crate::app::{
+    App,
+    EditorMode,
+    Focus,
+    IssueFilter,
+    PullRequestReviewFocus,
+    ReviewSide,
+    View,
+};
 use crate::markdown;
+use crate::pr_diff::{parse_patch, DiffKind};
 
 const GITHUB_BLUE: Color = Color::Rgb(122, 162, 247);
 const GITHUB_GREEN: Color = Color::Rgb(158, 206, 106);
@@ -833,14 +842,22 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(main);
-    let content_area = sections[1].inner(Margin {
+    let content = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .split(content);
 
     let title = match app.current_issue_row() {
-        Some(issue) => format!("PR changes #{}", issue.number),
-        None => "PR changes".to_string(),
+        Some(issue) => format!("PR review #{}", issue.number),
+        None => "PR review".to_string(),
+    };
+    let focused = match app.pull_request_review_focus() {
+        PullRequestReviewFocus::Files => "files",
+        PullRequestReviewFocus::Diff => "diff",
     };
     let header = Text::from(vec![
         Line::from(Span::styled(
@@ -848,7 +865,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "j/k scroll • Esc back",
+            format!("Ctrl+h/l switch pane • Enter focus diff • m inline comment • Esc back • focus: {}", focused),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -867,68 +884,150 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         }),
     );
 
+    let file_items = if app.pull_request_files().is_empty() {
+        vec![ListItem::new("No changed files cached yet. Press r to refresh.")]
+    } else {
+        app.pull_request_files()
+            .iter()
+            .map(|file| {
+                let comment_count = app.pull_request_comments_count_for_path(file.filename.as_str());
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        file_status_symbol(file.status.as_str()),
+                        Style::default().fg(file_status_color(file.status.as_str())),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        ellipsize(file.filename.as_str(), 34),
+                        Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("+{} -{}", file.additions, file.deletions),
+                        Style::default().fg(GITHUB_MUTED),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("c:{}", comment_count),
+                        Style::default().fg(POPUP_BORDER),
+                    ),
+                ]))
+            })
+            .collect::<Vec<ListItem>>()
+    };
+    let files_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Files;
+    let files_block_title = focused_title("Changed files", files_focused);
+    let files_list = List::new(file_items)
+        .block(panel_block_with_border(
+            files_block_title.as_str(),
+            focus_border(files_focused),
+        ))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .highlight_symbol("▸ ")
+        .highlight_style(
+            Style::default()
+                .bg(SELECT_BG)
+                .fg(TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_stateful_widget(
+        files_list,
+        panes[0],
+        &mut list_state(selected_for_list(
+            app.selected_pull_request_file(),
+            app.pull_request_files().len(),
+        )),
+    );
+
+    let diff_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Diff;
+    let selected_file = app
+        .selected_pull_request_file_row()
+        .map(|file| (file.filename.clone(), file.patch.clone()));
     let mut lines = Vec::new();
+    let mut row_offsets = Vec::new();
+
     if app.pull_request_files_syncing() {
         lines.push(Line::from("Loading pull request changes..."));
-    } else if app.pull_request_files().is_empty() {
-        lines.push(Line::from("No changed files cached yet. Press r to refresh."));
+    } else if selected_file.is_none() {
+        lines.push(Line::from("Select a file to start reviewing."));
     } else {
-        for file in app.pull_request_files() {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    file_status_symbol(file.status.as_str()),
-                    Style::default().fg(file_status_color(file.status.as_str())),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    file.filename.clone(),
-                    Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            lines.push(
-                Line::from(vec![
-                    Span::raw("  +"),
-                    Span::styled(
-                        file.additions.to_string(),
-                        Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  -"),
-                    Span::styled(
-                        file.deletions.to_string(),
-                        Style::default().fg(GITHUB_RED).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(file.status.clone(), Style::default().fg(GITHUB_MUTED)),
-                ])
-                .style(Style::default().fg(GITHUB_MUTED)),
-            );
-            if let Some(patch) = file.patch.as_deref() {
-                for patch_line in patch.lines() {
-                    lines.push(styled_patch_line(patch_line, 120));
+        let (file_name, patch) = selected_file.clone().expect("selected file exists");
+        let rows = parse_patch(patch.as_deref());
+        if rows.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No textual patch available for this file.",
+                Style::default().fg(GITHUB_MUTED),
+            )));
+        } else {
+            let panel_width = panes[1].width.saturating_sub(2) as usize;
+            let left_width = panel_width.saturating_sub(5) / 2;
+            let right_width = panel_width.saturating_sub(left_width + 3);
+            for (index, row) in rows.iter().enumerate() {
+                row_offsets.push(lines.len() as u16);
+                let selected = index == app.selected_pull_request_diff_line();
+                lines.push(render_split_diff_row(row, selected, left_width, right_width));
+
+                let target_right = row
+                    .new_line
+                    .map(|line| app.pull_request_comments_for_path_and_line(
+                        file_name.as_str(),
+                        ReviewSide::Right,
+                        line,
+                    ))
+                    .unwrap_or_default();
+                for comment in target_right {
+                    lines.push(render_inline_review_comment(comment.author.as_str(), comment.body.as_str(), panel_width));
                 }
-            } else {
-                lines.push(Line::from(Span::styled(
-                    "  (binary or patch not available)",
-                    Style::default().fg(GITHUB_MUTED),
-                )));
+
+                let target_left = row
+                    .old_line
+                    .map(|line| app.pull_request_comments_for_path_and_line(
+                        file_name.as_str(),
+                        ReviewSide::Left,
+                        line,
+                    ))
+                    .unwrap_or_default();
+                for comment in target_left {
+                    lines.push(render_inline_review_comment(comment.author.as_str(), comment.body.as_str(), panel_width));
+                }
             }
-            lines.push(Line::from(""));
         }
     }
 
-    let content_width = content_area.width.saturating_sub(2);
-    let viewport_height = content_area.height.saturating_sub(2) as usize;
+    let content_width = panes[1].width.saturating_sub(2);
+    let viewport_height = panes[1].height.saturating_sub(2) as usize;
     let total_lines = wrapped_line_count(&lines, content_width);
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
-    app.set_issue_recent_comments_max_scroll(max_scroll);
-    let scroll = app.issue_recent_comments_scroll();
+    app.set_pull_request_diff_max_scroll(max_scroll);
 
+    let selected_row_offset = row_offsets
+        .get(app.selected_pull_request_diff_line())
+        .copied()
+        .unwrap_or(0);
+    let mut scroll = app.pull_request_diff_scroll();
+    if selected_row_offset < scroll {
+        scroll = selected_row_offset;
+    }
+    let viewport = viewport_height as u16;
+    if viewport > 0 && selected_row_offset >= scroll.saturating_add(viewport) {
+        scroll = selected_row_offset.saturating_sub(viewport.saturating_sub(1));
+    }
+    app.set_pull_request_diff_scroll(scroll);
+
+    let diff_title = selected_file
+        .as_ref()
+        .map(|(file_name, _)| format!("Diff: {}", file_name))
+        .unwrap_or_else(|| "Diff".to_string());
+    let diff_block_title = focused_title(diff_title.as_str(), diff_focused);
     let paragraph = Paragraph::new(Text::from(lines))
-        .block(panel_block_with_border("Pull request changes", focus_border(true)))
+        .block(panel_block_with_border(
+            diff_block_title.as_str(),
+            focus_border(diff_focused),
+        ))
         .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
-    frame.render_widget(paragraph, content_area);
+    frame.render_widget(paragraph, panes[1]);
 
     draw_status(frame, app, footer);
 }
@@ -1200,6 +1299,7 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         EditorMode::CloseIssue => close_editor_title,
         EditorMode::AddComment => "Add Issue Comment",
         EditorMode::EditComment => "Edit Issue Comment",
+        EditorMode::AddPullRequestReviewComment => "Add Pull Request Review Comment",
         EditorMode::AddPreset => "Preset Body",
     };
     let editor_area = main.inner(Margin {
@@ -1432,7 +1532,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "j/k scroll changes • Ctrl+u/d page • gg/G top/bottom • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r refresh changes • o browser • Ctrl+y copy status • q quit"
+            "Ctrl+h/l switch pane • j/k move file/line • Enter focus diff • Ctrl+u/d page • gg/G top/bottom • m inline review comment • l labels • Shift+A assignees • u reopen pull request • dd close pull request • v checkout PR • Esc back • r refresh changes/comments • o browser • Ctrl+y copy status • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1469,6 +1569,8 @@ fn status_context(app: &App) -> String {
         "syncing"
     } else if app.pull_request_files_syncing() {
         "loading pr files"
+    } else if app.pull_request_review_comments_syncing() {
+        "loading review comments"
     } else if app.comment_syncing() {
         "syncing comments"
     } else if app.scanning() {
@@ -1571,6 +1673,81 @@ fn styled_patch_line(line: &str, width: usize) -> Line<'static> {
         format!("  {}", trimmed),
         Style::default().fg(GITHUB_MUTED),
     ))
+}
+
+fn render_split_diff_row(
+    row: &crate::pr_diff::DiffRow,
+    selected: bool,
+    left_width: usize,
+    right_width: usize,
+) -> Line<'static> {
+    if row.kind == DiffKind::Hunk {
+        return Line::from(Span::styled(
+            format!(" {}", ellipsize(row.raw.as_str(), left_width + right_width + 4)),
+            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if row.kind == DiffKind::Meta {
+        return Line::from(Span::styled(
+            format!(" {}", ellipsize(row.raw.as_str(), left_width + right_width + 4)),
+            Style::default().fg(GITHUB_MUTED),
+        ));
+    }
+
+    let left_number = row
+        .old_line
+        .map(|line| line.to_string())
+        .unwrap_or_default();
+    let right_number = row
+        .new_line
+        .map(|line| line.to_string())
+        .unwrap_or_default();
+
+    let left_prefix = format!("{:>4} ", left_number);
+    let right_prefix = format!("{:>4} ", right_number);
+    let left_text = ellipsize(row.left.as_str(), left_width.saturating_sub(5));
+    let right_text = ellipsize(row.right.as_str(), right_width.saturating_sub(5));
+
+    let mut left_style = Style::default().fg(GITHUB_MUTED);
+    let mut right_style = Style::default().fg(GITHUB_MUTED);
+    match row.kind {
+        DiffKind::Added => {
+            right_style = Style::default().fg(GITHUB_GREEN);
+        }
+        DiffKind::Removed => {
+            left_style = Style::default().fg(GITHUB_RED);
+        }
+        DiffKind::Context => {
+            left_style = Style::default().fg(TEXT_PRIMARY);
+            right_style = Style::default().fg(TEXT_PRIMARY);
+        }
+        _ => {}
+    }
+
+    let mut row_style = Style::default();
+    if selected {
+        row_style = Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD);
+    }
+
+    let left_cell = format!("{}{}", left_prefix, left_text);
+    let right_cell = format!("{}{}", right_prefix, right_text);
+    let left_cell = format!("{:width$}", left_cell, width = left_width);
+    let right_cell = format!("{:width$}", right_cell, width = right_width);
+
+    let mut line = Line::from(vec![
+        Span::styled(left_cell, left_style),
+        Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+        Span::styled(right_cell, right_style),
+    ]);
+    if selected {
+        line = line.style(row_style);
+    }
+    line
+}
+
+fn render_inline_review_comment(author: &str, body: &str, width: usize) -> Line<'static> {
+    let text = format!("  @{}: {}", author, ellipsize(body, width.saturating_sub(8)));
+    Line::from(Span::styled(text, Style::default().fg(POPUP_BORDER)))
 }
 
 fn file_status_symbol(status: &str) -> &'static str {

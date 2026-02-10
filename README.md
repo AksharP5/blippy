@@ -103,6 +103,7 @@ cargo test
 - x: delete selected comment in full comments view
 - PR detail: right pane shows changed files + patch snippets (no checkout required)
 - Enter on PR changes pane: open full-screen PR changes viewer
+- PR review view: Ctrl+h/l switch files/diff, j/k navigate, m add inline GitHub review comment
 - Ctrl+y: copy current status message to clipboard
 - b or Esc: back from issue detail/comments
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
