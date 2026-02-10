@@ -1398,7 +1398,10 @@ fn help_text(app: &App) -> String {
             } else {
                 parts.insert(11, "u reopen issue");
                 parts.insert(12, "dd close issue");
-                parts.insert(13, "Shift+O open linked PR");
+                if app.selected_issue_has_known_linked_pr() {
+                    parts.insert(13, "Shift+P open linked PR in TUI");
+                    parts.insert(14, "Shift+O open linked PR in browser");
+                }
             }
             parts.join(" • ")
         }
@@ -1408,7 +1411,11 @@ fn help_text(app: &App) -> String {
                 return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on description opens comments • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+O open linked PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
+            if app.selected_issue_has_known_linked_pr() {
+                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+P open linked PR in TUI • Shift+O open linked PR in browser • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
+                    .to_string();
+            }
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
@@ -1417,7 +1424,11 @@ fn help_text(app: &App) -> String {
                 return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
                     .to_string();
             }
-            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+O open linked PR • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
+            if app.selected_issue_has_known_linked_pr() {
+                return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+P open linked PR in TUI • Shift+O open linked PR in browser • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
+                    .to_string();
+            }
+            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • Ctrl+y copy status • q quit"
                 .to_string()
         }
         View::PullRequestFiles => {

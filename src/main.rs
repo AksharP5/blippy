@@ -318,6 +318,17 @@ fn handle_actions(
             app.request_comment_sync();
             if is_pr {
                 app.request_pull_request_files_sync();
+            } else if !app.linked_pull_request_known(issue_number) {
+                if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
+                    start_linked_pull_request_lookup(
+                        owner.to_string(),
+                        repo.to_string(),
+                        issue_number,
+                        token.to_string(),
+                        event_tx.clone(),
+                        LinkedPullRequestTarget::Probe,
+                    );
+                }
             }
         }
         AppAction::OpenInBrowser => {
@@ -334,8 +345,11 @@ fn handle_actions(
         AppAction::CheckoutPullRequest => {
             checkout_pull_request(app)?;
         }
-        AppAction::OpenLinkedPullRequest => {
-            open_linked_pull_request(app, token, event_tx.clone())?;
+        AppAction::OpenLinkedPullRequestInBrowser => {
+            open_linked_pull_request(app, token, event_tx.clone(), LinkedPullRequestTarget::Browser)?;
+        }
+        AppAction::OpenLinkedPullRequestInTui => {
+            open_linked_pull_request(app, token, event_tx.clone(), LinkedPullRequestTarget::Tui)?;
         }
         AppAction::CopyStatus => {
             copy_status_to_clipboard(app)?;
@@ -1063,7 +1077,19 @@ fn write_clipboard(value: &str) -> Result<()> {
     anyhow::bail!("clipboard command exited with status {}", status)
 }
 
-fn open_linked_pull_request(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkedPullRequestTarget {
+    Tui,
+    Browser,
+    Probe,
+}
+
+fn open_linked_pull_request(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+    target: LinkedPullRequestTarget,
+) -> Result<()> {
     let issue = match app.current_or_selected_issue() {
         Some(issue) => issue,
         None => {
@@ -1085,8 +1111,19 @@ fn open_linked_pull_request(app: &mut App, token: &str, event_tx: Sender<AppEven
         }
     };
 
-    start_linked_pull_request_lookup(owner, repo, issue_number, token.to_string(), event_tx);
-    app.set_status("Looking up linked pull request...".to_string());
+    start_linked_pull_request_lookup(
+        owner,
+        repo,
+        issue_number,
+        token.to_string(),
+        event_tx,
+        target,
+    );
+    if target == LinkedPullRequestTarget::Tui {
+        app.set_status("Looking up linked pull request for TUI...".to_string());
+        return Ok(());
+    }
+    app.set_status("Looking up linked pull request for browser...".to_string());
     Ok(())
 }
 
@@ -1128,6 +1165,7 @@ fn start_linked_pull_request_lookup(
     issue_number: i64,
     token: String,
     event_tx: Sender<AppEvent>,
+    target: LinkedPullRequestTarget,
 ) {
     thread::spawn(move || {
         let client = match GitHubClient::new(&token) {
@@ -1136,6 +1174,7 @@ fn start_linked_pull_request_lookup(
                 let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
                     issue_number,
                     message: error.to_string(),
+                    target,
                 });
                 return;
             }
@@ -1149,6 +1188,7 @@ fn start_linked_pull_request_lookup(
                 let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
                     issue_number,
                     message: error.to_string(),
+                    target,
                 });
                 return;
             }
@@ -1170,12 +1210,14 @@ fn start_linked_pull_request_lookup(
                     issue_number,
                     pull_number,
                     url,
+                    target,
                 });
             }
             Err(error) => {
                 let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
                     issue_number,
                     message: error.to_string(),
+                    target,
                 });
             }
         }
@@ -1428,51 +1470,79 @@ fn handle_events(
                 issue_number,
                 pull_number,
                 url,
+                target,
             } => {
+                app.set_linked_pull_request(issue_number, pull_number);
                 let pull_number = match pull_number {
                     Some(pull_number) => pull_number,
                     None => {
+                        if target == LinkedPullRequestTarget::Probe {
+                            continue;
+                        }
                         app.set_status(format!("No linked pull request found for #{}", issue_number));
                         continue;
                     }
                 };
 
-                refresh_current_repo_issues(app, conn)?;
-                if open_pull_request_in_tui(app, conn, pull_number)? {
-                    app.set_status(format!(
-                        "Opened linked pull request #{} in TUI",
-                        pull_number
-                    ));
+                if target == LinkedPullRequestTarget::Probe {
                     continue;
                 }
 
-                if let Some(url) = url {
-                    if let Err(error) = open_url(url.as_str()) {
+                if target == LinkedPullRequestTarget::Tui {
+                    refresh_current_repo_issues(app, conn)?;
+                    if open_pull_request_in_tui(app, conn, pull_number)? {
                         app.set_status(format!(
-                            "Linked PR #{} found but not cached; browser open failed: {}",
-                            pull_number, error
+                            "Opened linked pull request #{} in TUI",
+                            pull_number
                         ));
                         continue;
                     }
+
                     app.set_status(format!(
-                        "Linked PR #{} not cached, opened in browser",
+                        "Linked PR #{} not cached in TUI yet; press r then Shift+P",
                         pull_number
                     ));
                     continue;
                 }
 
-                app.set_status(format!(
-                    "Linked PR #{} found but not cached yet; run refresh",
-                    pull_number
-                ));
+                let browser_url = match url {
+                    Some(url) => Some(url),
+                    None => {
+                        if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
+                            Some(format!("https://github.com/{}/{}/pull/{}", owner, repo, pull_number))
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(browser_url) = browser_url {
+                    if let Err(error) = open_url(browser_url.as_str()) {
+                        app.set_status(format!("Open linked PR failed: {}", error));
+                        continue;
+                    }
+                    app.set_status(format!("Opened linked pull request #{} in browser", pull_number));
+                    continue;
+                }
+
+                app.set_status(format!("Linked PR #{} found but URL unavailable", pull_number));
             }
             AppEvent::LinkedPullRequestLookupFailed {
                 issue_number,
                 message,
+                target,
             } => {
+                if target == LinkedPullRequestTarget::Probe {
+                    continue;
+                }
+                let target_label = match target {
+                    LinkedPullRequestTarget::Tui => "TUI",
+                    LinkedPullRequestTarget::Browser => "browser",
+                    LinkedPullRequestTarget::Probe => "probe",
+                };
                 app.set_status(format!(
-                    "Linked pull request lookup failed for #{}: {}",
-                    issue_number, message
+                    "Linked pull request lookup failed for #{} ({}): {}",
+                    issue_number, target_label, message
                 ));
             }
             AppEvent::IssueCommentUpdated {
@@ -1542,10 +1612,12 @@ enum AppEvent {
         issue_number: i64,
         pull_number: Option<i64>,
         url: Option<String>,
+        target: LinkedPullRequestTarget,
     },
     LinkedPullRequestLookupFailed {
         issue_number: i64,
         message: String,
+        target: LinkedPullRequestTarget,
     },
     IssueUpdated { issue_number: i64, message: String },
     IssueLabelsUpdated { issue_number: i64, labels: String },
