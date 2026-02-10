@@ -104,7 +104,7 @@ cargo test
 - PR detail: right pane shows changed files + patch snippets (no checkout required)
 - Enter on PR changes pane: open full-screen PR changes viewer
 - PR review view: Ctrl+h/l switch files/diff, j/k navigate, m add inline GitHub review comment
-- PR review view: h/l choose old/new side, Shift+V visual multiline range, e edit, x delete, Shift+R resolve locally, n/p cycle comments on selected line
+- PR review view: h/l choose old/new side, Shift+V visual multiline range, e edit, x delete, Shift+R resolve/reopen thread on GitHub, n/p cycle comments on selected line
 - Ctrl+y: copy current status message to clipboard
 - b or Esc: back from issue detail/comments
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)

@@ -317,9 +317,9 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let items = if visible_issues.is_empty() {
         if app.issues().is_empty() {
             let message = if item_mode == crate::app::WorkItemMode::PullRequests {
-                "No cached pull requests yet. Syncing..."
+                "No cached pull requests yet. Press r to sync."
             } else {
-                "No cached issues yet. Syncing..."
+                "No cached issues yet. Press r to sync."
             };
             vec![ListItem::new(message)]
         } else {
@@ -868,13 +868,17 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     } else {
         "normal"
     };
+    let visual_range = app
+        .pull_request_visual_range()
+        .map(|(start, end)| format!("{}-{}", start + 1, end + 1))
+        .unwrap_or_else(|| "-".to_string());
     let header = Text::from(vec![
         Line::from(Span::styled(
             title.clone(),
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            format!("Ctrl+h/l pane • h/l side • Shift+V visual • m comment • e edit • x delete • Shift+R resolve local • focus:{} side:{} mode:{}", focused, side, visual),
+            format!("Ctrl+h/l pane • h/l side • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -969,8 +973,9 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             )));
         } else {
             let panel_width = panes[1].width.saturating_sub(2) as usize;
-            let left_width = panel_width.saturating_sub(5) / 2;
-            let right_width = panel_width.saturating_sub(left_width + 3);
+            let cells_width = panel_width.saturating_sub(2);
+            let left_width = cells_width.saturating_sub(5) / 2;
+            let right_width = cells_width.saturating_sub(left_width + 3);
             let visual_range = app.pull_request_visual_range();
             for (index, row) in rows.iter().enumerate() {
                 row_offsets.push(lines.len() as u16);
@@ -981,6 +986,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     row,
                     selected,
                     in_visual_range,
+                    app.pull_request_review_side(),
                     left_width,
                     right_width,
                 ));
@@ -994,15 +1000,15 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     ))
                     .unwrap_or_default();
                 for comment in target_right {
-                    if app.is_pull_request_review_comment_hidden(comment.id) {
-                        continue;
-                    }
                     lines.push(render_inline_review_comment(
                         comment.id,
                         comment.author.as_str(),
                         comment.body.as_str(),
                         ReviewSide::Right,
+                        comment.resolved,
                         panel_width,
+                        left_width,
+                        right_width,
                         app.selected_pull_request_review_comment_id() == Some(comment.id),
                     ));
                 }
@@ -1016,15 +1022,15 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     ))
                     .unwrap_or_default();
                 for comment in target_left {
-                    if app.is_pull_request_review_comment_hidden(comment.id) {
-                        continue;
-                    }
                     lines.push(render_inline_review_comment(
                         comment.id,
                         comment.author.as_str(),
                         comment.body.as_str(),
                         ReviewSide::Left,
+                        comment.resolved,
                         panel_width,
+                        left_width,
+                        right_width,
                         app.selected_pull_request_review_comment_id() == Some(comment.id),
                     ));
                 }
@@ -1571,7 +1577,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l switch pane • j/k move file/line • Enter focus diff • h/l old/new side • Shift+V visual range • m add review comment • e edit comment • x delete comment • Shift+R resolve local • n/p cycle comments at line • Ctrl+u/d page • gg/G top/bottom • v checkout PR • Esc back • r refresh changes/comments • o browser • Ctrl+y copy status • q quit"
+            "Ctrl+h/l switch pane • j/k move file/line • Enter focus diff • h/l old/new side • Shift+V visual range • m add review comment • e edit comment • x delete comment • Shift+R resolve/reopen thread • n/p cycle comments at line • Ctrl+u/d page • gg/G top/bottom • v checkout PR • Esc back • r refresh changes/comments • o browser • Ctrl+y copy status • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1718,6 +1724,7 @@ fn render_split_diff_row(
     row: &crate::pr_diff::DiffRow,
     selected: bool,
     in_visual_range: bool,
+    selected_side: ReviewSide,
     left_width: usize,
     right_width: usize,
 ) -> Line<'static> {
@@ -1770,6 +1777,11 @@ fn render_split_diff_row(
     }
     if selected {
         row_style = Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD);
+        if selected_side == ReviewSide::Left {
+            left_style = left_style.add_modifier(Modifier::UNDERLINED);
+        } else {
+            right_style = right_style.add_modifier(Modifier::UNDERLINED);
+        }
     }
 
     let left_cell = format!("{}{}", left_prefix, left_text);
@@ -1777,7 +1789,22 @@ fn render_split_diff_row(
     let left_cell = format!("{:width$}", left_cell, width = left_width);
     let right_cell = format!("{:width$}", right_cell, width = right_width);
 
+    let indicator = if selected {
+        match selected_side {
+            ReviewSide::Left => "L",
+            ReviewSide::Right => "R",
+        }
+    } else if in_visual_range {
+        "V"
+    } else {
+        " "
+    };
+
     let mut line = Line::from(vec![
+        Span::styled(
+            format!("{} ", indicator),
+            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(left_cell, left_style),
         Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
         Span::styled(right_cell, right_style),
@@ -1793,7 +1820,10 @@ fn render_inline_review_comment(
     author: &str,
     body: &str,
     side: ReviewSide,
+    resolved: bool,
     width: usize,
+    left_width: usize,
+    right_width: usize,
     selected: bool,
 ) -> Line<'static> {
     let side_label = match side {
@@ -1801,15 +1831,36 @@ fn render_inline_review_comment(
         ReviewSide::Right => "new",
     };
     let prefix = if selected { ">" } else { " " };
+    let resolved_label = if resolved { "resolved" } else { "open" };
     let text = format!(
-        "{} [{} #{} @{}] {}",
+        "{} [{} {} #{} @{}] {}",
         prefix,
         side_label,
+        resolved_label,
         comment_id,
         author,
         ellipsize(body, width.saturating_sub(24))
     );
-    let mut line = Line::from(Span::styled(text, Style::default().fg(POPUP_BORDER)));
+
+    let muted_left = " ".repeat(left_width);
+    let muted_right = " ".repeat(right_width);
+    let comment_width = width.saturating_sub(8);
+    let text = ellipsize(text.as_str(), comment_width);
+    let mut line = if side == ReviewSide::Left {
+        let left_text = format!("{:width$}", text, width = left_width);
+        Line::from(vec![
+            Span::styled(left_text, Style::default().fg(POPUP_BORDER)),
+            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+            Span::styled(muted_right, Style::default().fg(GITHUB_MUTED)),
+        ])
+    } else {
+        let right_text = format!("{:width$}", text, width = right_width);
+        Line::from(vec![
+            Span::styled(muted_left, Style::default().fg(GITHUB_MUTED)),
+            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+            Span::styled(right_text, Style::default().fg(POPUP_BORDER)),
+        ])
+    };
     if selected {
         line = line.style(Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD));
     }
