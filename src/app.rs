@@ -1456,9 +1456,8 @@ impl App {
             View::IssueDetail => {
                 if self.focus == Focus::IssueBody {
                     if self.current_view_issue_is_pull_request() {
-                        self.status =
-                            "Focus changes pane (Ctrl+l), then press Enter for full PR changes"
-                                .to_string();
+                        self.reset_issue_comments_scroll();
+                        self.set_view(View::IssueComments);
                         return;
                     }
                     self.status =
@@ -2321,27 +2320,27 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_issue_body_stays_in_detail_view() {
+    fn enter_on_pr_body_opens_comments_view() {
         let mut app = App::new(Config::default());
         app.set_issues(vec![IssueRow {
             id: 45,
             repo_id: 1,
             number: 10,
             state: "open".to_string(),
-            title: "Issue".to_string(),
+            title: "PR".to_string(),
             body: String::new(),
             labels: String::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
-            is_pr: false,
+            is_pr: true,
         }]);
         app.set_current_issue(45, 10);
         app.set_view(View::IssueDetail);
 
         app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert_eq!(app.view(), View::IssueDetail);
+        assert_eq!(app.view(), View::IssueComments);
     }
 
     #[test]

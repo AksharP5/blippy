@@ -1405,7 +1405,7 @@ fn help_text(app: &App) -> String {
         View::IssueDetail => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
+                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on description opens comments • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
                     .to_string();
             }
             "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on comments pane opens full comments • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Shift+O open linked PR • Esc back • r sync • o browser • Ctrl+y copy status • Ctrl+G repos • q quit"
