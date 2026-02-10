@@ -859,13 +859,22 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         PullRequestReviewFocus::Files => "files",
         PullRequestReviewFocus::Diff => "diff",
     };
+    let side = match app.pull_request_review_side() {
+        ReviewSide::Left => "old",
+        ReviewSide::Right => "new",
+    };
+    let visual = if app.pull_request_visual_mode() {
+        "visual"
+    } else {
+        "normal"
+    };
     let header = Text::from(vec![
         Line::from(Span::styled(
             title.clone(),
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            format!("Ctrl+h/l switch pane • Enter focus diff • m inline comment • Esc back • focus: {}", focused),
+            format!("Ctrl+h/l pane • h/l side • Shift+V visual • m comment • e edit • x delete • Shift+R resolve local • focus:{} side:{} mode:{}", focused, side, visual),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -962,10 +971,19 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             let panel_width = panes[1].width.saturating_sub(2) as usize;
             let left_width = panel_width.saturating_sub(5) / 2;
             let right_width = panel_width.saturating_sub(left_width + 3);
+            let visual_range = app.pull_request_visual_range();
             for (index, row) in rows.iter().enumerate() {
                 row_offsets.push(lines.len() as u16);
                 let selected = index == app.selected_pull_request_diff_line();
-                lines.push(render_split_diff_row(row, selected, left_width, right_width));
+                let in_visual_range = visual_range
+                    .is_some_and(|(start, end)| index >= start && index <= end);
+                lines.push(render_split_diff_row(
+                    row,
+                    selected,
+                    in_visual_range,
+                    left_width,
+                    right_width,
+                ));
 
                 let target_right = row
                     .new_line
@@ -976,7 +994,17 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     ))
                     .unwrap_or_default();
                 for comment in target_right {
-                    lines.push(render_inline_review_comment(comment.author.as_str(), comment.body.as_str(), panel_width));
+                    if app.is_pull_request_review_comment_hidden(comment.id) {
+                        continue;
+                    }
+                    lines.push(render_inline_review_comment(
+                        comment.id,
+                        comment.author.as_str(),
+                        comment.body.as_str(),
+                        ReviewSide::Right,
+                        panel_width,
+                        app.selected_pull_request_review_comment_id() == Some(comment.id),
+                    ));
                 }
 
                 let target_left = row
@@ -988,7 +1016,17 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     ))
                     .unwrap_or_default();
                 for comment in target_left {
-                    lines.push(render_inline_review_comment(comment.author.as_str(), comment.body.as_str(), panel_width));
+                    if app.is_pull_request_review_comment_hidden(comment.id) {
+                        continue;
+                    }
+                    lines.push(render_inline_review_comment(
+                        comment.id,
+                        comment.author.as_str(),
+                        comment.body.as_str(),
+                        ReviewSide::Left,
+                        panel_width,
+                        app.selected_pull_request_review_comment_id() == Some(comment.id),
+                    ));
                 }
             }
         }
@@ -1300,6 +1338,7 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         EditorMode::AddComment => "Add Issue Comment",
         EditorMode::EditComment => "Edit Issue Comment",
         EditorMode::AddPullRequestReviewComment => "Add Pull Request Review Comment",
+        EditorMode::EditPullRequestReviewComment => "Edit Pull Request Review Comment",
         EditorMode::AddPreset => "Preset Body",
     };
     let editor_area = main.inner(Margin {
@@ -1532,7 +1571,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l switch pane • j/k move file/line • Enter focus diff • Ctrl+u/d page • gg/G top/bottom • m inline review comment • l labels • Shift+A assignees • u reopen pull request • dd close pull request • v checkout PR • Esc back • r refresh changes/comments • o browser • Ctrl+y copy status • q quit"
+            "Ctrl+h/l switch pane • j/k move file/line • Enter focus diff • h/l old/new side • Shift+V visual range • m add review comment • e edit comment • x delete comment • Shift+R resolve local • n/p cycle comments at line • Ctrl+u/d page • gg/G top/bottom • v checkout PR • Esc back • r refresh changes/comments • o browser • Ctrl+y copy status • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1678,6 +1717,7 @@ fn styled_patch_line(line: &str, width: usize) -> Line<'static> {
 fn render_split_diff_row(
     row: &crate::pr_diff::DiffRow,
     selected: bool,
+    in_visual_range: bool,
     left_width: usize,
     right_width: usize,
 ) -> Line<'static> {
@@ -1725,6 +1765,9 @@ fn render_split_diff_row(
     }
 
     let mut row_style = Style::default();
+    if in_visual_range {
+        row_style = Style::default().bg(Color::Rgb(56, 66, 110));
+    }
     if selected {
         row_style = Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD);
     }
@@ -1745,9 +1788,32 @@ fn render_split_diff_row(
     line
 }
 
-fn render_inline_review_comment(author: &str, body: &str, width: usize) -> Line<'static> {
-    let text = format!("  @{}: {}", author, ellipsize(body, width.saturating_sub(8)));
-    Line::from(Span::styled(text, Style::default().fg(POPUP_BORDER)))
+fn render_inline_review_comment(
+    comment_id: i64,
+    author: &str,
+    body: &str,
+    side: ReviewSide,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
+    let side_label = match side {
+        ReviewSide::Left => "old",
+        ReviewSide::Right => "new",
+    };
+    let prefix = if selected { ">" } else { " " };
+    let text = format!(
+        "{} [{} #{} @{}] {}",
+        prefix,
+        side_label,
+        comment_id,
+        author,
+        ellipsize(body, width.saturating_sub(24))
+    );
+    let mut line = Line::from(Span::styled(text, Style::default().fg(POPUP_BORDER)));
+    if selected {
+        line = line.style(Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD));
+    }
+    line
 }
 
 fn file_status_symbol(status: &str) -> &'static str {
