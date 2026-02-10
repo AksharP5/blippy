@@ -69,10 +69,6 @@ pub fn map_repo_to_row(_repo: &ApiRepo) -> RepoRow {
 }
 
 pub fn map_issue_to_row(_repo_id: i64, _issue: &ApiIssue) -> Option<IssueRow> {
-    if _issue.pull_request.is_some() {
-        return None;
-    }
-
     let labels = _issue
         .labels
         .iter()
@@ -96,7 +92,7 @@ pub fn map_issue_to_row(_repo_id: i64, _issue: &ApiIssue) -> Option<IssueRow> {
         assignees,
         comments_count: _issue.comments,
         updated_at: _issue.updated_at.clone(),
-        is_pr: false,
+        is_pr: _issue.pull_request.is_some(),
     })
 }
 
@@ -282,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn map_issue_to_row_skips_pull_requests() {
+    fn map_issue_to_row_marks_pull_requests() {
         let issue = ApiIssue {
             id: 10,
             number: 1,
@@ -300,7 +296,8 @@ mod tests {
             pull_request: Some(serde_json::json!({"url": "x"})),
         };
         let row = map_issue_to_row(1, &issue);
-        assert!(row.is_none());
+        assert!(row.is_some());
+        assert!(row.is_some_and(|row| row.is_pr));
     }
 
     #[test]
@@ -411,11 +408,11 @@ mod tests {
         let stats = sync_repo(&client, &conn, "acme", "glyph")
             .await
             .expect("sync");
-        assert_eq!(stats.issues, 1);
+        assert_eq!(stats.issues, 2);
         assert_eq!(stats.comments, 0);
 
         let rows = list_issues(&conn, 1).expect("list issues");
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), 2);
         let comments = comments_for_issue(&conn, 10).expect("comments");
         assert_eq!(comments.len(), 0);
 
@@ -891,7 +888,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_repo_keeps_partial_when_only_prs_seen_before_failure() {
+    async fn sync_repo_keeps_partial_when_only_pull_requests_seen_before_failure() {
         let dir = unique_temp_dir("sync-pr-only-partial");
         let db_path = dir.join("glyph.db");
         let conn = open_db_at(&db_path).expect("open db");
@@ -934,7 +931,7 @@ mod tests {
         let stats = sync_repo(&client, &conn, "acme", "glyph")
             .await
             .expect("sync");
-        assert_eq!(stats.issues, 0);
+        assert_eq!(stats.issues, 1);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);

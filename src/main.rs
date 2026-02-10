@@ -236,7 +236,14 @@ fn initialize_app(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
 
         if remotes.len() == 1 {
             let remote = &remotes[0];
-            load_issues_for_slug(app, conn, &remote.slug.owner, &remote.slug.repo)?;
+            let root_path = root.to_string_lossy().to_string();
+            load_issues_for_slug(
+                app,
+                conn,
+                &remote.slug.owner,
+                &remote.slug.repo,
+                Some(root_path.as_str()),
+            )?;
             app.set_view(View::Issues);
             app.request_sync();
             return Ok(());
@@ -265,11 +272,11 @@ fn handle_actions(
 
     match action {
         AppAction::PickRepo => {
-            let (owner, repo) = match app.selected_repo_slug() {
+            let (owner, repo, path) = match app.selected_repo_target() {
                 Some(target) => target,
                 None => return Ok(()),
             };
-            load_issues_for_slug(app, conn, &owner, &repo)?;
+            load_issues_for_slug(app, conn, &owner, &repo, Some(path.as_str()))?;
             app.set_view(View::Issues);
             app.request_sync();
         }
@@ -278,7 +285,9 @@ fn handle_actions(
                 Some(remote) => (remote.slug.owner.clone(), remote.slug.repo.clone()),
                 None => return Ok(()),
             };
-            load_issues_for_slug(app, conn, &owner, &repo)?;
+            let repo_path = crate::git::repo_root()?
+                .map(|path| path.to_string_lossy().to_string());
+            load_issues_for_slug(app, conn, &owner, &repo, repo_path.as_deref())?;
             app.set_view(View::Issues);
             app.request_sync();
         }
@@ -304,6 +313,9 @@ fn handle_actions(
             } else {
                 app.set_status("No issue selected".to_string());
             }
+        }
+        AppAction::CheckoutPullRequest => {
+            checkout_pull_request(app)?;
         }
         AppAction::AddIssueComment => {
             let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
@@ -803,16 +815,55 @@ fn issue_number(app: &App) -> Option<i64> {
 fn issue_url(app: &App) -> Option<String> {
     let owner = app.current_owner()?;
     let repo = app.current_repo()?;
-    let issue_number = match app.view() {
-        View::IssueDetail | View::IssueComments => app.current_issue_number(),
-        View::Issues => app.selected_issue_row().map(|issue| issue.number),
-        _ => None,
-    }?;
+    let issue = app.current_or_selected_issue()?;
+    let issue_number = issue.number;
+    let route = if issue.is_pr { "pull" } else { "issues" };
 
-    Some(format!(
-        "https://github.com/{}/{}/issues/{}",
-        owner, repo, issue_number
-    ))
+    Some(format!("https://github.com/{}/{}/{}/{}", owner, repo, route, issue_number))
+}
+
+fn checkout_pull_request(app: &mut App) -> Result<()> {
+    let issue = match app.current_or_selected_issue() {
+        Some(issue) => issue,
+        None => {
+            app.set_status("No pull request selected".to_string());
+            return Ok(());
+        }
+    };
+    if !issue.is_pr {
+        app.set_status("Selected item is not a pull request".to_string());
+        return Ok(());
+    }
+
+    let working_dir = app.current_repo_path().unwrap_or(".");
+    let number = issue.number.to_string();
+    let output = std::process::Command::new("gh")
+        .args(["pr", "checkout", number.as_str()])
+        .current_dir(working_dir)
+        .output();
+
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => {
+            app.set_status(format!("PR checkout failed: {}", error));
+            return Ok(());
+        }
+    };
+
+    if output.status.success() {
+        app.set_status(format!("Checked out PR #{}", issue.number));
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(output.stderr.as_slice());
+    let message = stderr.trim();
+    if message.is_empty() {
+        app.set_status(format!("PR checkout failed for #{}", issue.number));
+        return Ok(());
+    }
+
+    app.set_status(format!("PR checkout failed: {}", message));
+    Ok(())
 }
 
 fn open_url(url: &str) -> Result<()> {
@@ -837,8 +888,9 @@ fn load_issues_for_slug(
     conn: &rusqlite::Connection,
     owner: &str,
     repo: &str,
+    repo_path: Option<&str>,
 ) -> Result<()> {
-    app.set_current_repo(owner, repo);
+    app.set_current_repo_with_path(owner, repo, repo_path);
     let repo_row = get_repo_by_slug(conn, owner, repo)?;
     let repo_row = match repo_row {
         Some(repo_row) => repo_row,
@@ -1822,7 +1874,10 @@ impl Drop for TerminalGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_csv_values;
+    use super::{issue_url, parse_csv_values};
+    use crate::app::View;
+    use crate::config::Config;
+    use crate::store::IssueRow;
 
     #[test]
     fn parse_csv_values_trims_dedupes_and_strips_at() {
@@ -1834,5 +1889,55 @@ mod tests {
     fn parse_csv_values_keeps_label_case() {
         let values = parse_csv_values("bug,needs-triage,BUG", false);
         assert_eq!(values, vec!["bug".to_string(), "needs-triage".to_string()]);
+    }
+
+    #[test]
+    fn issue_url_uses_pull_route_for_pull_requests() {
+        let mut app = crate::app::App::new(Config::default());
+        app.set_current_repo_with_path("acme", "glyph", None);
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 10,
+            repo_id: 1,
+            number: 42,
+            state: "open".to_string(),
+            title: "Improve docs".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        }]);
+        app.set_current_issue(10, 42);
+        app.set_view(View::IssueDetail);
+
+        let url = issue_url(&app).expect("url");
+
+        assert_eq!(url, "https://github.com/acme/glyph/pull/42");
+    }
+
+    #[test]
+    fn issue_url_uses_issue_route_for_issues() {
+        let mut app = crate::app::App::new(Config::default());
+        app.set_current_repo_with_path("acme", "glyph", None);
+        app.set_view(View::Issues);
+        app.set_issues(vec![IssueRow {
+            id: 11,
+            repo_id: 1,
+            number: 7,
+            state: "open".to_string(),
+            title: "Bug".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+
+        let url = issue_url(&app).expect("url");
+
+        assert_eq!(url, "https://github.com/acme/glyph/issues/7");
     }
 }

@@ -27,6 +27,7 @@ pub enum AppAction {
     PickRemote,
     PickIssue,
     OpenInBrowser,
+    CheckoutPullRequest,
     CloseIssue,
     ReopenIssue,
     AddIssueComment,
@@ -63,6 +64,12 @@ pub enum Focus {
 pub enum IssueFilter {
     Open,
     Closed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkItemMode {
+    Issues,
+    PullRequests,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +139,29 @@ impl IssueFilter {
     }
 }
 
+impl WorkItemMode {
+    fn toggle(self) -> Self {
+        match self {
+            Self::Issues => Self::PullRequests,
+            Self::PullRequests => Self::Issues,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Issues => "issues",
+            Self::PullRequests => "pull requests",
+        }
+    }
+
+    fn matches(self, issue: &IssueRow) -> bool {
+        match self {
+            Self::Issues => !issue.is_pr,
+            Self::PullRequests => issue.is_pr,
+        }
+    }
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -146,6 +176,7 @@ pub struct App {
     selected_issue: usize,
     selected_comment: usize,
     issue_filter: IssueFilter,
+    work_item_mode: WorkItemMode,
     assignee_filter: AssigneeFilter,
     repo_query: String,
     repo_search_mode: bool,
@@ -171,6 +202,7 @@ pub struct App {
     action: Option<AppAction>,
     current_owner: Option<String>,
     current_repo: Option<String>,
+    current_repo_path: Option<String>,
     current_issue_id: Option<i64>,
     current_issue_number: Option<i64>,
     pending_issue_actions: HashMap<i64, PendingIssueAction>,
@@ -206,6 +238,7 @@ impl App {
             selected_issue: 0,
             selected_comment: 0,
             issue_filter: IssueFilter::Open,
+            work_item_mode: WorkItemMode::Issues,
             assignee_filter: AssigneeFilter::All,
             repo_query: String::new(),
             repo_search_mode: false,
@@ -231,6 +264,7 @@ impl App {
             action: None,
             current_owner: None,
             current_repo: None,
+            current_repo_path: None,
             current_issue_id: None,
             current_issue_number: None,
             pending_issue_actions: HashMap::new(),
@@ -311,12 +345,27 @@ impl App {
         self.issue_filter
     }
 
+    pub fn work_item_mode(&self) -> WorkItemMode {
+        self.work_item_mode
+    }
+
+    pub fn current_repo_path(&self) -> Option<&str> {
+        self.current_repo_path.as_deref()
+    }
+
     pub fn assignee_filter_label(&self) -> String {
         self.assignee_filter.label()
     }
 
     pub fn has_assignee_filter(&self) -> bool {
         !matches!(self.assignee_filter, AssigneeFilter::All)
+    }
+
+    pub fn current_or_selected_issue(&self) -> Option<&IssueRow> {
+        if self.view == View::Issues {
+            return self.selected_issue_row();
+        }
+        self.current_issue_row()
     }
 
     pub fn set_issue_filter(&mut self, filter: IssueFilter) {
@@ -342,11 +391,13 @@ impl App {
         let open = self
             .issues
             .iter()
+            .filter(|issue| self.work_item_mode.matches(issue))
             .filter(|issue| issue.state.eq_ignore_ascii_case("open"))
             .count();
         let closed = self
             .issues
             .iter()
+            .filter(|issue| self.work_item_mode.matches(issue))
             .filter(|issue| issue.state.eq_ignore_ascii_case("closed"))
             .count();
         (open, closed)
@@ -360,10 +411,10 @@ impl App {
         self.selected_repo
     }
 
-    pub fn selected_repo_slug(&self) -> Option<(String, String)> {
+    pub fn selected_repo_target(&self) -> Option<(String, String, String)> {
         let repo_index = *self.filtered_repo_indices.get(self.selected_repo)?;
         let repo = self.repos.get(repo_index)?;
-        Some((repo.owner.clone(), repo.repo.clone()))
+        Some((repo.owner.clone(), repo.repo.clone(), repo.path.clone()))
     }
 
     pub fn selected_remote(&self) -> usize {
@@ -583,6 +634,13 @@ impl App {
             KeyCode::Char('f') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.set_issue_filter(self.issue_filter.next());
             }
+            KeyCode::Char('p') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.work_item_mode = self.work_item_mode.toggle();
+                self.assignee_filter = AssigneeFilter::All;
+                self.rebuild_issue_filter();
+                self.issues_preview_scroll = 0;
+                self.status = format!("Showing {}", self.work_item_mode.label());
+            }
             KeyCode::Char('a') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.cycle_assignee_filter(true);
             }
@@ -710,6 +768,11 @@ impl App {
                 if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
             {
                 self.action = Some(AppAction::OpenInBrowser);
+            }
+            KeyCode::Char('v')
+                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            {
+                self.action = Some(AppAction::CheckoutPullRequest);
             }
             _ => {}
         }
@@ -868,13 +931,15 @@ impl App {
         requested
     }
 
-    pub fn set_current_repo(&mut self, owner: &str, repo: &str) {
+    pub fn set_current_repo_with_path(&mut self, owner: &str, repo: &str, path: Option<&str>) {
         self.current_owner = Some(owner.to_string());
         self.current_repo = Some(repo.to_string());
+        self.current_repo_path = path.map(ToString::to_string);
         self.current_issue_id = None;
         self.current_issue_number = None;
         self.repo_search_mode = false;
         self.assignee_filter = AssigneeFilter::All;
+        self.work_item_mode = WorkItemMode::Issues;
         self.issue_query.clear();
         self.issue_search_mode = false;
     }
@@ -1457,7 +1522,8 @@ impl App {
             .iter()
             .enumerate()
             .filter_map(|(index, issue)| {
-                if self.issue_filter.matches(issue)
+                if self.work_item_mode.matches(issue)
+                    && self.issue_filter.matches(issue)
                     && self.assignee_filter_matches(issue)
                     && Self::issue_matches_query(issue, query.as_str())
                 {
@@ -1504,6 +1570,12 @@ impl App {
 
         query.split_whitespace().all(|token| {
             if let Some(value) = token.strip_prefix("is:") {
+                if value == "pr" || value == "pull" || value == "pull-request" {
+                    return issue.is_pr;
+                }
+                if value == "issue" {
+                    return !issue.is_pr;
+                }
                 return value == state;
             }
             if let Some(value) = token.strip_prefix("label:") {
@@ -1551,7 +1623,7 @@ impl App {
         self.rebuild_issue_filter();
         self.issues_preview_scroll = 0;
         self.status = format!(
-            "Assignee: {} ({} issues)",
+            "Assignee: {} ({} items)",
             self.assignee_filter.label(),
             self.filtered_issue_indices.len()
         );
@@ -1561,6 +1633,7 @@ impl App {
         let mut users = self
             .issues
             .iter()
+            .filter(|issue| self.work_item_mode.matches(issue))
             .flat_map(|issue| issue.assignees.split(','))
             .map(str::trim)
             .filter(|assignee| !assignee.is_empty())
@@ -1572,6 +1645,7 @@ impl App {
         let has_unassigned = self
             .issues
             .iter()
+            .filter(|issue| self.work_item_mode.matches(issue))
             .any(|issue| issue.assignees.trim().is_empty());
 
         let mut options = vec![AssigneeFilter::All];
@@ -2003,7 +2077,7 @@ impl CommentEditorState {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, AppAction, Focus, IssueFilter, View};
+    use super::{App, AppAction, Focus, IssueFilter, View, WorkItemMode};
     use crate::config::Config;
     use crate::store::{CommentRow, IssueRow, LocalRepoRow};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -2102,6 +2176,59 @@ mod tests {
         assert_eq!(app.issue_filter(), IssueFilter::Open);
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
+    }
+
+    #[test]
+    fn p_toggles_between_issue_and_pr_modes() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 1,
+                state: "open".to_string(),
+                title: "Issue".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 2,
+                state: "open".to_string(),
+                title: "PR".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: true,
+            },
+        ]);
+
+        assert_eq!(app.work_item_mode(), WorkItemMode::Issues);
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert!(!app.issues_for_view()[0].is_pr);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert_eq!(app.work_item_mode(), WorkItemMode::PullRequests);
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert!(app.issues_for_view()[0].is_pr);
+    }
+
+    #[test]
+    fn v_triggers_checkout_pull_request_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::CheckoutPullRequest));
     }
 
     #[test]
@@ -2507,6 +2634,50 @@ mod tests {
 
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(11));
+    }
+
+    #[test]
+    fn is_pr_query_matches_pull_requests() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 11,
+                state: "open".to_string(),
+                title: "Issue".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 12,
+                state: "open".to_string(),
+                title: "PR".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: true,
+            },
+        ]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for ch in "is:pr".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        assert_eq!(app.issues_for_view().len(), 1);
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(12));
     }
 
     #[test]
