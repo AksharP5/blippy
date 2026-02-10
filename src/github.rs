@@ -297,4 +297,29 @@ impl GitHubClient {
             .error_for_status()?;
         Ok(())
     }
+
+    pub async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
+        let mut page = 1u32;
+        let mut labels = Vec::new();
+        loop {
+            let url = format!("{}/repos/{}/{}/labels", API_BASE, owner, repo);
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let batch = response.json::<Vec<ApiLabel>>().await?;
+            if batch.is_empty() {
+                break;
+            }
+            for label in batch {
+                labels.push(label.name);
+            }
+            page += 1;
+        }
+        Ok(labels)
+    }
 }

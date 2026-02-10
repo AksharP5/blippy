@@ -329,6 +329,14 @@ fn handle_actions(
             let labels = selected_issue_labels(app).unwrap_or_default();
             let options = label_options_for_repo(app);
             app.open_label_picker(return_view, options, labels.as_str());
+            if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
+                start_fetch_labels(
+                    owner.to_string(),
+                    repo.to_string(),
+                    token.to_string(),
+                    event_tx.clone(),
+                );
+            }
         }
         AppAction::EditAssignees => {
             let return_view = app.view();
@@ -930,6 +938,14 @@ fn handle_events(
                 app.set_status(format!("#{} assignees updated", issue_number));
                 app.request_sync();
             }
+            AppEvent::RepoLabelsSuggested { owner, repo, labels } => {
+                if app.current_owner() == Some(owner.as_str())
+                    && app.current_repo() == Some(repo.as_str())
+                    && app.view() == View::LabelPicker
+                {
+                    app.merge_label_options(labels);
+                }
+            }
         }
     }
     Ok(())
@@ -959,6 +975,11 @@ enum AppEvent {
     IssueUpdated { issue_number: i64, message: String },
     IssueLabelsUpdated { issue_number: i64, labels: String },
     IssueAssigneesUpdated { issue_number: i64, assignees: String },
+    RepoLabelsSuggested {
+        owner: String,
+        repo: String,
+        labels: Vec<String>,
+    },
 }
 
 fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Result<()> {
@@ -1354,6 +1375,31 @@ fn start_update_assignees(
                     message: format!("assignee update failed: {}", error),
                 });
             }
+        }
+    });
+}
+
+fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(_) => return,
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(_) => return,
+        };
+
+        let labels = runtime.block_on(async { client.list_labels(&owner, &repo).await });
+        if let Ok(labels) = labels {
+            let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
+                owner,
+                repo,
+                labels,
+            });
         }
     });
 }

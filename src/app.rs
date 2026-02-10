@@ -77,15 +77,6 @@ pub enum PendingIssueAction {
     UpdatingAssignees,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepoPickerEntry {
-    pub owner: String,
-    pub repo: String,
-    pub paths: usize,
-    pub remotes: usize,
-    pub last_seen: Option<String>,
-}
-
 impl PendingIssueAction {
     fn label(self) -> &'static str {
         match self {
@@ -162,7 +153,7 @@ pub struct App {
     assignee_filter: AssigneeFilter,
     repo_query: String,
     repo_search_mode: bool,
-    repo_entries: Vec<RepoPickerEntry>,
+    filtered_repo_indices: Vec<usize>,
     issue_query: String,
     issue_search_mode: bool,
     filtered_issue_indices: Vec<usize>,
@@ -194,9 +185,11 @@ pub struct App {
     label_options: Vec<String>,
     label_selected: HashSet<String>,
     selected_label_option: usize,
+    label_query: String,
     assignee_options: Vec<String>,
     assignee_selected: HashSet<String>,
     selected_assignee_option: usize,
+    assignee_query: String,
     preset_choice: usize,
 }
 
@@ -219,7 +212,7 @@ impl App {
             assignee_filter: AssigneeFilter::All,
             repo_query: String::new(),
             repo_search_mode: false,
-            repo_entries: Vec::new(),
+            filtered_repo_indices: Vec::new(),
             issue_query: String::new(),
             issue_search_mode: false,
             filtered_issue_indices: Vec::new(),
@@ -251,9 +244,11 @@ impl App {
             label_options: Vec::new(),
             label_selected: HashSet::new(),
             selected_label_option: 0,
+            label_query: String::new(),
             assignee_options: Vec::new(),
             assignee_selected: HashSet::new(),
             selected_assignee_option: 0,
+            assignee_query: String::new(),
             preset_choice: 0,
         }
     }
@@ -270,8 +265,11 @@ impl App {
         &self.repos
     }
 
-    pub fn repo_picker_entries(&self) -> &[RepoPickerEntry] {
-        &self.repo_entries
+    pub fn filtered_repo_rows(&self) -> Vec<&LocalRepoRow> {
+        self.filtered_repo_indices
+            .iter()
+            .filter_map(|index| self.repos.get(*index))
+            .collect::<Vec<&LocalRepoRow>>()
     }
 
     pub fn repo_query(&self) -> &str {
@@ -365,8 +363,9 @@ impl App {
     }
 
     pub fn selected_repo_slug(&self) -> Option<(String, String)> {
-        let entry = self.repo_entries.get(self.selected_repo)?;
-        Some((entry.owner.clone(), entry.repo.clone()))
+        let repo_index = *self.filtered_repo_indices.get(self.selected_repo)?;
+        let repo = self.repos.get(repo_index)?;
+        Some((repo.owner.clone(), repo.repo.clone()))
     }
 
     pub fn selected_remote(&self) -> usize {
@@ -410,6 +409,27 @@ impl App {
         self.label_selected.contains(&label.to_ascii_lowercase())
     }
 
+    pub fn label_query(&self) -> &str {
+        self.label_query.as_str()
+    }
+
+    pub fn filtered_label_indices(&self) -> Vec<usize> {
+        let query = self.label_query.trim().to_ascii_lowercase();
+        self.label_options
+            .iter()
+            .enumerate()
+            .filter_map(|(index, label)| {
+                if query.is_empty() {
+                    return Some(index);
+                }
+                if label.to_ascii_lowercase().contains(query.as_str()) {
+                    return Some(index);
+                }
+                None
+            })
+            .collect::<Vec<usize>>()
+    }
+
     pub fn assignee_options(&self) -> &[String] {
         &self.assignee_options
     }
@@ -421,6 +441,27 @@ impl App {
     pub fn assignee_option_selected(&self, assignee: &str) -> bool {
         self.assignee_selected
             .contains(&assignee.to_ascii_lowercase())
+    }
+
+    pub fn assignee_query(&self) -> &str {
+        self.assignee_query.as_str()
+    }
+
+    pub fn filtered_assignee_indices(&self) -> Vec<usize> {
+        let query = self.assignee_query.trim().to_ascii_lowercase();
+        self.assignee_options
+            .iter()
+            .enumerate()
+            .filter_map(|(index, assignee)| {
+                if query.is_empty() {
+                    return Some(index);
+                }
+                if assignee.to_ascii_lowercase().contains(query.as_str()) {
+                    return Some(index);
+                }
+                None
+            })
+            .collect::<Vec<usize>>()
     }
 
     pub fn set_selected_preset(&mut self, index: usize) {
@@ -483,6 +524,11 @@ impl App {
                 return;
             }
         }
+        if matches!(self.view, View::LabelPicker | View::AssigneePicker) {
+            if self.handle_popup_filter_key(key) {
+                return;
+            }
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
             if self.view == View::RepoPicker {
                 self.rescan_requested = true;
@@ -515,6 +561,9 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.repo_query.clear();
+                self.repo_search_mode = false;
+                self.rebuild_repo_picker_filter();
                 self.set_view(View::RepoPicker);
             }
             KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::RepoPicker => {
@@ -530,9 +579,6 @@ impl App {
             }
             KeyCode::Char('a') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.cycle_assignee_filter(true);
-            }
-            KeyCode::Char('A') if self.view == View::Issues => {
-                self.cycle_assignee_filter(false);
             }
             KeyCode::Char('[') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.set_issue_filter(self.issue_filter.prev());
@@ -610,8 +656,9 @@ impl App {
             {
                 self.action = Some(AppAction::EditLabels);
             }
-            KeyCode::Char('s')
-                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+            KeyCode::Char('A')
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    && matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
             {
                 self.action = Some(AppAction::EditAssignees);
             }
@@ -626,16 +673,12 @@ impl App {
             KeyCode::Char(' ') if self.view == View::AssigneePicker => {
                 self.toggle_selected_assignee();
             }
-            KeyCode::Char('c') if self.view == View::LabelPicker => {
-                self.label_selected.clear();
-            }
-            KeyCode::Char('c') if self.view == View::AssigneePicker => {
-                self.assignee_selected.clear();
-            }
             KeyCode::Enter if self.view == View::LabelPicker => {
+                self.toggle_selected_label();
                 self.action = Some(AppAction::SubmitLabels);
             }
             KeyCode::Enter if self.view == View::AssigneePicker => {
+                self.toggle_selected_assignee();
                 self.action = Some(AppAction::SubmitAssignees);
             }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
@@ -643,9 +686,6 @@ impl App {
             }
             KeyCode::Char('b') if self.view == View::IssueComments => {
                 self.set_view(View::IssueDetail);
-            }
-            KeyCode::Char('b') if matches!(self.view, View::LabelPicker | View::AssigneePicker) => {
-                self.set_view(self.editor_cancel_view);
             }
             KeyCode::Esc if self.view == View::IssueDetail => {
                 self.set_view(View::Issues);
@@ -691,9 +731,9 @@ impl App {
 
     pub fn set_repos(&mut self, repos: Vec<LocalRepoRow>) {
         self.repos = repos;
-        self.rebuild_repo_picker_entries();
-        if self.selected_repo >= self.repo_entries.len() {
-            self.selected_repo = self.repo_entries.len().saturating_sub(1);
+        self.rebuild_repo_picker_filter();
+        if self.selected_repo >= self.filtered_repo_indices.len() {
+            self.selected_repo = self.filtered_repo_indices.len().saturating_sub(1);
         }
     }
 
@@ -894,12 +934,15 @@ impl App {
     pub fn open_label_picker(
         &mut self,
         return_view: View,
-        options: Vec<String>,
+        mut options: Vec<String>,
         current_labels: &str,
     ) {
         self.editor_cancel_view = return_view;
+        options.sort_by_key(|value| value.to_ascii_lowercase());
+        options.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         self.label_options = options;
         self.selected_label_option = 0;
+        self.label_query.clear();
         self.label_selected = Self::csv_set(current_labels);
         self.set_view(View::LabelPicker);
     }
@@ -907,14 +950,38 @@ impl App {
     pub fn open_assignee_picker(
         &mut self,
         return_view: View,
-        options: Vec<String>,
+        mut options: Vec<String>,
         current_assignees: &str,
     ) {
         self.editor_cancel_view = return_view;
+        options.sort_by_key(|value| value.to_ascii_lowercase());
+        options.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         self.assignee_options = options;
         self.selected_assignee_option = 0;
+        self.assignee_query.clear();
         self.assignee_selected = Self::csv_set(current_assignees);
         self.set_view(View::AssigneePicker);
+    }
+
+    pub fn merge_label_options(&mut self, labels: Vec<String>) {
+        let mut merged = self.label_options.clone();
+        for label in labels {
+            if label.trim().is_empty() {
+                continue;
+            }
+            if merged
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(label.as_str()))
+            {
+                continue;
+            }
+            merged.push(label);
+        }
+        merged.sort_by_key(|value| value.to_ascii_lowercase());
+        self.label_options = merged;
+        if let Some(index) = self.filtered_label_indices().first() {
+            self.selected_label_option = *index;
+        }
     }
 
     pub fn selected_labels_csv(&self) -> String {
@@ -1033,14 +1100,28 @@ impl App {
                 }
             }
             View::LabelPicker => {
-                if self.selected_label_option > 0 {
-                    self.selected_label_option -= 1;
+                let filtered = self.filtered_label_indices();
+                if filtered.is_empty() {
+                    return;
                 }
+                let current = filtered
+                    .iter()
+                    .position(|index| *index == self.selected_label_option)
+                    .unwrap_or(0);
+                let next = current.saturating_sub(1);
+                self.selected_label_option = filtered[next];
             }
             View::AssigneePicker => {
-                if self.selected_assignee_option > 0 {
-                    self.selected_assignee_option -= 1;
+                let filtered = self.filtered_assignee_indices();
+                if filtered.is_empty() {
+                    return;
                 }
+                let current = filtered
+                    .iter()
+                    .position(|index| *index == self.selected_assignee_option)
+                    .unwrap_or(0);
+                let next = current.saturating_sub(1);
+                self.selected_assignee_option = filtered[next];
             }
             View::CommentPresetName
             | View::CommentEditor
@@ -1051,7 +1132,7 @@ impl App {
     fn move_selection_down(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if self.selected_repo + 1 < self.repo_entries.len() {
+                if self.selected_repo + 1 < self.filtered_repo_indices.len() {
                     self.selected_repo += 1;
                 }
             }
@@ -1093,14 +1174,28 @@ impl App {
                 }
             }
             View::LabelPicker => {
-                if self.selected_label_option + 1 < self.label_options.len() {
-                    self.selected_label_option += 1;
+                let filtered = self.filtered_label_indices();
+                if filtered.is_empty() {
+                    return;
                 }
+                let current = filtered
+                    .iter()
+                    .position(|index| *index == self.selected_label_option)
+                    .unwrap_or(0);
+                let next = (current + 1).min(filtered.len() - 1);
+                self.selected_label_option = filtered[next];
             }
             View::AssigneePicker => {
-                if self.selected_assignee_option + 1 < self.assignee_options.len() {
-                    self.selected_assignee_option += 1;
+                let filtered = self.filtered_assignee_indices();
+                if filtered.is_empty() {
+                    return;
                 }
+                let current = filtered
+                    .iter()
+                    .position(|index| *index == self.selected_assignee_option)
+                    .unwrap_or(0);
+                let next = (current + 1).min(filtered.len() - 1);
+                self.selected_assignee_option = filtered[next];
             }
             View::CommentPresetName
             | View::CommentEditor
@@ -1155,8 +1250,16 @@ impl App {
             }
             View::IssueComments => self.issue_comments_scroll = 0,
             View::CommentPresetPicker => self.preset_choice = 0,
-            View::LabelPicker => self.selected_label_option = 0,
-            View::AssigneePicker => self.selected_assignee_option = 0,
+            View::LabelPicker => {
+                if let Some(index) = self.filtered_label_indices().first() {
+                    self.selected_label_option = *index;
+                }
+            }
+            View::AssigneePicker => {
+                if let Some(index) = self.filtered_assignee_indices().first() {
+                    self.selected_assignee_option = *index;
+                }
+            }
             View::CommentPresetName
             | View::CommentEditor
                 => {}
@@ -1166,8 +1269,8 @@ impl App {
     fn jump_bottom(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if !self.repo_entries.is_empty() {
-                    self.selected_repo = self.repo_entries.len() - 1;
+                if !self.filtered_repo_indices.is_empty() {
+                    self.selected_repo = self.filtered_repo_indices.len() - 1;
                 }
             }
             View::RemoteChooser => {
@@ -1202,13 +1305,15 @@ impl App {
                 }
             }
             View::LabelPicker => {
-                if !self.label_options.is_empty() {
-                    self.selected_label_option = self.label_options.len() - 1;
+                let filtered = self.filtered_label_indices();
+                if !filtered.is_empty() {
+                    self.selected_label_option = *filtered.last().unwrap_or(&0);
                 }
             }
             View::AssigneePicker => {
-                if !self.assignee_options.is_empty() {
-                    self.selected_assignee_option = self.assignee_options.len() - 1;
+                let filtered = self.filtered_assignee_indices();
+                if !filtered.is_empty() {
+                    self.selected_assignee_option = *filtered.last().unwrap_or(&0);
                 }
             }
             View::CommentPresetName
@@ -1449,6 +1554,12 @@ impl App {
     }
 
     fn toggle_selected_label(&mut self) {
+        if !self
+            .filtered_label_indices()
+            .contains(&self.selected_label_option)
+        {
+            return;
+        }
         let label = match self.label_options.get(self.selected_label_option) {
             Some(label) => label.to_ascii_lowercase(),
             None => return,
@@ -1461,6 +1572,12 @@ impl App {
     }
 
     fn toggle_selected_assignee(&mut self) {
+        if !self
+            .filtered_assignee_indices()
+            .contains(&self.selected_assignee_option)
+        {
+            return;
+        }
         let assignee = match self.assignee_options.get(self.selected_assignee_option) {
             Some(assignee) => assignee.to_ascii_lowercase(),
             None => return,
@@ -1557,7 +1674,8 @@ impl App {
                 self.issues_preview_scroll = 0;
                 self.update_search_status();
             }
-            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
                 self.issue_query.push(ch);
                 self.rebuild_issue_filter();
                 self.issues_preview_scroll = 0;
@@ -1571,7 +1689,7 @@ impl App {
     fn handle_repo_search_key(&mut self, key: KeyEvent) -> bool {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
             self.repo_query.clear();
-            self.rebuild_repo_picker_entries();
+            self.rebuild_repo_picker_filter();
             self.selected_repo = 0;
             self.status = "Repo search cleared".to_string();
             return true;
@@ -1581,27 +1699,89 @@ impl App {
             KeyCode::Esc => {
                 self.repo_search_mode = false;
                 self.repo_query.clear();
-                self.rebuild_repo_picker_entries();
+                self.rebuild_repo_picker_filter();
                 self.selected_repo = 0;
                 self.status = String::new();
             }
             KeyCode::Enter => {
                 self.repo_search_mode = false;
-                self.status = format!("{} repos", self.repo_entries.len());
+                self.status = format!("{} repos", self.filtered_repo_indices.len());
             }
             KeyCode::Backspace => {
                 self.repo_query.pop();
-                self.rebuild_repo_picker_entries();
+                self.rebuild_repo_picker_filter();
                 self.selected_repo = 0;
             }
             KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
                 self.repo_query.push(ch);
-                self.rebuild_repo_picker_entries();
+                self.rebuild_repo_picker_filter();
                 self.selected_repo = 0;
             }
             _ => {}
         }
         true
+    }
+
+    fn handle_popup_filter_key(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
+            if self.view == View::LabelPicker {
+                self.label_query.clear();
+                if let Some(index) = self.filtered_label_indices().first() {
+                    self.selected_label_option = *index;
+                }
+                return true;
+            }
+            if self.view == View::AssigneePicker {
+                self.assignee_query.clear();
+                if let Some(index) = self.filtered_assignee_indices().first() {
+                    self.selected_assignee_option = *index;
+                }
+                return true;
+            }
+        }
+
+        match key.code {
+            KeyCode::Backspace => {
+                if self.view == View::LabelPicker {
+                    self.label_query.pop();
+                    if let Some(index) = self.filtered_label_indices().first() {
+                        self.selected_label_option = *index;
+                    }
+                    return true;
+                }
+                if self.view == View::AssigneePicker {
+                    self.assignee_query.pop();
+                    if let Some(index) = self.filtered_assignee_indices().first() {
+                        self.selected_assignee_option = *index;
+                    }
+                    return true;
+                }
+            }
+            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+                if self.view == View::LabelPicker {
+                    if self.label_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
+                        return false;
+                    }
+                    self.label_query.push(ch);
+                    if let Some(index) = self.filtered_label_indices().first() {
+                        self.selected_label_option = *index;
+                    }
+                    return true;
+                }
+                if self.view == View::AssigneePicker {
+                    if self.assignee_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
+                        return false;
+                    }
+                    self.assignee_query.push(ch);
+                    if let Some(index) = self.filtered_assignee_indices().first() {
+                        self.selected_assignee_option = *index;
+                    }
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
     }
 
     fn update_search_status(&mut self) {
@@ -1649,67 +1829,27 @@ impl App {
         }
     }
 
-    fn rebuild_repo_picker_entries(&mut self) {
-        #[derive(Default)]
-        struct RepoGroup {
-            owner: String,
-            repo: String,
-            paths: HashSet<String>,
-            remotes: HashSet<String>,
-            last_seen: Option<String>,
-            order: usize,
-            matches_query: bool,
-        }
-
+    fn rebuild_repo_picker_filter(&mut self) {
         let query = self.repo_query.trim().to_ascii_lowercase();
-        let mut groups = HashMap::<String, RepoGroup>::new();
-
-        for (index, repo) in self.repos.iter().enumerate() {
-            let key = format!("{}/{}", repo.owner, repo.repo);
-            let group = groups.entry(key).or_insert_with(|| RepoGroup {
-                owner: repo.owner.clone(),
-                repo: repo.repo.clone(),
-                order: index,
-                ..RepoGroup::default()
-            });
-
-            group.paths.insert(repo.path.clone());
-            group.remotes.insert(repo.remote_name.clone());
-            if group.last_seen.is_none() {
-                group.last_seen = repo.last_seen.clone();
-            }
-
-            if query.is_empty() {
-                group.matches_query = true;
-                continue;
-            }
-
-            let haystack = format!(
-                "{} {} {} {} {}",
-                repo.owner, repo.repo, repo.path, repo.remote_name, repo.url
-            )
-            .to_ascii_lowercase();
-            if haystack.contains(query.as_str()) {
-                group.matches_query = true;
-            }
-        }
-
-        let mut entries = groups
-            .into_values()
-            .filter(|group| group.matches_query)
-            .collect::<Vec<RepoGroup>>();
-        entries.sort_by_key(|group| group.order);
-
-        self.repo_entries = entries
-            .into_iter()
-            .map(|group| RepoPickerEntry {
-                owner: group.owner,
-                repo: group.repo,
-                paths: group.paths.len(),
-                remotes: group.remotes.len(),
-                last_seen: group.last_seen,
+        self.filtered_repo_indices = self
+            .repos
+            .iter()
+            .enumerate()
+            .filter_map(|(index, repo)| {
+                if query.is_empty() {
+                    return Some(index);
+                }
+                let haystack = format!(
+                    "{} {} {} {} {}",
+                    repo.owner, repo.repo, repo.path, repo.remote_name, repo.url
+                )
+                .to_ascii_lowercase();
+                if haystack.contains(query.as_str()) {
+                    return Some(index);
+                }
+                None
             })
-            .collect::<Vec<RepoPickerEntry>>();
+            .collect::<Vec<usize>>();
     }
 }
 
@@ -1982,8 +2122,11 @@ mod tests {
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
 
-        app.on_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
-        assert_eq!(app.assignee_filter_label(), "unassigned");
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.assignee_filter_label(), "sam");
+
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.assignee_filter_label(), "all");
     }
 
     #[test]
@@ -2358,7 +2501,7 @@ mod tests {
     }
 
     #[test]
-    fn repo_picker_groups_same_owner_repo() {
+    fn repo_picker_keeps_distinct_rows() {
         let mut app = App::new(Config::default());
         app.set_repos(vec![
             LocalRepoRow {
@@ -2390,10 +2533,10 @@ mod tests {
             },
         ]);
 
-        assert_eq!(app.repo_picker_entries().len(), 2);
-        assert_eq!(app.repo_picker_entries()[0].owner, "acme");
-        assert_eq!(app.repo_picker_entries()[0].repo, "glyph");
-        assert_eq!(app.repo_picker_entries()[0].paths, 2);
+        assert_eq!(app.filtered_repo_rows().len(), 3);
+        assert_eq!(app.filtered_repo_rows()[0].owner, "acme");
+        assert_eq!(app.filtered_repo_rows()[0].repo, "glyph");
+        assert_eq!(app.filtered_repo_rows()[1].remote_name, "upstream");
     }
 
     #[test]
@@ -2425,11 +2568,52 @@ mod tests {
             app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
         }
 
-        assert_eq!(app.repo_picker_entries().len(), 1);
-        assert_eq!(app.repo_picker_entries()[0].owner, "acme");
+        assert_eq!(app.filtered_repo_rows().len(), 1);
+        assert_eq!(app.filtered_repo_rows()[0].owner, "acme");
 
         app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert_eq!(app.repo_picker_entries().len(), 2);
+        assert_eq!(app.filtered_repo_rows().len(), 2);
+    }
+
+    #[test]
+    fn ctrl_g_resets_repo_picker_query_when_reopened() {
+        let mut app = App::new(Config::default());
+        app.set_repos(vec![
+            LocalRepoRow {
+                path: "/tmp/one".to_string(),
+                remote_name: "origin".to_string(),
+                owner: "acme".to_string(),
+                repo: "glyph".to_string(),
+                url: "https://github.com/acme/glyph.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+            LocalRepoRow {
+                path: "/tmp/two".to_string(),
+                remote_name: "origin".to_string(),
+                owner: "other".to_string(),
+                repo: "core".to_string(),
+                url: "https://github.com/other/core.git".to_string(),
+                last_seen: None,
+                last_scanned: None,
+            },
+        ]);
+
+        app.set_view(View::Issues);
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for ch in "acme".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        assert_eq!(app.repo_query(), "acme");
+        assert_eq!(app.filtered_repo_rows().len(), 1);
+
+        app.set_view(View::Issues);
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.repo_query(), "");
+        assert_eq!(app.filtered_repo_rows().len(), 2);
+        assert!(!app.repo_search_mode());
     }
 
     #[test]
@@ -2455,7 +2639,7 @@ mod tests {
     }
 
     #[test]
-    fn s_triggers_edit_assignees_action_in_detail() {
+    fn shift_a_triggers_edit_assignees_action_in_detail() {
         let mut app = App::new(Config::default());
         app.set_issues(vec![IssueRow {
             id: 1,
@@ -2473,7 +2657,16 @@ mod tests {
         app.set_current_issue(1, 1);
         app.set_view(View::IssueDetail);
 
-        app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
+        assert_eq!(app.take_action(), Some(AppAction::EditAssignees));
+    }
+
+    #[test]
+    fn shift_a_triggers_edit_assignees_action_in_issues() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
         assert_eq!(app.take_action(), Some(AppAction::EditAssignees));
     }
 
@@ -2488,5 +2681,135 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+    }
+
+    #[test]
+    fn labels_picker_enter_selects_highlighted_when_none_selected() {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "docs".to_string()],
+            "",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+        assert_eq!(app.selected_labels(), vec!["bug".to_string()]);
+    }
+
+    #[test]
+    fn labels_picker_enter_adds_highlighted_when_existing_labels_present() {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "docs".to_string()],
+            "bug",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+        assert_eq!(app.selected_labels(), vec!["bug".to_string(), "docs".to_string()]);
+    }
+
+    #[test]
+    fn assignee_picker_enter_selects_highlighted_when_none_selected() {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            vec!["alex".to_string(), "sam".to_string()],
+            "",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+        assert_eq!(app.selected_assignees(), vec!["alex".to_string()]);
+    }
+
+    #[test]
+    fn assignee_picker_enter_adds_highlighted_when_existing_assignees_present() {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            vec!["alex".to_string(), "sam".to_string()],
+            "alex",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+        assert_eq!(
+            app.selected_assignees(),
+            vec!["alex".to_string(), "sam".to_string()]
+        );
+    }
+
+    #[test]
+    fn labels_picker_enter_removes_highlighted_when_already_selected() {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "docs".to_string()],
+            "bug,docs",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+        assert_eq!(app.selected_labels(), vec!["docs".to_string()]);
+    }
+
+    #[test]
+    fn assignee_picker_enter_removes_highlighted_when_already_selected() {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            vec!["alex".to_string(), "sam".to_string()],
+            "alex,sam",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+        assert_eq!(app.selected_assignees(), vec!["sam".to_string()]);
+    }
+
+    #[test]
+    fn label_picker_type_filter_can_match_c_prefix() {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "customer".to_string(), "docs".to_string()],
+            "",
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+
+        assert_eq!(app.label_query(), "c");
+        assert_eq!(app.filtered_label_indices().len(), 2);
+        assert_eq!(app.selected_label_option(), app.filtered_label_indices()[0]);
+
+    }
+
+    #[test]
+    fn merge_label_options_dedupes_case_insensitive() {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "Docs".to_string()],
+            "",
+        );
+
+        app.merge_label_options(vec![
+            "docs".to_string(),
+            "enhancement".to_string(),
+            "BUG".to_string(),
+        ]);
+
+        assert_eq!(app.label_options(), &["bug", "Docs", "enhancement"]);
     }
 }

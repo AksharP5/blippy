@@ -48,19 +48,19 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
     } else {
         ellipsize(query, 64)
     };
-    let grouped_count = app.repo_picker_entries().len();
-    let total_remotes = app.repos().len();
+    let visible_count = app.filtered_repo_rows().len();
+    let total_count = app.repos().len();
     let header = Text::from(vec![
         Line::from(vec![
             Span::styled("Repositories", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
             Span::raw("  "),
             Span::styled(
-                format!("{} groups", grouped_count),
+                format!("{} shown", visible_count),
                 Style::default().fg(Color::White),
             ),
             Span::raw("  "),
             Span::styled(
-                format!("{} remotes", total_remotes),
+                format!("{} total", total_count),
                 Style::default().fg(GITHUB_MUTED),
             ),
         ]),
@@ -102,15 +102,15 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
         }
     }
 
-    let block = panel_block("Repository Groups");
-    let items = if app.repo_picker_entries().is_empty() {
+    let block = panel_block("Repositories");
+    let items = if app.filtered_repo_rows().is_empty() {
         if app.repos().is_empty() {
             vec![ListItem::new("No repos found. Run `glyph sync` or press Ctrl+R to rescan.")]
         } else {
             vec![ListItem::new("No repos match current search. Press Esc to clear.")]
         }
     } else {
-        app.repo_picker_entries()
+        app.filtered_repo_rows()
             .iter()
             .map(|repo| {
                 let line1 = Line::from(vec![
@@ -120,21 +120,12 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
                     ),
                     Span::raw("  "),
                     Span::styled(
-                        format!("{} remotes", repo.remotes),
-                        Style::default().fg(GITHUB_MUTED),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("{} paths", repo.paths),
+                        format!("{}", repo.remote_name),
                         Style::default().fg(GITHUB_MUTED),
                     ),
                 ]);
-                let last_seen = repo
-                    .last_seen
-                    .as_deref()
-                    .map(|value| format!("last seen {}", value.replace('T', " ")))
-                    .unwrap_or_else(|| "last seen unknown".to_string());
-                let line2 = Line::from(last_seen).style(Style::default().fg(GITHUB_MUTED));
+                let line2 = Line::from(ellipsize(repo.path.as_str(), 96))
+                    .style(Style::default().fg(GITHUB_MUTED));
                 ListItem::new(vec![line1, line2])
             })
             .collect()
@@ -157,7 +148,7 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
         }),
         &mut list_state(selected_for_list(
             app.selected_repo(),
-            app.repo_picker_entries().len(),
+            app.filtered_repo_rows().len(),
         )),
     );
 
@@ -238,7 +229,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                 Span::styled(assignee.clone(), Style::default().fg(GITHUB_MUTED))
             },
             Span::raw("  "),
-            Span::styled("(a/A cycle)", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("(a cycle)", Style::default().fg(GITHUB_MUTED)),
             Span::raw("  "),
             Span::styled(
                 format!("showing {} of {}", visible_count, total_count),
@@ -710,24 +701,35 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
         .split(popup);
 
+    let filtered = app.filtered_label_indices();
+    let query_display = if app.label_query().trim().is_empty() {
+        "none".to_string()
+    } else {
+        ellipsize(app.label_query().trim(), 56)
+    };
     let header = Paragraph::new(Text::from(vec![
         Line::from(Span::styled(
             "Edit Labels",
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
+        Line::from(vec![
+            Span::styled("filter: ", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(query_display),
+        ]),
         Line::from(Span::styled(
-            "Space toggle • Enter apply • c clear • Esc cancel",
+            "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
             Style::default().fg(GITHUB_MUTED),
         )),
     ]))
     .block(panel_block("Labels"));
     frame.render_widget(header, sections[0]);
 
-    let items = if app.label_options().is_empty() {
+    let items = if filtered.is_empty() {
         vec![ListItem::new("No labels discovered in this repo yet.")]
     } else {
-        app.label_options()
+        filtered
             .iter()
+            .filter_map(|index| app.label_options().get(*index))
             .map(|label| {
                 let checked = if app.label_option_selected(label.as_str()) {
                     "[x]"
@@ -756,8 +758,11 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         list,
         sections[1],
         &mut list_state(selected_for_list(
-            app.selected_label_option(),
-            app.label_options().len(),
+            filtered
+                .iter()
+                .position(|index| *index == app.selected_label_option())
+                .unwrap_or(0),
+            filtered.len(),
         )),
     );
 
@@ -782,24 +787,35 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
         .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
         .split(popup);
 
+    let filtered = app.filtered_assignee_indices();
+    let query_display = if app.assignee_query().trim().is_empty() {
+        "none".to_string()
+    } else {
+        ellipsize(app.assignee_query().trim(), 56)
+    };
     let header = Paragraph::new(Text::from(vec![
         Line::from(Span::styled(
             "Edit Assignees",
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
+        Line::from(vec![
+            Span::styled("filter: ", Style::default().fg(GITHUB_MUTED)),
+            Span::raw(query_display),
+        ]),
         Line::from(Span::styled(
-            "Space toggle • Enter apply • c clear • Esc cancel",
+            "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
             Style::default().fg(GITHUB_MUTED),
         )),
     ]))
     .block(panel_block("Assignees"));
     frame.render_widget(header, sections[0]);
 
-    let items = if app.assignee_options().is_empty() {
+    let items = if filtered.is_empty() {
         vec![ListItem::new("No assignees discovered in this repo yet.")]
     } else {
-        app.assignee_options()
+        filtered
             .iter()
+            .filter_map(|index| app.assignee_options().get(*index))
             .map(|assignee| {
                 let checked = if app.assignee_option_selected(assignee.as_str()) {
                     "[x]"
@@ -828,8 +844,11 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
         list,
         sections[1],
         &mut list_state(selected_for_list(
-            app.selected_assignee_option(),
-            app.assignee_options().len(),
+            filtered
+                .iter()
+                .position(|index| *index == app.selected_assignee_option())
+                .unwrap_or(0),
+            filtered.len(),
         )),
     );
 
@@ -1054,22 +1073,24 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a/A assignee filter • l labels • s assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k or ↑/↓ move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • a assignee filter • l labels • Shift+A assignees • 1/2 or [ ] tabs • f cycle • m comment • u reopen • dd close • r refresh • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • l labels • s assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close • l labels • Shift+A assignees • m comment • u reopen • c all comments • b/Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • l labels • s assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
+            "j/k or ↑/↓ scroll • Ctrl+u/d page • gg/G top/bottom • n/p next/prev comment • dd close • l labels • Shift+A assignees • m comment • u reopen • b/Esc back • r sync issue+comments • o browser • q quit"
                 .to_string()
         }
         View::LabelPicker => {
-            "j/k move • space toggle • c clear • Enter apply • Esc cancel".to_string()
+            "Type to filter • j/k or ↑/↓ move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
+                .to_string()
         }
         View::AssigneePicker => {
-            "j/k move • space toggle • c clear • Enter apply • Esc cancel".to_string()
+            "Type to filter • j/k or ↑/↓ move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
+                .to_string()
         }
         View::CommentPresetPicker => {
             "j/k move • gg/G top/bottom • Enter select • Esc cancel • q quit".to_string()
