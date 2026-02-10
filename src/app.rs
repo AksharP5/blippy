@@ -1,9 +1,10 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
+use crate::keybinds::Keybinds;
 use crate::markdown;
 use crate::pr_diff::{parse_patch, DiffKind};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
@@ -282,6 +283,7 @@ impl WorkItemMode {
 pub struct App {
     should_quit: bool,
     config: Config,
+    keybinds: Keybinds,
     view: View,
     focus: Focus,
     repos: Vec<LocalRepoRow>,
@@ -338,6 +340,7 @@ pub struct App {
     selected_pull_request_diff_line: usize,
     pull_request_diff_scroll: u16,
     pull_request_diff_max_scroll: u16,
+    pull_request_diff_horizontal_scroll: u16,
     pull_request_review_side: ReviewSide,
     pull_request_visual_mode: bool,
     pull_request_visual_anchor: Option<usize>,
@@ -363,9 +366,11 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
+        let keybinds = Keybinds::from_overrides(&config.keybinds);
         Self {
             should_quit: false,
             config,
+            keybinds,
             view: View::RepoPicker,
             focus: Focus::IssuesList,
             repos: Vec::new(),
@@ -422,6 +427,7 @@ impl App {
             selected_pull_request_diff_line: 0,
             pull_request_diff_scroll: 0,
             pull_request_diff_max_scroll: 0,
+            pull_request_diff_horizontal_scroll: 0,
             pull_request_review_side: ReviewSide::Right,
             pull_request_visual_mode: false,
             pull_request_visual_anchor: None,
@@ -892,6 +898,10 @@ impl App {
         self.pull_request_diff_scroll
     }
 
+    pub fn pull_request_diff_horizontal_scroll(&self) -> u16 {
+        self.pull_request_diff_horizontal_scroll
+    }
+
     pub fn selected_pull_request_file_row(&self) -> Option<&PullRequestFile> {
         self.pull_request_files.get(self.selected_pull_request_file)
     }
@@ -990,6 +1000,10 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
+        let key = match self.keybinds.remap_key(key) {
+            Some(key) => key,
+            None => return,
+        };
         if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
             self.handle_editor_key(key);
             return;
@@ -1182,6 +1196,15 @@ impl App {
             {
                 self.toggle_pull_request_visual_mode();
             }
+            KeyCode::Left if self.view == View::PullRequestFiles => {
+                self.scroll_pull_request_diff_horizontal(-4);
+            }
+            KeyCode::Right if self.view == View::PullRequestFiles => {
+                self.scroll_pull_request_diff_horizontal(4);
+            }
+            KeyCode::Home if self.view == View::PullRequestFiles => {
+                self.reset_pull_request_diff_horizontal_scroll();
+            }
             KeyCode::Char('e') if self.view == View::IssueComments => {
                 self.action = Some(AppAction::EditIssueComment);
             }
@@ -1298,6 +1321,72 @@ impl App {
         }
     }
 
+    pub fn on_mouse(&mut self, event: MouseEvent) {
+        match event.kind {
+            MouseEventKind::ScrollUp => {
+                self.move_selection_up();
+            }
+            MouseEventKind::ScrollDown => {
+                self.move_selection_down();
+            }
+            MouseEventKind::ScrollLeft => {
+                self.scroll_pull_request_diff_horizontal(-4);
+            }
+            MouseEventKind::ScrollRight => {
+                self.scroll_pull_request_diff_horizontal(4);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.handle_mouse_click(event.column, event.row);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_mouse_click(&mut self, column: u16, row: u16) {
+        if row <= 2 && column <= 12 {
+            match self.view {
+                View::IssueDetail => {
+                    self.set_view(View::Issues);
+                    return;
+                }
+                View::IssueComments | View::PullRequestFiles => {
+                    self.set_view(View::IssueDetail);
+                    return;
+                }
+                View::LabelPicker | View::AssigneePicker => {
+                    self.set_view(self.editor_cancel_view);
+                    return;
+                }
+                View::CommentPresetPicker => {
+                    self.set_view(View::Issues);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        if self.view == View::Issues && row <= 2 {
+            if (2..=13).contains(&column) {
+                self.set_issue_filter(IssueFilter::Open);
+                return;
+            }
+            if (15..=28).contains(&column) {
+                self.set_issue_filter(IssueFilter::Closed);
+                return;
+            }
+        }
+
+        if self.view == View::PullRequestFiles && row <= 2 {
+            if (14..=24).contains(&column) {
+                self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
+                return;
+            }
+            if (26..=36).contains(&column) {
+                self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+            }
+        }
+    }
+
     pub fn should_quit(&self) -> bool {
         self.should_quit
     }
@@ -1387,6 +1476,7 @@ impl App {
         self.selected_pull_request_file = 0;
         self.selected_pull_request_diff_line = 0;
         self.pull_request_diff_scroll = 0;
+        self.pull_request_diff_horizontal_scroll = 0;
         self.pull_request_diff_max_scroll = 0;
         self.pull_request_review_focus = PullRequestReviewFocus::Files;
         self.pull_request_visual_mode = false;
@@ -1441,6 +1531,26 @@ impl App {
 
     pub fn set_pull_request_diff_scroll(&mut self, scroll: u16) {
         self.pull_request_diff_scroll = scroll.min(self.pull_request_diff_max_scroll);
+    }
+
+    pub fn reset_pull_request_diff_horizontal_scroll(&mut self) {
+        self.pull_request_diff_horizontal_scroll = 0;
+    }
+
+    fn scroll_pull_request_diff_horizontal(&mut self, delta: i16) {
+        if self.view != View::PullRequestFiles || self.pull_request_review_focus != PullRequestReviewFocus::Diff {
+            return;
+        }
+        let amount = delta.unsigned_abs();
+        if delta.is_negative() {
+            self.pull_request_diff_horizontal_scroll =
+                self.pull_request_diff_horizontal_scroll.saturating_sub(amount);
+            return;
+        }
+        self.pull_request_diff_horizontal_scroll = self
+            .pull_request_diff_horizontal_scroll
+            .saturating_add(amount)
+            .min(2000);
     }
 
     pub fn reset_issue_detail_scroll(&mut self) {
@@ -1568,6 +1678,7 @@ impl App {
         self.selected_pull_request_file = 0;
         self.selected_pull_request_diff_line = 0;
         self.pull_request_diff_scroll = 0;
+        self.pull_request_diff_horizontal_scroll = 0;
         self.pull_request_diff_max_scroll = 0;
         self.pull_request_review_focus = PullRequestReviewFocus::Files;
         self.pull_request_review_side = ReviewSide::Right;
@@ -1597,6 +1708,7 @@ impl App {
             self.selected_pull_request_file = 0;
             self.selected_pull_request_diff_line = 0;
             self.pull_request_diff_scroll = 0;
+            self.pull_request_diff_horizontal_scroll = 0;
             self.pull_request_diff_max_scroll = 0;
             self.pull_request_review_focus = PullRequestReviewFocus::Files;
             self.pull_request_review_side = ReviewSide::Right;
@@ -1929,6 +2041,7 @@ impl App {
                         self.selected_pull_request_file -= 1;
                         self.selected_pull_request_diff_line = 0;
                         self.pull_request_diff_scroll = 0;
+                        self.pull_request_diff_horizontal_scroll = 0;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -2043,6 +2156,7 @@ impl App {
                         self.selected_pull_request_file += 1;
                         self.selected_pull_request_diff_line = 0;
                         self.pull_request_diff_scroll = 0;
+                        self.pull_request_diff_horizontal_scroll = 0;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -2192,6 +2306,7 @@ impl App {
                     self.selected_pull_request_file = 0;
                     self.selected_pull_request_diff_line = 0;
                     self.pull_request_diff_scroll = 0;
+                    self.pull_request_diff_horizontal_scroll = 0;
                     self.pull_request_visual_mode = false;
                     self.pull_request_visual_anchor = None;
                     self.sync_selected_pull_request_review_comment();
@@ -2199,6 +2314,7 @@ impl App {
                 }
                 self.selected_pull_request_diff_line = 0;
                 self.pull_request_diff_scroll = 0;
+                self.pull_request_diff_horizontal_scroll = 0;
                 self.sync_selected_pull_request_review_comment();
             }
             View::CommentPresetPicker => self.preset_choice = 0,
@@ -2259,6 +2375,7 @@ impl App {
                         self.selected_pull_request_file = self.pull_request_files.len() - 1;
                         self.selected_pull_request_diff_line = 0;
                         self.pull_request_diff_scroll = 0;
+                        self.pull_request_diff_horizontal_scroll = 0;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -3286,7 +3403,14 @@ mod tests {
     };
     use crate::config::Config;
     use crate::store::{CommentRow, IssueRow, LocalRepoRow};
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::{
+        KeyCode,
+        KeyEvent,
+        KeyModifiers,
+        MouseButton,
+        MouseEvent,
+        MouseEventKind,
+    };
 
     #[test]
     fn dd_triggers_close_issue_action() {
@@ -3958,6 +4082,67 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::TogglePullRequestFileViewed));
+    }
+
+    #[test]
+    fn custom_quit_keybinding_remaps_and_disables_default() {
+        let mut config = Config::default();
+        config
+            .keybinds
+            .insert("quit".to_string(), "ctrl+q".to_string());
+        let mut app = App::new(config);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(!app.should_quit());
+
+        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+        assert!(app.should_quit());
+    }
+
+    #[test]
+    fn diff_horizontal_scroll_uses_keyboard_and_mouse() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(app.pull_request_diff_horizontal_scroll(), 4);
+
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollRight,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.pull_request_diff_horizontal_scroll(), 8);
+
+        app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.pull_request_diff_horizontal_scroll(), 0);
+    }
+
+    #[test]
+    fn mouse_back_click_navigates_to_previous_view() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert_eq!(app.view(), View::IssueDetail);
     }
 
     #[test]

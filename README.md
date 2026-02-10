@@ -105,8 +105,10 @@ cargo test
 - Enter on PR changes pane: open full-screen PR changes viewer
 - PR review view: Ctrl+h/l switch files/diff, j/k navigate, w mark/unmark file viewed on GitHub, m add inline GitHub review comment
 - PR review view: h/l choose old/new side, z collapse/expand current hunk, Shift+V visual multiline range, e edit, x delete, Shift+R resolve/reopen thread on GitHub, n/p cycle comments on selected line
+- PR review view: Left/Right arrow pans horizontally for long lines, Home resets horizontal pan
 - Ctrl+y: copy current status message to clipboard
 - b or Esc: back from issue detail/comments
+- Mouse: wheel scrolls lists/diffs, click `[Back]` in headers to navigate back, click Open/Closed tabs in issues header
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
 
 Search supports simple GitHub-like qualifiers:
@@ -122,4 +124,18 @@ Configure close/comment presets in `config.toml`:
 [[comment_defaults]]
 name = "close_default"
 body = "Closing this issue as resolved."
+```
+
+## Keybind Configuration
+- Every keyboard shortcut can be overridden.
+- Copy `keybinds.example.toml` to `~/.config/glyph/keybinds.toml` and edit values.
+- You can also place the same `[keybinds]` table inside `~/.config/glyph/config.toml`.
+
+Example:
+```toml
+[keybinds]
+quit = "ctrl+q"
+refresh = "ctrl+s"
+diff_scroll_left = "alt+h"
+diff_scroll_right = "alt+l"
 ```

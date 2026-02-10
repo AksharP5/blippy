@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Config {
     pub keymap: Option<String>,
+    #[serde(default)]
+    pub keybinds: HashMap<String, String>,
     #[serde(default)]
     pub comment_defaults: Vec<CommentDefault>,
 }
@@ -21,14 +24,23 @@ pub struct CommentDefault {
 impl Config {
     pub fn load() -> Result<Self> {
         let path = config_path();
-        if !path.exists() {
-            return Ok(Self::default());
-        }
+        let mut config = if !path.exists() {
+            Self::default()
+        } else {
+            let contents = fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read config at {}", path.display()))?;
+            toml::from_str(&contents)
+                .with_context(|| format!("Failed to parse config at {}", path.display()))?
+        };
 
-        let contents = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read config at {}", path.display()))?;
-        let config = toml::from_str(&contents)
-            .with_context(|| format!("Failed to parse config at {}", path.display()))?;
+        let keybinds_path = keybinds_path();
+        if keybinds_path.exists() {
+            let contents = fs::read_to_string(&keybinds_path)
+                .with_context(|| format!("Failed to read config at {}", keybinds_path.display()))?;
+            let keybinds_file: KeybindsFile = toml::from_str(&contents)
+                .with_context(|| format!("Failed to parse config at {}", keybinds_path.display()))?;
+            config.keybinds.extend(keybinds_file.keybinds);
+        }
         Ok(config)
     }
 
@@ -62,10 +74,33 @@ mod tests {
         assert_eq!(config.comment_defaults.len(), 1);
         assert_eq!(config.comment_defaults[0].name, "close_default");
     }
+
+    #[test]
+    fn parses_keybind_overrides() {
+        let input = r#"
+            [keybinds]
+            quit = "ctrl+q"
+            refresh = "ctrl+s"
+        "#;
+
+        let config: Config = toml::from_str(input).expect("parse config");
+        assert_eq!(config.keybinds.get("quit"), Some(&"ctrl+q".to_string()));
+        assert_eq!(config.keybinds.get("refresh"), Some(&"ctrl+s".to_string()));
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct KeybindsFile {
+    #[serde(default)]
+    keybinds: HashMap<String, String>,
 }
 
 fn config_path() -> PathBuf {
     config_dir().join("glyph").join("config.toml")
+}
+
+fn keybinds_path() -> PathBuf {
+    config_dir().join("glyph").join("keybinds.toml")
 }
 
 fn config_dir() -> PathBuf {

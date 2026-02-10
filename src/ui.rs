@@ -474,7 +474,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([Constraint::Length(4), Constraint::Min(0)])
         .split(main);
     let content_area = sections[1].inner(Margin {
         vertical: 1,
@@ -519,20 +519,32 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         };
 
     let header_text = if issue_title.is_empty() {
-        Text::from(Line::from("Issue detail"))
+        Text::from(vec![
+            Line::from(Span::styled(
+                "[Back]",
+                Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            )),
+            Line::from("Issue detail"),
+        ])
     } else {
         let pending = issue_number.and_then(|number| app.pending_issue_badge(number));
-        Text::from(vec![Line::from(vec![
-            Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
-            Span::raw("  "),
-            Span::styled(
-                format!("[{}]", issue_state),
-                Style::default()
-                    .fg(issue_state_color(issue_state.as_str()))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            pending_issue_span(pending),
-        ])])
+        Text::from(vec![
+            Line::from(Span::styled(
+                "[Back]",
+                Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(vec![
+                Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+                Span::raw("  "),
+                Span::styled(
+                    format!("[{}]", issue_state),
+                    Style::default()
+                        .fg(issue_state_color(issue_state.as_str()))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                pending_issue_span(pending),
+            ]),
+        ])
     };
     let header_block = Block::default()
         .borders(Borders::ALL)
@@ -772,6 +784,10 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         format!("{}/{}", app.selected_comment() + 1, app.comments().len())
     };
     let header = Text::from(vec![
+        Line::from(Span::styled(
+            "[Back]",
+            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        )),
         Line::from(Span::styled(title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD))),
         Line::from(Span::styled(
             format!("j/k jump comments • selected {} • e edit • x delete", selected),
@@ -838,7 +854,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([Constraint::Length(5), Constraint::Min(0)])
         .split(main);
     let content = sections[1].inner(Margin {
         vertical: 1,
@@ -870,13 +886,34 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         .pull_request_visual_range()
         .map(|(start, end)| format!("{}-{}", start + 1, end + 1))
         .unwrap_or_else(|| "-".to_string());
+    let horizontal_scroll = app.pull_request_diff_horizontal_scroll();
     let header = Text::from(vec![
         Line::from(Span::styled(
             title.clone(),
             Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
         )),
+        Line::from(vec![
+            Span::styled("[Back]", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled("[Files]", if focused == "files" {
+                Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(GITHUB_MUTED)
+            }),
+            Span::raw("  "),
+            Span::styled("[Diff]", if focused == "diff" {
+                Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(GITHUB_MUTED)
+            }),
+            Span::raw("  "),
+            Span::styled(
+                format!("x:{}", horizontal_scroll),
+                Style::default().fg(GITHUB_MUTED),
+            ),
+        ]),
         Line::from(Span::styled(
-            format!("Ctrl+h/l pane • h/l side • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
+            format!("Ctrl+h/l pane • h/l side • ←/→ pan • Home reset pan • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
             Style::default().fg(GITHUB_MUTED),
         )),
     ]);
@@ -985,6 +1022,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
             let cells_width = panel_width.saturating_sub(2);
             let left_width = cells_width.saturating_sub(5) / 2;
             let right_width = cells_width.saturating_sub(left_width + 3);
+            let horizontal_offset = app.pull_request_diff_horizontal_scroll() as usize;
             let visual_range = app.pull_request_visual_range();
             for (index, row) in rows.iter().enumerate() {
                 if app.pull_request_diff_row_hidden(file_name.as_str(), rows.as_slice(), index) {
@@ -1023,7 +1061,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     let text = format!(
                         " {} {}  [{} lines hidden]",
                         indicator,
-                        ellipsize(row.raw.as_str(), panel_width.saturating_sub(24)),
+                        clip_horizontal(row.raw.as_str(), horizontal_offset, panel_width.saturating_sub(24)),
                         hidden_lines,
                     );
                     lines.push(Line::from(Span::styled(text, style)));
@@ -1037,6 +1075,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     app.pull_request_review_side(),
                     left_width,
                     right_width,
+                    horizontal_offset,
                 ));
 
                 let target_right = row
@@ -1108,7 +1147,13 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
 
     let diff_title = selected_file
         .as_ref()
-        .map(|(file_name, _)| format!("Diff: {}", file_name))
+        .map(|(file_name, _)| {
+            format!(
+                "Diff: {}  [pan {} | left/right move]",
+                file_name,
+                app.pull_request_diff_horizontal_scroll(),
+            )
+        })
         .unwrap_or_else(|| "Diff".to_string());
     let diff_block_title = focused_title(diff_title.as_str(), diff_focused);
     let paragraph = Paragraph::new(Text::from(lines))
@@ -1636,7 +1681,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l pane • j/k move file/line • w viewed • z collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc back • q quit"
+            "Ctrl+h/l pane • j/k move file/line • ←/→ pan diff • Home reset pan • w viewed • z collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1785,16 +1830,23 @@ fn render_split_diff_row(
     selected_side: ReviewSide,
     left_width: usize,
     right_width: usize,
+    horizontal_offset: usize,
 ) -> Line<'static> {
     if row.kind == DiffKind::Hunk {
         return Line::from(Span::styled(
-            format!(" {}", ellipsize(row.raw.as_str(), left_width + right_width + 4)),
+            format!(
+                " {}",
+                clip_horizontal(row.raw.as_str(), horizontal_offset, left_width + right_width + 4)
+            ),
             Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
         ));
     }
     if row.kind == DiffKind::Meta {
         return Line::from(Span::styled(
-            format!(" {}", ellipsize(row.raw.as_str(), left_width + right_width + 4)),
+            format!(
+                " {}",
+                clip_horizontal(row.raw.as_str(), horizontal_offset, left_width + right_width + 4)
+            ),
             Style::default().fg(GITHUB_MUTED),
         ));
     }
@@ -1810,8 +1862,8 @@ fn render_split_diff_row(
 
     let left_prefix = format!("{:>4} ", left_number);
     let right_prefix = format!("{:>4} ", right_number);
-    let left_text = ellipsize(row.left.as_str(), left_width.saturating_sub(5));
-    let right_text = ellipsize(row.right.as_str(), right_width.saturating_sub(5));
+    let left_text = clip_horizontal(row.left.as_str(), horizontal_offset, left_width.saturating_sub(5));
+    let right_text = clip_horizontal(row.right.as_str(), horizontal_offset, right_width.saturating_sub(5));
 
     let mut left_style = Style::default().fg(GITHUB_MUTED);
     let mut right_style = Style::default().fg(GITHUB_MUTED);
@@ -2017,6 +2069,28 @@ fn ellipsize(input: &str, max: usize) -> String {
     }
     let head = input.chars().take(max.saturating_sub(3)).collect::<String>();
     format!("{}...", head)
+}
+
+fn clip_horizontal(input: &str, offset: usize, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let chars = input.chars().collect::<Vec<char>>();
+    if chars.len() <= max && offset == 0 {
+        return input.to_string();
+    }
+    if offset >= chars.len() {
+        return String::new();
+    }
+    let visible = chars
+        .iter()
+        .skip(offset)
+        .take(max)
+        .collect::<String>();
+    if visible.chars().count() <= max {
+        return visible;
+    }
+    ellipsize(visible.as_str(), max)
 }
 
 fn comment_header(index: usize, author: &str, created_at: Option<&str>, selected: bool) -> Line<'static> {

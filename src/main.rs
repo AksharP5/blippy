@@ -5,6 +5,7 @@ mod config;
 mod discovery;
 mod git;
 mod github;
+mod keybinds;
 mod markdown;
 mod pr_diff;
 mod repo_index;
@@ -204,6 +205,7 @@ fn run_app(
 
         match event::read()? {
             Event::Key(key) => app.on_key(key),
+            Event::Mouse(mouse) => app.on_mouse(mouse),
             _ => {}
         }
 
