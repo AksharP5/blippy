@@ -650,7 +650,6 @@ impl App {
                     self.pending_d = false;
                 } else {
                     self.pending_d = true;
-                    self.status = "Press d again to close issue".to_string();
                 }
             }
             KeyCode::Char('G') => self.jump_bottom(),
