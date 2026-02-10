@@ -315,22 +315,72 @@ impl GitHubClient {
         path: &str,
         line: i64,
         side: &str,
+        start_line: Option<i64>,
+        start_side: Option<&str>,
         body: &str,
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}/comments",
             API_BASE, owner, repo, pull_number
         );
+        let mut payload = serde_json::json!({
+            "body": body,
+            "commit_id": commit_id,
+            "path": path,
+            "line": line,
+            "side": side,
+        });
+        if let Some(start_line) = start_line {
+            payload["start_line"] = serde_json::json!(start_line);
+        }
+        if let Some(start_side) = start_side {
+            payload["start_side"] = serde_json::json!(start_side);
+        }
+
         self.client
             .post(url)
             .bearer_auth(&self.token)
-            .json(&serde_json::json!({
-                "body": body,
-                "commit_id": commit_id,
-                "path": path,
-                "line": line,
-                "side": side,
-            }))
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn update_pull_request_review_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        comment_id: i64,
+        body: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/comments/{}",
+            API_BASE, owner, repo, comment_id
+        );
+        self.client
+            .patch(url)
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"body": body}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn delete_pull_request_review_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        comment_id: i64,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/comments/{}",
+            API_BASE, owner, repo, comment_id
+        );
+        self.client
+            .delete(url)
+            .bearer_auth(&self.token)
             .send()
             .await?
             .error_for_status()?;
