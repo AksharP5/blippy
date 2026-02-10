@@ -7,15 +7,21 @@ use ratatui::Frame;
 use crate::app::{App, EditorMode, Focus, IssueFilter, View};
 use crate::markdown;
 
-const GITHUB_BLUE: Color = Color::Rgb(88, 166, 255);
-const GITHUB_GREEN: Color = Color::Rgb(63, 185, 80);
-const GITHUB_RED: Color = Color::Rgb(248, 81, 73);
-const GITHUB_BG: Color = Color::Rgb(13, 17, 23);
-const GITHUB_PANEL: Color = Color::Rgb(22, 27, 34);
-const GITHUB_PANEL_ALT: Color = Color::Rgb(28, 34, 43);
-const GITHUB_MUTED: Color = Color::Rgb(139, 148, 158);
-const PANEL_BORDER: Color = Color::Rgb(48, 54, 61);
-const SELECT_BG: Color = Color::Rgb(33, 58, 89);
+const GITHUB_BLUE: Color = Color::Rgb(122, 162, 247);
+const GITHUB_GREEN: Color = Color::Rgb(158, 206, 106);
+const GITHUB_RED: Color = Color::Rgb(247, 118, 142);
+const GITHUB_YELLOW: Color = Color::Rgb(224, 175, 104);
+const GITHUB_BG: Color = Color::Rgb(26, 27, 38);
+const GITHUB_PANEL: Color = Color::Rgb(36, 40, 59);
+const GITHUB_PANEL_ALT: Color = Color::Rgb(41, 46, 66);
+const GITHUB_MUTED: Color = Color::Rgb(86, 95, 137);
+const PANEL_BORDER: Color = Color::Rgb(65, 72, 104);
+const FOCUS_BORDER: Color = Color::Rgb(125, 207, 255);
+const POPUP_BORDER: Color = Color::Rgb(187, 154, 247);
+const POPUP_BG: Color = Color::Rgb(31, 35, 53);
+const OVERLAY_BG: Color = Color::Rgb(20, 22, 34);
+const TEXT_PRIMARY: Color = Color::Rgb(192, 202, 245);
+const SELECT_BG: Color = Color::Rgb(51, 63, 104);
 const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
@@ -56,7 +62,7 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
             Span::raw("  "),
             Span::styled(
                 format!("{} shown", visible_count),
-                Style::default().fg(Color::White),
+                Style::default().fg(TEXT_PRIMARY),
             ),
             Span::raw("  "),
             Span::styled(
@@ -84,7 +90,7 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
                     .border_style(Style::default().fg(PANEL_BORDER))
                     .style(Style::default().bg(GITHUB_PANEL)),
             )
-            .style(Style::default().fg(Color::White)),
+            .style(Style::default().fg(TEXT_PRIMARY)),
         header_area,
     );
     if app.repo_search_mode() {
@@ -116,7 +122,7 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
                 let line1 = Line::from(vec![
                     Span::styled(
                         format!("{} / {}", repo.owner, repo.repo),
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                        Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
                     ),
                     Span::raw("  "),
                     Span::styled(
@@ -131,13 +137,13 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
             .collect()
     };
     let list = List::new(items)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
                 .bg(SELECT_BG)
-                .fg(Color::White)
+                .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -167,13 +173,13 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
         })
         .collect::<Vec<ListItem>>();
     let list = List::new(items)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
                 .bg(SELECT_BG)
-                .fg(Color::White)
+                .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -276,7 +282,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     frame.render_widget(
         Paragraph::new(header_text)
             .block(header_block)
-            .style(Style::default().fg(Color::White)),
+            .style(Style::default().fg(TEXT_PRIMARY)),
         header_area,
     );
     if app.issue_search_mode() {
@@ -296,7 +302,8 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
 
     let list_focused = app.focus() == Focus::IssuesList;
     let preview_focused = app.focus() == Focus::IssuesPreview;
-    let block = panel_block_with_border(list_title, focus_border(list_focused));
+    let list_block_title = focused_title(list_title, list_focused);
+    let block = panel_block_with_border(list_block_title.as_str(), focus_border(list_focused));
     let items = if visible_issues.is_empty() {
         if app.issues().is_empty() {
             let message = if item_mode == crate::app::WorkItemMode::PullRequests {
@@ -355,13 +362,13 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
             .collect()
     };
     let list = List::new(items)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
                 .bg(SELECT_BG)
-                .fg(Color::White)
+                .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -439,10 +446,14 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_issues_preview_max_scroll(max_scroll);
     let scroll = app.issues_preview_scroll();
-    let preview_block = panel_block_with_border(&preview_title, focus_border(preview_focused));
+    let preview_block_title = focused_title(preview_title.as_str(), preview_focused);
+    let preview_block = panel_block_with_border(
+        preview_block_title.as_str(),
+        focus_border(preview_focused),
+    );
     let preview_widget = Paragraph::new(Text::from(preview_lines))
         .block(preview_block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL_ALT))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL_ALT))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(preview_widget, preview_area);
@@ -523,7 +534,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     frame.render_widget(
         Paragraph::new(header_text)
             .block(header_block)
-            .style(Style::default().fg(Color::White)),
+            .style(Style::default().fg(TEXT_PRIMARY)),
         sections[0].inner(Margin {
             vertical: 0,
             horizontal: 2,
@@ -571,7 +582,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                 side_lines.push(Line::from(vec![
                     Span::styled(file_status_symbol(file.status.as_str()), Style::default().fg(file_status_color(file.status.as_str()))),
                     Span::raw(" "),
-                    Span::styled(file.filename.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled(file.filename.clone(), Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
                 ]));
                 side_lines.push(
                     Line::from(format!(
@@ -639,9 +650,10 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     app.set_issue_detail_max_scroll(max_scroll);
     let scroll = app.issue_detail_scroll();
 
+    let body_title = focused_title("Issue description", body_focused);
     let body_block = Block::default()
         .title(Line::from(Span::styled(
-            "Issue description",
+            body_title,
             Style::default()
                 .fg(if body_focused { GITHUB_BLUE } else { GITHUB_MUTED })
                 .add_modifier(Modifier::BOLD),
@@ -656,7 +668,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         }));
     let body_paragraph = Paragraph::new(Text::from(body_lines))
         .block(body_block)
-        .style(Style::default().fg(Color::White).bg(if body_focused {
+        .style(Style::default().fg(TEXT_PRIMARY).bg(if body_focused {
             GITHUB_PANEL_ALT
         } else {
             GITHUB_PANEL
@@ -677,6 +689,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     } else {
         format!("Recent comments ({})", app.comments().len())
     };
+    let side_title = focused_title(side_title.as_str(), comments_focused);
     let side_block = Block::default()
         .title(Line::from(Span::styled(
             side_title,
@@ -698,7 +711,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .border_style(Style::default().fg(side_border));
     let side_paragraph = Paragraph::new(Text::from(side_lines))
         .block(side_block)
-        .style(Style::default().fg(Color::White).bg(if comments_focused {
+        .style(Style::default().fg(TEXT_PRIMARY).bg(if comments_focused {
             GITHUB_PANEL_ALT
         } else {
             GITHUB_PANEL
@@ -750,7 +763,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     frame.render_widget(
         Paragraph::new(header)
             .block(header_block)
-            .style(Style::default().fg(Color::White)),
+            .style(Style::default().fg(TEXT_PRIMARY)),
         sections[0].inner(Margin {
             vertical: 0,
             horizontal: 2,
@@ -790,7 +803,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
 
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(paragraph, content_area);
@@ -800,13 +813,19 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
 
 fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     draw_modal_background(frame, app, area);
-    let popup = centered_rect(70, 70, area);
+    let popup = centered_rect(74, 76, area);
     frame.render_widget(Clear, popup);
+    let shell = popup_block("Label Picker");
+    let popup_inner = shell.inner(popup).inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    frame.render_widget(shell, popup);
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
-        .split(popup);
+        .split(popup_inner);
 
     let filtered = app.filtered_label_indices();
     let query_display = if app.label_query().trim().is_empty() {
@@ -828,7 +847,8 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             Style::default().fg(GITHUB_MUTED),
         )),
     ]))
-    .block(panel_block("Labels"));
+    .block(panel_block_with_border("Labels", POPUP_BORDER))
+    .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG));
     frame.render_widget(header, sections[0]);
 
     let items = if filtered.is_empty() {
@@ -852,13 +872,13 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             .collect::<Vec<ListItem>>()
     };
     let list = List::new(items)
-        .block(panel_block("Available labels"))
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .block(panel_block_with_border("Available labels", POPUP_BORDER))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG))
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
                 .bg(SELECT_BG)
-                .fg(Color::White)
+                .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -880,19 +900,25 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     };
     let footer = Paragraph::new(selection)
         .style(Style::default().fg(GITHUB_MUTED))
-        .block(panel_block("Selection"));
+        .block(panel_block_with_border("Selection", POPUP_BORDER));
     frame.render_widget(footer, sections[2]);
 }
 
 fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     draw_modal_background(frame, app, area);
-    let popup = centered_rect(70, 70, area);
+    let popup = centered_rect(74, 76, area);
     frame.render_widget(Clear, popup);
+    let shell = popup_block("Assignee Picker");
+    let popup_inner = shell.inner(popup).inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    frame.render_widget(shell, popup);
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
-        .split(popup);
+        .split(popup_inner);
 
     let filtered = app.filtered_assignee_indices();
     let query_display = if app.assignee_query().trim().is_empty() {
@@ -914,7 +940,8 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
             Style::default().fg(GITHUB_MUTED),
         )),
     ]))
-    .block(panel_block("Assignees"));
+    .block(panel_block_with_border("Assignees", POPUP_BORDER))
+    .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG));
     frame.render_widget(header, sections[0]);
 
     let items = if filtered.is_empty() {
@@ -938,13 +965,13 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
             .collect::<Vec<ListItem>>()
     };
     let list = List::new(items)
-        .block(panel_block("Available assignees"))
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .block(panel_block_with_border("Available assignees", POPUP_BORDER))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG))
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
                 .bg(SELECT_BG)
-                .fg(Color::White)
+                .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -969,7 +996,7 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
     };
     let footer = Paragraph::new(selection)
         .style(Style::default().fg(GITHUB_MUTED))
-        .block(panel_block("Selection"));
+        .block(panel_block_with_border("Selection", POPUP_BORDER));
     frame.render_widget(footer, sections[2]);
 }
 
@@ -990,13 +1017,13 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::R
     items.push(ListItem::new("Add preset..."));
 
     let list = List::new(items)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
                 .bg(SELECT_BG)
-                .fg(Color::White)
+                .fg(TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -1021,7 +1048,7 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rec
     let text = app.editor().name();
     let paragraph = Paragraph::new(text)
         .block(block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, input_area);
 
@@ -1061,7 +1088,7 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
     let text = app.editor().text();
     let paragraph = Paragraph::new(text)
         .block(block)
-        .style(Style::default().fg(Color::White).bg(GITHUB_PANEL))
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, editor_area);
 
@@ -1109,23 +1136,49 @@ fn panel_block(title: &str) -> Block<'_> {
     panel_block_with_border(title, PANEL_BORDER)
 }
 
+fn popup_block(title: &str) -> Block<'_> {
+    Block::default()
+        .title(Line::from(Span::styled(
+            format!(" {} ", title),
+            Style::default()
+                .fg(POPUP_BORDER)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .style(Style::default().bg(POPUP_BG).fg(TEXT_PRIMARY))
+        .border_style(Style::default().fg(POPUP_BORDER))
+}
+
+fn focused_title(title: &str, focused: bool) -> String {
+    if focused {
+        return format!("> {}", title);
+    }
+    title.to_string()
+}
+
 fn panel_block_with_border(title: &str, border: Color) -> Block<'_> {
+    let title_color = if border == FOCUS_BORDER {
+        FOCUS_BORDER
+    } else {
+        GITHUB_BLUE
+    };
     Block::default()
         .title(Line::from(Span::styled(
             title.to_string(),
             Style::default()
-                .fg(GITHUB_BLUE)
+                .fg(title_color)
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .style(Style::default().bg(GITHUB_PANEL).fg(Color::White))
+        .style(Style::default().bg(GITHUB_PANEL).fg(TEXT_PRIMARY))
         .border_style(Style::default().fg(border))
 }
 
 fn focus_border(focused: bool) -> Color {
     if focused {
-        GITHUB_BLUE
+        FOCUS_BORDER
     } else {
         PANEL_BORDER
     }
@@ -1142,6 +1195,7 @@ fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             draw_status(frame, app, footer);
         }
     }
+    frame.render_widget(Block::default().style(Style::default().bg(OVERLAY_BG)), area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
@@ -1332,10 +1386,10 @@ fn file_status_color(status: &str) -> Color {
         return GITHUB_RED;
     }
     if status.eq_ignore_ascii_case("renamed") {
-        return Color::Rgb(33, 136, 255);
+        return GITHUB_BLUE;
     }
     if status.eq_ignore_ascii_case("modified") {
-        return Color::Rgb(210, 153, 34);
+        return GITHUB_YELLOW;
     }
     GITHUB_MUTED
 }
@@ -1346,7 +1400,7 @@ fn pending_issue_span(pending: Option<&str>) -> Span<'static> {
             format!("  [{}]", label),
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Rgb(210, 153, 34))
+                .bg(GITHUB_YELLOW)
                 .add_modifier(Modifier::BOLD),
         ),
         None => Span::raw(String::new()),
@@ -1390,7 +1444,7 @@ fn comment_header(index: usize, author: &str, created_at: Option<&str>, selected
     spans.push(Span::styled(
         format!("{}  {}", index, author),
         Style::default()
-            .fg(if selected { Color::White } else { GITHUB_BLUE })
+            .fg(if selected { TEXT_PRIMARY } else { GITHUB_BLUE })
             .add_modifier(Modifier::BOLD),
     ));
     if let Some(date) = format_comment_date(created_at) {
