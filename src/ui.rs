@@ -1755,6 +1755,10 @@ fn render_split_diff_row(
     let mut left_style = Style::default().fg(GITHUB_MUTED);
     let mut right_style = Style::default().fg(GITHUB_MUTED);
     match row.kind {
+        DiffKind::Changed => {
+            left_style = Style::default().fg(GITHUB_RED);
+            right_style = Style::default().fg(GITHUB_GREEN);
+        }
         DiffKind::Added => {
             right_style = Style::default().fg(GITHUB_GREEN);
         }
@@ -1832,7 +1836,7 @@ fn render_split_diff_row(
 }
 
 fn render_inline_review_comment(
-    comment_id: i64,
+    _comment_id: i64,
     author: &str,
     body: &str,
     side: ReviewSide,
@@ -1847,13 +1851,12 @@ fn render_inline_review_comment(
         ReviewSide::Right => "new",
     };
     let prefix = if selected { ">" } else { " " };
-    let resolved_label = if resolved { "resolved" } else { "open" };
+    let resolved_label = if resolved { "done" } else { "open" };
     let text = format!(
-        "{} [{} {} #{} @{}] {}",
+        "{} [{} {} @{}] {}",
         prefix,
         side_label,
         resolved_label,
-        comment_id,
         author,
         ellipsize(body, width.saturating_sub(24))
     );
@@ -1862,10 +1865,11 @@ fn render_inline_review_comment(
     let muted_right = " ".repeat(right_width);
     let comment_width = width.saturating_sub(8);
     let text = ellipsize(text.as_str(), comment_width);
+    let comment_style = Style::default().fg(POPUP_BORDER).bg(GITHUB_PANEL_ALT);
     let mut line = if side == ReviewSide::Left {
         let left_text = format!("{:width$}", text, width = left_width);
         Line::from(vec![
-            Span::styled(left_text, Style::default().fg(POPUP_BORDER)),
+            Span::styled(left_text, comment_style),
             Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
             Span::styled(muted_right, Style::default().fg(GITHUB_MUTED)),
         ])
@@ -1874,7 +1878,7 @@ fn render_inline_review_comment(
         Line::from(vec![
             Span::styled(muted_left, Style::default().fg(GITHUB_MUTED)),
             Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
-            Span::styled(right_text, Style::default().fg(POPUP_BORDER)),
+            Span::styled(right_text, comment_style),
         ])
     };
     if selected {

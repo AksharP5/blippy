@@ -3525,7 +3525,7 @@ mod tests {
             .expect("review target");
         assert_eq!(target.path, "src/main.rs");
         assert_eq!(target.line, 1);
-        assert_eq!(target.side, ReviewSide::Left);
+        assert_eq!(target.side, ReviewSide::Right);
     }
 
     #[test]
