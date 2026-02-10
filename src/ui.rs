@@ -10,7 +10,7 @@ use crate::markdown;
 const GITHUB_BLUE: Color = Color::Rgb(122, 162, 247);
 const GITHUB_GREEN: Color = Color::Rgb(158, 206, 106);
 const GITHUB_RED: Color = Color::Rgb(247, 118, 142);
-const GITHUB_YELLOW: Color = Color::Rgb(224, 175, 104);
+const GITHUB_VIOLET: Color = Color::Rgb(197, 160, 255);
 const GITHUB_BG: Color = Color::Rgb(26, 27, 38);
 const GITHUB_PANEL: Color = Color::Rgb(36, 40, 59);
 const GITHUB_PANEL_ALT: Color = Color::Rgb(41, 46, 66);
@@ -33,6 +33,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         View::Issues => draw_issues(frame, app, area),
         View::IssueDetail => draw_issue_detail(frame, app, area),
         View::IssueComments => draw_issue_comments(frame, app, area),
+        View::PullRequestFiles => draw_pull_request_files(frame, app, area),
         View::LabelPicker => draw_label_picker(frame, app, area),
         View::AssigneePicker => draw_assignee_picker(frame, app, area),
         View::CommentPresetPicker => draw_preset_picker(frame, app, area),
@@ -594,10 +595,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                 );
                 if let Some(patch) = file.patch.as_deref() {
                     for patch_line in patch.lines().take(8) {
-                        side_lines.push(
-                            Line::from(format!("  {}", ellipsize(patch_line, 100)))
-                                .style(Style::default().fg(GITHUB_MUTED)),
-                        );
+                        side_lines.push(styled_patch_line(patch_line, 100));
                     }
                     if patch.lines().count() > 8 {
                         side_lines.push(
@@ -650,7 +648,12 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     app.set_issue_detail_max_scroll(max_scroll);
     let scroll = app.issue_detail_scroll();
 
-    let body_title = focused_title("Issue description", body_focused);
+    let base_body_title = if is_pr {
+        "Pull request description"
+    } else {
+        "Issue description"
+    };
+    let body_title = focused_title(base_body_title, body_focused);
     let body_block = Block::default()
         .title(Line::from(Span::styled(
             body_title,
@@ -803,6 +806,112 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
 
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
+        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(paragraph, content_area);
+
+    draw_status(frame, app, footer);
+}
+
+fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+    let (main, footer) = split_area(area);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(main);
+    let content_area = sections[1].inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
+
+    let title = match app.current_issue_row() {
+        Some(issue) => format!("PR changes #{}", issue.number),
+        None => "PR changes".to_string(),
+    };
+    let header = Text::from(vec![
+        Line::from(Span::styled(
+            title.clone(),
+            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "j/k scroll • Esc back",
+            Style::default().fg(GITHUB_MUTED),
+        )),
+    ]);
+    let header_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(PANEL_BORDER))
+        .style(Style::default().bg(GITHUB_PANEL));
+    frame.render_widget(
+        Paragraph::new(header)
+            .block(header_block)
+            .style(Style::default().fg(TEXT_PRIMARY)),
+        sections[0].inner(Margin {
+            vertical: 0,
+            horizontal: 2,
+        }),
+    );
+
+    let mut lines = Vec::new();
+    if app.pull_request_files_syncing() {
+        lines.push(Line::from("Loading pull request changes..."));
+    } else if app.pull_request_files().is_empty() {
+        lines.push(Line::from("No changed files cached yet. Press r to refresh."));
+    } else {
+        for file in app.pull_request_files() {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    file_status_symbol(file.status.as_str()),
+                    Style::default().fg(file_status_color(file.status.as_str())),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    file.filename.clone(),
+                    Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(
+                Line::from(vec![
+                    Span::raw("  +"),
+                    Span::styled(
+                        file.additions.to_string(),
+                        Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  -"),
+                    Span::styled(
+                        file.deletions.to_string(),
+                        Style::default().fg(GITHUB_RED).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(file.status.clone(), Style::default().fg(GITHUB_MUTED)),
+                ])
+                .style(Style::default().fg(GITHUB_MUTED)),
+            );
+            if let Some(patch) = file.patch.as_deref() {
+                for patch_line in patch.lines() {
+                    lines.push(styled_patch_line(patch_line, 120));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "  (binary or patch not available)",
+                    Style::default().fg(GITHUB_MUTED),
+                )));
+            }
+            lines.push(Line::from(""));
+        }
+    }
+
+    let content_width = content_area.width.saturating_sub(2);
+    let viewport_height = content_area.height.saturating_sub(2) as usize;
+    let total_lines = wrapped_line_count(&lines, content_width);
+    let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
+    app.set_issue_recent_comments_max_scroll(max_scroll);
+    let scroll = app.issue_recent_comments_scroll();
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(panel_block_with_border("Pull request changes", focus_border(true)))
         .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
@@ -1189,6 +1298,7 @@ fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         View::Issues => draw_issues(frame, app, area),
         View::IssueDetail => draw_issue_detail(frame, app, area),
         View::IssueComments => draw_issue_comments(frame, app, area),
+        View::PullRequestFiles => draw_pull_request_files(frame, app, area),
         _ => {
             let (main, footer) = split_area(area);
             frame.render_widget(panel_block("Glyph"), main);
@@ -1245,15 +1355,58 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+h/j/k/l pane • j/k move/scroll • Ctrl+u/d page • gg/G top/bottom • / search • p issues/prs • 1/2 tabs • f cycle • a assignee filter • l labels • Shift+A assignees • m comment • u reopen • dd close issue/pr • v checkout PR • r refresh • o browser • Ctrl+G repos • q quit"
-                .to_string()
+            let reviewing_pr = app
+                .selected_issue_row()
+                .is_some_and(|issue| issue.is_pr)
+                || app.work_item_mode() == crate::app::WorkItemMode::PullRequests;
+            let mut parts = vec![
+                "Ctrl+h/j/k/l pane",
+                "j/k move/scroll",
+                "Ctrl+u/d page",
+                "gg/G top/bottom",
+                "/ search",
+                "p issues/prs",
+                "1/2 tabs",
+                "f cycle",
+                "a assignee filter",
+                "l labels",
+                "Shift+A assignees",
+                "m comment",
+                "r refresh",
+                "o browser",
+                "Ctrl+G repos",
+                "q quit",
+            ];
+            if reviewing_pr {
+                parts.insert(11, "u reopen pull request");
+                parts.insert(12, "dd close pull request");
+                parts.insert(13, "v checkout PR");
+            } else {
+                parts.insert(11, "u reopen issue");
+                parts.insert(12, "dd close issue");
+            }
+            parts.join(" • ")
         }
         View::IssueDetail => {
-            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • dd close issue/pr • l labels • Shift+A assignees • m comment • u reopen • c all comments • v checkout PR • Esc back • r sync issue+comments • o browser • Ctrl+G repos • q quit"
+            let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
+            if is_pr {
+                return "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • Enter on changes pane opens full changes • c all comments • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • Ctrl+G repos • q quit"
+                    .to_string();
+            }
+            "Ctrl+h/j/k/l pane • j/k scroll • Ctrl+u/d page • gg/G top/bottom • c all comments • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • Ctrl+G repos • q quit"
                 .to_string()
         }
         View::IssueComments => {
-            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • dd close issue/pr • l labels • Shift+A assignees • m comment • u reopen • v checkout PR • Esc back • r sync issue+comments • o browser • q quit"
+            let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
+            if is_pr {
+                return "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r sync • o browser • q quit"
+                    .to_string();
+            }
+            "j/k next/prev comment • Ctrl+u/d page • gg/G top/bottom • e edit comment • x delete comment • l labels • Shift+A assignees • m comment • u reopen issue • dd close issue • Esc back • r sync • o browser • q quit"
+                .to_string()
+        }
+        View::PullRequestFiles => {
+            "j/k scroll changes • Ctrl+u/d page • gg/G top/bottom • l labels • Shift+A assignees • m comment • u reopen pull request • dd close pull request • v checkout PR • Esc back • r refresh changes • o browser • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -1362,6 +1515,38 @@ fn issue_state_color(state: &str) -> Color {
     GITHUB_GREEN
 }
 
+fn styled_patch_line(line: &str, width: usize) -> Line<'static> {
+    let trimmed = ellipsize(line, width);
+    if trimmed.starts_with("+++") || trimmed.starts_with("---") {
+        return Line::from(Span::styled(
+            format!("  {}", trimmed),
+            Style::default().fg(FOCUS_BORDER).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if trimmed.starts_with("@@") {
+        return Line::from(Span::styled(
+            format!("  {}", trimmed),
+            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if trimmed.starts_with('+') {
+        return Line::from(Span::styled(
+            format!("  {}", trimmed),
+            Style::default().fg(GITHUB_GREEN),
+        ));
+    }
+    if trimmed.starts_with('-') {
+        return Line::from(Span::styled(
+            format!("  {}", trimmed),
+            Style::default().fg(GITHUB_RED),
+        ));
+    }
+    Line::from(Span::styled(
+        format!("  {}", trimmed),
+        Style::default().fg(GITHUB_MUTED),
+    ))
+}
+
 fn file_status_symbol(status: &str) -> &'static str {
     if status.eq_ignore_ascii_case("added") {
         return "+";
@@ -1389,7 +1574,7 @@ fn file_status_color(status: &str) -> Color {
         return GITHUB_BLUE;
     }
     if status.eq_ignore_ascii_case("modified") {
-        return GITHUB_YELLOW;
+        return GITHUB_VIOLET;
     }
     GITHUB_MUTED
 }
@@ -1400,7 +1585,7 @@ fn pending_issue_span(pending: Option<&str>) -> Span<'static> {
             format!("  [{}]", label),
             Style::default()
                 .fg(Color::Black)
-                .bg(GITHUB_YELLOW)
+                .bg(GITHUB_VIOLET)
                 .add_modifier(Modifier::BOLD),
         ),
         None => Span::raw(String::new()),

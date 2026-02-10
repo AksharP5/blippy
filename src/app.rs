@@ -14,6 +14,7 @@ pub enum View {
     Issues,
     IssueDetail,
     IssueComments,
+    PullRequestFiles,
     LabelPicker,
     AssigneePicker,
     CommentPresetPicker,
@@ -682,7 +683,7 @@ impl App {
             }
             KeyCode::Char('r')
                 if key.modifiers.is_empty()
-                    && matches!(self.view, View::IssueDetail | View::IssueComments) =>
+                    && matches!(self.view, View::IssueDetail | View::IssueComments | View::PullRequestFiles) =>
             {
                 self.request_comment_sync();
                 self.request_sync();
@@ -701,7 +702,7 @@ impl App {
             }
             KeyCode::Char('d')
                 if key.modifiers.is_empty()
-                    && matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                    && matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles) =>
             {
                 let has_issue = if self.view == View::Issues {
                     !self.filtered_issue_indices.is_empty()
@@ -731,7 +732,10 @@ impl App {
                 self.set_view(View::IssueComments);
             }
             KeyCode::Char('m')
-                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                if matches!(
+                    self.view,
+                    View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                ) =>
             {
                 self.action = Some(AppAction::AddIssueComment);
             }
@@ -742,18 +746,27 @@ impl App {
                 self.action = Some(AppAction::DeleteIssueComment);
             }
             KeyCode::Char('l')
-                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                if matches!(
+                    self.view,
+                    View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                ) =>
             {
                 self.action = Some(AppAction::EditLabels);
             }
             KeyCode::Char('A')
                 if key.modifiers.contains(KeyModifiers::SHIFT)
-                    && matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                    && matches!(
+                        self.view,
+                        View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                    ) =>
             {
                 self.action = Some(AppAction::EditAssignees);
             }
             KeyCode::Char('u')
-                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                if matches!(
+                    self.view,
+                    View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                ) =>
             {
                 self.action = Some(AppAction::ReopenIssue);
             }
@@ -777,10 +790,16 @@ impl App {
             KeyCode::Char('b') if self.view == View::IssueComments => {
                 self.set_view(View::IssueDetail);
             }
+            KeyCode::Char('b') if self.view == View::PullRequestFiles => {
+                self.set_view(View::IssueDetail);
+            }
             KeyCode::Esc if self.view == View::IssueDetail => {
                 self.set_view(View::Issues);
             }
             KeyCode::Esc if self.view == View::IssueComments => {
+                self.set_view(View::IssueDetail);
+            }
+            KeyCode::Esc if self.view == View::PullRequestFiles => {
                 self.set_view(View::IssueDetail);
             }
             KeyCode::Esc if self.view == View::CommentPresetPicker => {
@@ -793,12 +812,18 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
             KeyCode::Enter => self.activate_selection(),
             KeyCode::Char('o')
-                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                if matches!(
+                    self.view,
+                    View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                ) =>
             {
                 self.action = Some(AppAction::OpenInBrowser);
             }
             KeyCode::Char('v')
-                if matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments) =>
+                if matches!(
+                    self.view,
+                    View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                ) =>
             {
                 self.action = Some(AppAction::CheckoutPullRequest);
             }
@@ -1282,6 +1307,10 @@ impl App {
             View::IssueComments => {
                 self.jump_prev_comment();
             }
+            View::PullRequestFiles => {
+                self.issue_recent_comments_scroll =
+                    self.issue_recent_comments_scroll.saturating_sub(1);
+            }
             View::CommentPresetPicker => {
                 if self.preset_choice > 0 {
                     self.preset_choice -= 1;
@@ -1354,6 +1383,11 @@ impl App {
             View::IssueComments => {
                 self.jump_next_comment();
             }
+            View::PullRequestFiles => {
+                let max = self.issue_recent_comments_max_scroll;
+                self.issue_recent_comments_scroll =
+                    self.issue_recent_comments_scroll.saturating_add(1).min(max);
+            }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
                 if self.preset_choice + 1 < max {
@@ -1402,10 +1436,17 @@ impl App {
                 self.action = Some(AppAction::PickIssue);
             }
             View::IssueDetail => {
+                if self.current_view_issue_is_pull_request()
+                    && self.focus == Focus::IssueRecentComments
+                {
+                    self.set_view(View::PullRequestFiles);
+                    return;
+                }
                 self.reset_issue_comments_scroll();
                 self.set_view(View::IssueComments);
             }
             View::IssueComments => {}
+            View::PullRequestFiles => {}
             View::CommentPresetPicker => {
                 self.action = Some(AppAction::PickPreset);
             }
@@ -1438,6 +1479,9 @@ impl App {
             View::IssueComments => {
                 self.selected_comment = 0;
                 self.issue_comments_scroll = 0;
+            }
+            View::PullRequestFiles => {
+                self.issue_recent_comments_scroll = 0;
             }
             View::CommentPresetPicker => self.preset_choice = 0,
             View::LabelPicker => {
@@ -1490,6 +1534,9 @@ impl App {
                     self.selected_comment = self.comments.len() - 1;
                 }
                 self.issue_comments_scroll = self.issue_comments_max_scroll;
+            }
+            View::PullRequestFiles => {
+                self.issue_recent_comments_scroll = self.issue_recent_comments_max_scroll;
             }
             View::CommentPresetPicker => {
                 let max = self.preset_items_len();
@@ -2191,6 +2238,56 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::CloseIssue));
+    }
+
+    #[test]
+    fn enter_on_pr_changes_pane_opens_full_pr_changes_view() {
+        let mut app = App::new(Config::default());
+        app.set_issues(vec![IssueRow {
+            id: 43,
+            repo_id: 1,
+            number: 8,
+            state: "open".to_string(),
+            title: "PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        }]);
+        app.set_current_issue(43, 8);
+        app.set_view(View::IssueDetail);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.view(), View::PullRequestFiles);
+    }
+
+    #[test]
+    fn enter_on_issue_side_pane_opens_comments_view() {
+        let mut app = App::new(Config::default());
+        app.set_issues(vec![IssueRow {
+            id: 44,
+            repo_id: 1,
+            number: 9,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        }]);
+        app.set_current_issue(44, 9);
+        app.set_view(View::IssueDetail);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.view(), View::IssueComments);
     }
 
     #[test]

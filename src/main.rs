@@ -153,7 +153,10 @@ fn run_app(
 
     loop {
         if app.view() != last_view {
-            if matches!(last_view, View::IssueDetail | View::IssueComments) {
+            if matches!(
+                last_view,
+                View::IssueDetail | View::IssueComments | View::PullRequestFiles
+            ) {
                 app.set_comment_syncing(false);
                 app.set_pull_request_files_syncing(false);
             }
@@ -721,7 +724,7 @@ fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<String>)> {
             .map(|issue| (issue.id, issue.number, Some(issue.state.clone())));
     }
 
-    if matches!(app.view(), View::IssueDetail | View::IssueComments) {
+    if matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
         if let Some(issue) = app.current_issue_row() {
             return Some((issue.id, issue.number, Some(issue.state.clone())));
         }
@@ -737,7 +740,10 @@ fn selected_issue_labels(app: &App) -> Option<String> {
     if app.view() == View::Issues {
         return app.selected_issue_row().map(|issue| issue.labels.clone());
     }
-    if matches!(app.view(), View::IssueDetail | View::IssueComments | View::CommentEditor) {
+    if matches!(
+        app.view(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles | View::CommentEditor
+    ) {
         return app.current_issue_row().map(|issue| issue.labels.clone());
     }
     None
@@ -747,7 +753,10 @@ fn selected_issue_assignees(app: &App) -> Option<String> {
     if app.view() == View::Issues {
         return app.selected_issue_row().map(|issue| issue.assignees.clone());
     }
-    if matches!(app.view(), View::IssueDetail | View::IssueComments | View::CommentEditor) {
+    if matches!(
+        app.view(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles | View::CommentEditor
+    ) {
         return app.current_issue_row().map(|issue| issue.assignees.clone());
     }
     None
@@ -807,6 +816,7 @@ fn issue_number(app: &App) -> Option<i64> {
     match app.view() {
         View::IssueDetail
         | View::IssueComments
+        | View::PullRequestFiles
         | View::LabelPicker
         | View::AssigneePicker
         | View::CommentPresetPicker
@@ -1221,7 +1231,10 @@ fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>)
 }
 
 fn maybe_start_issue_poll(app: &mut App, last_poll: &mut Instant) {
-    if !matches!(app.view(), View::Issues | View::IssueDetail | View::IssueComments) {
+    if !matches!(
+        app.view(),
+        View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+    ) {
         return;
     }
 
@@ -1239,7 +1252,7 @@ fn maybe_start_comment_poll(
     event_tx: Sender<AppEvent>,
     last_poll: &mut Instant,
 ) -> Result<()> {
-    if !matches!(app.view(), View::IssueDetail | View::IssueComments) {
+    if !matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
         return Ok(());
     }
 
@@ -1276,7 +1289,7 @@ fn maybe_start_pull_request_files_sync(
     token: &str,
     event_tx: Sender<AppEvent>,
 ) -> Result<()> {
-    if !matches!(app.view(), View::IssueDetail | View::IssueComments) {
+    if !matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
         return Ok(());
     }
     if app.pull_request_files_syncing() {

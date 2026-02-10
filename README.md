@@ -89,17 +89,18 @@ cargo test
 - m: add comment to selected issue
 - l: edit issue labels (comma-separated)
 - Shift+A: edit issue assignees
-- u: reopen selected closed issue
+- u: reopen selected closed issue/pull request
 - Enter: open selected issue
 - r: refresh issues/comments
 - o: open in browser
 - v: checkout selected pull request locally (`gh pr checkout`)
 - dd: close selected issue/pull request with preset
-- c: open full comments from issue detail
+- c: open full comments from detail view
 - j/k: jump next/previous comment in full comments view
 - e: edit selected comment in full comments view
 - x: delete selected comment in full comments view
 - PR detail: right pane shows changed files + patch snippets (no checkout required)
+- Enter on PR changes pane: open full-screen PR changes viewer
 - b or Esc: back from issue detail/comments
 - comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
 

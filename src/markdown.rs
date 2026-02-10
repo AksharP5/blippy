@@ -2,6 +2,14 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+const TEXT: Color = Color::Rgb(192, 202, 245);
+const MUTED: Color = Color::Rgb(134, 143, 188);
+const ACCENT_PURPLE: Color = Color::Rgb(187, 154, 247);
+const ACCENT_BLUE: Color = Color::Rgb(122, 162, 247);
+const ACCENT_CYAN: Color = Color::Rgb(125, 207, 255);
+const ACCENT_GREEN: Color = Color::Rgb(158, 206, 106);
+const CODE_BG: Color = Color::Rgb(31, 35, 53);
+
 #[derive(Debug, Default)]
 pub struct RenderedMarkdown {
     pub lines: Vec<Line<'static>>,
@@ -57,13 +65,16 @@ impl RenderState {
             Event::End(tag) => self.end_tag(tag),
             Event::Text(text) => self.push_text(text.as_ref()),
             Event::Code(text) => {
-                let style = Style::default().fg(Color::Yellow).bg(Color::Rgb(32, 32, 32));
+                let style = Style::default().fg(ACCENT_CYAN).bg(CODE_BG);
                 self.push_span(Span::styled(text.into_string(), style));
             }
             Event::SoftBreak | Event::HardBreak => self.new_line(),
             Event::Rule => {
                 self.new_line();
-                self.push_text("----------------------------------------");
+                self.push_span(Span::styled(
+                    "----------------------------------------".to_string(),
+                    Style::default().fg(MUTED),
+                ));
                 self.new_line();
             }
             Event::TaskListMarker(checked) => {
@@ -100,14 +111,14 @@ impl RenderState {
             Tag::CodeBlock(_) => {
                 self.in_code_block = true;
                 self.new_line();
-                self.push_style(Style::default().fg(Color::Yellow).bg(Color::Rgb(20, 20, 20)));
+                self.push_style(Style::default().fg(ACCENT_GREEN).bg(CODE_BG));
             }
             Tag::Link { dest_url, .. } => {
                 self.links.push(dest_url.to_string());
                 self.active_link = Some(self.links.len());
                 self.push_style(
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(ACCENT_CYAN)
                         .add_modifier(Modifier::UNDERLINED),
                 );
             }
@@ -149,7 +160,7 @@ impl RenderState {
                 if let Some(index) = self.active_link.take() {
                     self.push_span(Span::styled(
                         format!("[{}]", index),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(ACCENT_CYAN),
                     ));
                 }
             }
@@ -233,10 +244,10 @@ impl RenderState {
 
 fn heading_style(level: HeadingLevel) -> Style {
     match level {
-        HeadingLevel::H1 => Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-        HeadingLevel::H2 => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        HeadingLevel::H3 => Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-        _ => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        HeadingLevel::H1 => Style::default().fg(ACCENT_PURPLE).add_modifier(Modifier::BOLD),
+        HeadingLevel::H2 => Style::default().fg(ACCENT_BLUE).add_modifier(Modifier::BOLD),
+        HeadingLevel::H3 => Style::default().fg(ACCENT_CYAN).add_modifier(Modifier::BOLD),
+        _ => Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
     }
 }
 
