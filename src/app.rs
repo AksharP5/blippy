@@ -2128,7 +2128,7 @@ impl App {
 
     fn toggle_pull_request_visual_mode(&mut self) {
         if self.pull_request_review_focus != PullRequestReviewFocus::Diff {
-            return;
+            self.pull_request_review_focus = PullRequestReviewFocus::Diff;
         }
         if self.pull_request_visual_mode {
             self.pull_request_visual_mode = false;

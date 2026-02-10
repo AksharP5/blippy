@@ -73,6 +73,7 @@ pub struct ApiPullRequestReviewComment {
     pub is_resolved: bool,
     pub path: String,
     pub line: Option<i64>,
+    pub original_line: Option<i64>,
     pub side: Option<String>,
     pub body: Option<String>,
     pub created_at: Option<String>,
@@ -299,7 +300,8 @@ impl GitHubClient {
                           databaseId
                           path
                           line
-                          side
+                          originalLine
+                          diffSide
                           body
                           createdAt
                           author {
@@ -374,8 +376,11 @@ impl GitHubClient {
                         is_resolved,
                         path,
                         line: comment.get("line").and_then(serde_json::Value::as_i64),
+                        original_line: comment
+                            .get("originalLine")
+                            .and_then(serde_json::Value::as_i64),
                         side: comment
-                            .get("side")
+                            .get("diffSide")
                             .and_then(serde_json::Value::as_str)
                             .map(ToString::to_string),
                         body: comment

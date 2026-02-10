@@ -2428,7 +2428,7 @@ fn start_pull_request_review_comments_sync(
         let mapped = comments
             .into_iter()
             .filter_map(|comment| {
-                let line = comment.line?;
+                let line = comment.line.or(comment.original_line)?;
                 let side_value = comment.side.unwrap_or_else(|| "RIGHT".to_string());
                 let side = if side_value.eq_ignore_ascii_case("left") {
                     ReviewSide::Left
