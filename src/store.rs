@@ -177,7 +177,10 @@ pub fn update_comment_body_by_id(_conn: &Connection, _comment_id: i64, _body: &s
 
 pub fn delete_comment_by_id(_conn: &Connection, _comment_id: i64) -> Result<()> {
     _conn.execute("DELETE FROM comments WHERE id = ?1", [_comment_id])?;
-    _conn.execute("DELETE FROM fts_content WHERE comment_id = ?1", [_comment_id])?;
+    _conn.execute(
+        "DELETE FROM fts_content WHERE comment_id = ?1",
+        [_comment_id],
+    )?;
     Ok(())
 }
 
@@ -600,7 +603,10 @@ fn add_comment_accessed_column(conn: &Connection) -> Result<()> {
         }
     }
 
-    let result = conn.execute("ALTER TABLE comments ADD COLUMN last_accessed_at INTEGER", []);
+    let result = conn.execute(
+        "ALTER TABLE comments ADD COLUMN last_accessed_at INTEGER",
+        [],
+    );
     if let Err(error) = result {
         let message = error.to_string();
         if message.contains("duplicate column") {
@@ -637,9 +643,9 @@ fn add_issue_comments_count_column(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        comments_for_issue, delete_db_at, get_repo_by_slug, list_issues, list_local_repos,
-        open_db_at, search_issues, upsert_comment, upsert_issue, upsert_local_repo, upsert_repo,
-        CommentRow, IssueRow, LocalRepoRow, RepoRow,
+        CommentRow, IssueRow, LocalRepoRow, RepoRow, comments_for_issue, delete_db_at,
+        get_repo_by_slug, list_issues, list_local_repos, open_db_at, search_issues, upsert_comment,
+        upsert_issue, upsert_local_repo, upsert_repo,
     };
     use std::fs;
     use std::path::PathBuf;

@@ -164,13 +164,11 @@ fn parse_hunk_header(line: &str) -> Option<(i64, i64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_patch, DiffKind};
+    use super::{DiffKind, parse_patch};
 
     #[test]
     fn parse_patch_extracts_line_numbers_and_kinds() {
-        let rows = parse_patch(Some(
-            "@@ -10,2 +20,3 @@\n line\n-old\n+new\n+more\n",
-        ));
+        let rows = parse_patch(Some("@@ -10,2 +20,3 @@\n line\n-old\n+new\n+more\n"));
 
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].kind, DiffKind::Hunk);

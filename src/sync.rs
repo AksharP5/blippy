@@ -238,9 +238,7 @@ where
         let next_cursor = latest_seen_updated_at
             .as_deref()
             .or(previous_cursor.as_deref());
-        let next_etag = first_page_etag
-            .as_deref()
-            .or(previous_etag.as_deref());
+        let next_etag = first_page_etag.as_deref().or(previous_etag.as_deref());
         crate::store::update_repo_sync_state(_conn, repo_row.id, next_cursor, next_etag)?;
     }
 
@@ -250,8 +248,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo, sync_repo_with_progress,
-        GitHubApi,
+        GitHubApi, map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo,
+        sync_repo_with_progress,
     };
     use crate::github::{ApiComment, ApiIssue, ApiIssuesPageResult, ApiLabel, ApiRepo, ApiUser};
     use crate::store::{comments_for_issue, get_repo_by_slug, list_issues, open_db_at};
@@ -465,7 +463,10 @@ mod tests {
                 return Ok(ApiIssuesPageResult::NotModified);
             }
 
-            if self.fail_issue_page.is_some_and(|fail_page| fail_page == page) {
+            if self
+                .fail_issue_page
+                .is_some_and(|fail_page| fail_page == page)
+            {
                 return Err(anyhow::anyhow!("rate limit"));
             }
 
@@ -717,12 +718,17 @@ mod tests {
             not_modified_when_etag_matches: false,
         };
 
-        sync_repo(&client, &conn, "acme", "glyph").await.expect("sync");
+        sync_repo(&client, &conn, "acme", "glyph")
+            .await
+            .expect("sync");
 
         let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
             .expect("lookup")
             .expect("repo");
-        assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-03T00:00:00Z"));
+        assert_eq!(
+            stored_repo.updated_at.as_deref(),
+            Some("2024-01-03T00:00:00Z")
+        );
         assert_eq!(stored_repo.etag.as_deref(), Some("etag-cursor"));
 
         drop(conn);
@@ -772,7 +778,10 @@ mod tests {
         let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
             .expect("lookup")
             .expect("repo");
-        assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-05T00:00:00Z"));
+        assert_eq!(
+            stored_repo.updated_at.as_deref(),
+            Some("2024-01-05T00:00:00Z")
+        );
         assert_eq!(stored_repo.etag.as_deref(), Some("etag-stable"));
 
         drop(conn);
@@ -880,7 +889,10 @@ mod tests {
         let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
             .expect("lookup")
             .expect("repo");
-        assert_eq!(stored_repo.updated_at.as_deref(), Some("2024-01-01T00:00:00Z"));
+        assert_eq!(
+            stored_repo.updated_at.as_deref(),
+            Some("2024-01-01T00:00:00Z")
+        );
         assert_eq!(stored_repo.etag.as_deref(), Some("etag-old"));
 
         drop(conn);

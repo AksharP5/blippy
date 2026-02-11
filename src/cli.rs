@@ -32,15 +32,11 @@ pub fn parse_args(_args: &[String]) -> Result<Option<CliCommand>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, CliCommand};
+    use super::{CliCommand, parse_args};
 
     #[test]
     fn parse_args_returns_auth_reset() {
-        let args = vec![
-            "glyph".to_string(),
-            "auth".to_string(),
-            "reset".to_string(),
-        ];
+        let args = vec!["glyph".to_string(), "auth".to_string(), "reset".to_string()];
 
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, Some(CliCommand::AuthReset));

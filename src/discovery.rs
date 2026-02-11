@@ -8,7 +8,11 @@ pub struct DiscoveredRepo {
     pub path: PathBuf,
 }
 
-pub fn quick_scan(_cwd: &Path, _max_depth: usize, _parent_depth: usize) -> Result<Vec<DiscoveredRepo>> {
+pub fn quick_scan(
+    _cwd: &Path,
+    _max_depth: usize,
+    _parent_depth: usize,
+) -> Result<Vec<DiscoveredRepo>> {
     let mut roots = Vec::new();
     for (idx, ancestor) in _cwd.ancestors().enumerate() {
         if idx > _parent_depth {
@@ -54,7 +58,11 @@ pub fn home_dir() -> Option<PathBuf> {
     None
 }
 
-fn scan_repos_in_dir(_root: &Path, _max_depth: usize, _excluded: &HashSet<&'static str>) -> Result<Vec<DiscoveredRepo>> {
+fn scan_repos_in_dir(
+    _root: &Path,
+    _max_depth: usize,
+    _excluded: &HashSet<&'static str>,
+) -> Result<Vec<DiscoveredRepo>> {
     let mut repos = Vec::new();
     if !_root.exists() {
         return Ok(repos);
@@ -142,7 +150,7 @@ fn canonical_key(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{excluded_dirs, scan_repos_in_dir, DiscoveredRepo};
+    use super::{DiscoveredRepo, excluded_dirs, scan_repos_in_dir};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,13 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
 use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
 use crate::keybinds::Keybinds;
 use crate::markdown;
-use crate::pr_diff::{parse_patch, DiffKind};
+use crate::pr_diff::{DiffKind, parse_patch};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
+use anyhow::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -622,10 +622,11 @@ impl App {
     }
 
     pub fn select_issue_by_number(&mut self, issue_number: i64) -> bool {
-        let selected = self
-            .filtered_issue_indices
-            .iter()
-            .position(|index| self.issues.get(*index).is_some_and(|issue| issue.number == issue_number));
+        let selected = self.filtered_issue_indices.iter().position(|index| {
+            self.issues
+                .get(*index)
+                .is_some_and(|issue| issue.number == issue_number)
+        });
         let selected = match selected {
             Some(selected) => selected,
             None => return false,
@@ -661,6 +662,10 @@ impl App {
 
     pub fn comment_defaults(&self) -> &[CommentDefault] {
         &self.config.comment_defaults
+    }
+
+    pub fn theme_name(&self) -> Option<&str> {
+        self.config.theme.as_deref()
     }
 
     pub fn selected_repo(&self) -> usize {
@@ -700,7 +705,6 @@ impl App {
     pub fn issue_comments_scroll(&self) -> u16 {
         self.issue_comments_scroll
     }
-
 
     pub fn issue_recent_comments_scroll(&self) -> u16 {
         self.issue_recent_comments_scroll
@@ -894,8 +898,11 @@ impl App {
     ) {
         self.pull_request_id = pull_request_id;
         self.pull_request_viewed_files = viewed_files;
-        self.pull_request_viewed_files
-            .retain(|file_path| self.pull_request_files.iter().any(|file| file.filename == *file_path));
+        self.pull_request_viewed_files.retain(|file_path| {
+            self.pull_request_files
+                .iter()
+                .any(|file| file.filename == *file_path)
+        });
     }
 
     pub fn pull_request_review_comments(&self) -> &[PullRequestReviewComment] {
@@ -1019,11 +1026,7 @@ impl App {
         comments.first().copied()
     }
 
-    pub fn update_pull_request_review_comment_body_by_id(
-        &mut self,
-        comment_id: i64,
-        body: &str,
-    ) {
+    pub fn update_pull_request_review_comment_body_by_id(&mut self, comment_id: i64, body: &str) {
         for comment in &mut self.pull_request_review_comments {
             if comment.id != comment_id {
                 continue;
@@ -1138,7 +1141,10 @@ impl App {
             }
             KeyCode::Char('r')
                 if key.modifiers.is_empty()
-                    && matches!(self.view, View::IssueDetail | View::IssueComments | View::PullRequestFiles) =>
+                    && matches!(
+                        self.view,
+                        View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                    ) =>
             {
                 self.request_comment_sync();
                 self.request_sync();
@@ -1158,7 +1164,13 @@ impl App {
             }
             KeyCode::Char('d')
                 if key.modifiers.is_empty()
-                    && matches!(self.view, View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles) =>
+                    && matches!(
+                        self.view,
+                        View::Issues
+                            | View::IssueDetail
+                            | View::IssueComments
+                            | View::PullRequestFiles
+                    ) =>
             {
                 let has_issue = if self.view == View::Issues {
                     !self.filtered_issue_indices.is_empty()
@@ -1210,8 +1222,7 @@ impl App {
             KeyCode::Char('x') if self.view == View::PullRequestFiles => {
                 self.action = Some(AppAction::DeletePullRequestReviewComment);
             }
-            KeyCode::Char('R') if self.view == View::PullRequestFiles =>
-            {
+            KeyCode::Char('R') if self.view == View::PullRequestFiles => {
                 self.action = Some(AppAction::ResolvePullRequestReviewComment);
             }
             KeyCode::Char('n') if self.view == View::PullRequestFiles => {
@@ -1232,8 +1243,7 @@ impl App {
                     self.sync_selected_pull_request_review_comment();
                 }
             }
-            KeyCode::Char('V') if self.view == View::PullRequestFiles =>
-            {
+            KeyCode::Char('V') if self.view == View::PullRequestFiles => {
                 self.toggle_pull_request_visual_mode();
             }
             KeyCode::Char('[') if self.view == View::PullRequestFiles => {
@@ -1263,7 +1273,10 @@ impl App {
                 if key.modifiers.contains(KeyModifiers::SHIFT)
                     && matches!(
                         self.view,
-                        View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+                        View::Issues
+                            | View::IssueDetail
+                            | View::IssueComments
+                            | View::PullRequestFiles
                     ) =>
             {
                 self.action = Some(AppAction::EditAssignees);
@@ -1397,7 +1410,10 @@ impl App {
             }
             return;
         }
-        if matches!(target, MouseTarget::RemoteListPane | MouseTarget::RemoteRow(_)) {
+        if matches!(
+            target,
+            MouseTarget::RemoteListPane | MouseTarget::RemoteRow(_)
+        ) {
             if self.view == View::RemoteChooser {
                 if down {
                     self.move_selection_down();
@@ -1413,22 +1429,13 @@ impl App {
         ) {
             self.focus = Focus::IssuesList;
         }
-        if matches!(
-            target,
-            MouseTarget::IssuesPreviewPane
-        ) {
+        if matches!(target, MouseTarget::IssuesPreviewPane) {
             self.focus = Focus::IssuesPreview;
         }
-        if matches!(
-            target,
-            MouseTarget::IssueBodyPane
-        ) {
+        if matches!(target, MouseTarget::IssueBodyPane) {
             self.focus = Focus::IssueBody;
         }
-        if matches!(
-            target,
-            MouseTarget::IssueSidePane
-        ) {
+        if matches!(target, MouseTarget::IssueSidePane) {
             self.focus = Focus::IssueRecentComments;
         }
         if matches!(
@@ -1512,7 +1519,8 @@ impl App {
             }
             Some(MouseTarget::IssueRow(index)) => {
                 self.focus = Focus::IssuesList;
-                self.selected_issue = index.min(self.filtered_issue_indices.len().saturating_sub(1));
+                self.selected_issue =
+                    index.min(self.filtered_issue_indices.len().saturating_sub(1));
                 self.issues_preview_scroll = 0;
                 self.action = Some(AppAction::PickIssue);
             }
@@ -1540,7 +1548,8 @@ impl App {
             }
             Some(MouseTarget::PullRequestFileRow(index)) => {
                 self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
-                self.selected_pull_request_file = index.min(self.pull_request_files.len().saturating_sub(1));
+                self.selected_pull_request_file =
+                    index.min(self.pull_request_files.len().saturating_sub(1));
                 self.selected_pull_request_diff_line = 0;
                 self.pull_request_diff_scroll = 0;
                 self.pull_request_diff_horizontal_scroll = 0;
@@ -1634,9 +1643,11 @@ impl App {
         self.rebuild_issue_filter();
         self.selected_issue = selected_issue_number
             .and_then(|number| {
-                self.filtered_issue_indices
-                    .iter()
-                    .position(|index| self.issues.get(*index).is_some_and(|issue| issue.number == number))
+                self.filtered_issue_indices.iter().position(|index| {
+                    self.issues
+                        .get(*index)
+                        .is_some_and(|issue| issue.number == number)
+                })
             })
             .unwrap_or(0);
         if let Some(number) = current_issue_number {
@@ -1660,7 +1671,11 @@ impl App {
             return;
         }
         self.selected_comment = selected_comment_id
-            .and_then(|comment_id| self.comments.iter().position(|comment| comment.id == comment_id))
+            .and_then(|comment_id| {
+                self.comments
+                    .iter()
+                    .position(|comment| comment.id == comment_id)
+            })
             .unwrap_or(0);
         self.issue_comments_scroll = 0;
         self.issue_recent_comments_scroll = 0;
@@ -1713,9 +1728,9 @@ impl App {
             self.pull_request_visual_anchor = None;
         }
         if focus == PullRequestReviewFocus::Diff {
-            let selected_file = self.selected_pull_request_file_row().map(|file| {
-                (file.filename.clone(), file.patch.clone())
-            });
+            let selected_file = self
+                .selected_pull_request_file_row()
+                .map(|file| (file.filename.clone(), file.patch.clone()));
             if let Some((file_path, patch)) = selected_file {
                 let rows = parse_patch(patch.as_deref());
                 self.selected_pull_request_diff_line = self.nearest_visible_pull_request_diff_line(
@@ -1744,13 +1759,16 @@ impl App {
     }
 
     fn scroll_pull_request_diff_horizontal(&mut self, delta: i16) {
-        if self.view != View::PullRequestFiles || self.pull_request_review_focus != PullRequestReviewFocus::Diff {
+        if self.view != View::PullRequestFiles
+            || self.pull_request_review_focus != PullRequestReviewFocus::Diff
+        {
             return;
         }
         let amount = delta.unsigned_abs();
         if delta.is_negative() {
-            self.pull_request_diff_horizontal_scroll =
-                self.pull_request_diff_horizontal_scroll.saturating_sub(amount);
+            self.pull_request_diff_horizontal_scroll = self
+                .pull_request_diff_horizontal_scroll
+                .saturating_sub(amount);
             return;
         }
         self.pull_request_diff_horizontal_scroll = self
@@ -2026,12 +2044,7 @@ impl App {
         self.set_view(View::CommentEditor);
     }
 
-    pub fn open_comment_edit_editor(
-        &mut self,
-        return_view: View,
-        comment_id: i64,
-        body: &str,
-    ) {
+    pub fn open_comment_edit_editor(&mut self, return_view: View, comment_id: i64, body: &str) {
         self.editing_comment_id = Some(comment_id);
         self.editing_pull_request_review_comment_id = None;
         self.pending_review_target = None;
@@ -2356,9 +2369,7 @@ impl App {
                 let next = current.saturating_sub(1);
                 self.selected_assignee_option = filtered[next];
             }
-            View::CommentPresetName
-            | View::CommentEditor
-                => {}
+            View::CommentPresetName | View::CommentEditor => {}
         }
     }
 
@@ -2472,9 +2483,7 @@ impl App {
                 let next = (current + 1).min(filtered.len() - 1);
                 self.selected_assignee_option = filtered[next];
             }
-            View::CommentPresetName
-            | View::CommentEditor
-                => {}
+            View::CommentPresetName | View::CommentEditor => {}
         }
     }
 
@@ -2577,9 +2586,7 @@ impl App {
                     self.selected_assignee_option = *index;
                 }
             }
-            View::CommentPresetName
-            | View::CommentEditor
-                => {}
+            View::CommentPresetName | View::CommentEditor => {}
         }
     }
 
@@ -2636,10 +2643,9 @@ impl App {
                     .map(|file| (file.filename.clone(), file.patch.clone()));
                 if let Some((file_path, patch)) = selected_file {
                     let rows = parse_patch(patch.as_deref());
-                    if let Some(last_visible) = self.last_visible_pull_request_diff_line(
-                        file_path.as_str(),
-                        rows.as_slice(),
-                    ) {
+                    if let Some(last_visible) = self
+                        .last_visible_pull_request_diff_line(file_path.as_str(), rows.as_slice())
+                    {
                         self.selected_pull_request_diff_line = last_visible;
                     }
                     self.pull_request_diff_scroll = self.pull_request_diff_max_scroll;
@@ -2664,9 +2670,7 @@ impl App {
                     self.selected_assignee_option = *filtered.last().unwrap_or(&0);
                 }
             }
-            View::CommentPresetName
-            | View::CommentEditor
-                => {}
+            View::CommentPresetName | View::CommentEditor => {}
         }
     }
 
@@ -2688,7 +2692,8 @@ impl App {
             return;
         }
         self.selected_comment += 1;
-        self.issue_comments_scroll = offsets[self.selected_comment].min(self.issue_comments_max_scroll);
+        self.issue_comments_scroll =
+            offsets[self.selected_comment].min(self.issue_comments_max_scroll);
         self.status = format!("Comment {}/{}", self.selected_comment + 1, offsets.len());
     }
 
@@ -2872,11 +2877,7 @@ impl App {
 
         if collapsed {
             let hidden_lines = hunk_range.end.saturating_sub(hunk_range.start);
-            self.status = format!(
-                "Collapsed {} lines in {}",
-                hidden_lines,
-                file_path
-            );
+            self.status = format!("Collapsed {} lines in {}", hidden_lines, file_path);
             return;
         }
         self.status = format!("Expanded section in {}", file_path);
@@ -3014,7 +3015,9 @@ impl App {
     }
 
     fn sync_selected_pull_request_review_comment(&mut self) {
-        let comment_id = self.selected_pull_request_review_comment().map(|comment| comment.id);
+        let comment_id = self
+            .selected_pull_request_review_comment()
+            .map(|comment| comment.id);
         self.selected_pull_request_review_comment_id = comment_id;
     }
 
@@ -3110,7 +3113,10 @@ impl App {
                 return Self::issue_has_assignee(issue.assignees.as_str(), value);
             }
             if let Some(value) = token.strip_prefix('#') {
-                return value.parse::<i64>().ok().is_some_and(|parsed| issue.number == parsed);
+                return value
+                    .parse::<i64>()
+                    .ok()
+                    .is_some_and(|parsed| issue.number == parsed);
             }
             title.contains(token)
                 || body.contains(token)
@@ -3257,54 +3263,52 @@ impl App {
                 KeyCode::Char(ch) => self.comment_editor.append_name(ch),
                 _ => {}
             },
-            View::CommentEditor => {
-                match key.code {
-                    KeyCode::Esc => {
-                        self.editing_comment_id = None;
-                        self.editing_pull_request_review_comment_id = None;
-                        self.pending_review_target = None;
-                        self.set_view(self.editor_cancel_view);
-                    }
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        if self.comment_editor.mode().allows_multiline() {
-                            self.comment_editor.newline()
-                        }
-                    }
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
-                        if self.comment_editor.mode().allows_multiline() {
-                            self.comment_editor.newline()
-                        }
-                    }
-                    KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if self.comment_editor.mode().allows_multiline() {
-                            self.comment_editor.newline()
-                        }
-                    }
-                    KeyCode::Enter => match self.comment_editor.mode() {
-                        EditorMode::CloseIssue => {
-                            self.action = Some(AppAction::SubmitComment);
-                        }
-                        EditorMode::AddComment => {
-                            self.action = Some(AppAction::SubmitIssueComment);
-                        }
-                        EditorMode::EditComment => {
-                            self.action = Some(AppAction::SubmitEditedComment);
-                        }
-                        EditorMode::AddPullRequestReviewComment => {
-                            self.action = Some(AppAction::SubmitPullRequestReviewComment);
-                        }
-                        EditorMode::EditPullRequestReviewComment => {
-                            self.action = Some(AppAction::SubmitEditedPullRequestReviewComment);
-                        }
-                        EditorMode::AddPreset => {
-                            self.action = Some(AppAction::SavePreset);
-                        }
-                    },
-                    KeyCode::Backspace => self.comment_editor.backspace_text(),
-                    KeyCode::Char(ch) => self.comment_editor.append_text(ch),
-                    _ => {}
+            View::CommentEditor => match key.code {
+                KeyCode::Esc => {
+                    self.editing_comment_id = None;
+                    self.editing_pull_request_review_comment_id = None;
+                    self.pending_review_target = None;
+                    self.set_view(self.editor_cancel_view);
                 }
-            }
+                KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    if self.comment_editor.mode().allows_multiline() {
+                        self.comment_editor.newline()
+                    }
+                }
+                KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.comment_editor.mode().allows_multiline() {
+                        self.comment_editor.newline()
+                    }
+                }
+                KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if self.comment_editor.mode().allows_multiline() {
+                        self.comment_editor.newline()
+                    }
+                }
+                KeyCode::Enter => match self.comment_editor.mode() {
+                    EditorMode::CloseIssue => {
+                        self.action = Some(AppAction::SubmitComment);
+                    }
+                    EditorMode::AddComment => {
+                        self.action = Some(AppAction::SubmitIssueComment);
+                    }
+                    EditorMode::EditComment => {
+                        self.action = Some(AppAction::SubmitEditedComment);
+                    }
+                    EditorMode::AddPullRequestReviewComment => {
+                        self.action = Some(AppAction::SubmitPullRequestReviewComment);
+                    }
+                    EditorMode::EditPullRequestReviewComment => {
+                        self.action = Some(AppAction::SubmitEditedPullRequestReviewComment);
+                    }
+                    EditorMode::AddPreset => {
+                        self.action = Some(AppAction::SavePreset);
+                    }
+                },
+                KeyCode::Backspace => self.comment_editor.backspace_text(),
+                KeyCode::Char(ch) => self.comment_editor.append_text(ch),
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -3336,7 +3340,8 @@ impl App {
                 self.issues_preview_scroll = 0;
                 self.update_search_status();
             }
-            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
             {
                 self.issue_query.push(ch);
                 self.rebuild_issue_filter();
@@ -3374,7 +3379,9 @@ impl App {
                 self.rebuild_repo_picker_filter();
                 self.selected_repo = 0;
             }
-            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
                 self.repo_query.push(ch);
                 self.rebuild_repo_picker_filter();
                 self.selected_repo = 0;
@@ -3419,7 +3426,9 @@ impl App {
                     return true;
                 }
             }
-            KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
                 if self.view == View::LabelPicker {
                     if self.label_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
                         return false;
@@ -3639,27 +3648,13 @@ impl CommentEditorState {
 #[cfg(test)]
 mod tests {
     use super::{
-        App,
-        AppAction,
-        Focus,
-        IssueFilter,
-        MouseTarget,
-        PullRequestFile,
-        PullRequestReviewFocus,
-        PullRequestReviewTarget,
-        ReviewSide,
-        View,
-        WorkItemMode,
+        App, AppAction, Focus, IssueFilter, MouseTarget, PullRequestFile, PullRequestReviewFocus,
+        PullRequestReviewTarget, ReviewSide, View, WorkItemMode,
     };
     use crate::config::Config;
     use crate::store::{CommentRow, IssueRow, LocalRepoRow};
     use crossterm::event::{
-        KeyCode,
-        KeyEvent,
-        KeyModifiers,
-        MouseButton,
-        MouseEvent,
-        MouseEventKind,
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
 
     #[test]
@@ -3969,7 +3964,10 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT));
 
-        assert_eq!(app.take_action(), Some(AppAction::OpenLinkedPullRequestInTui));
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::OpenLinkedPullRequestInTui)
+        );
     }
 
     #[test]
@@ -4167,7 +4165,10 @@ mod tests {
 
         assert_eq!(app.issue_query(), "bug");
         assert_eq!(app.issues_for_view().len(), 1);
-        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(101));
+        assert_eq!(
+            app.selected_issue_row().map(|issue| issue.number),
+            Some(101)
+        );
 
         app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(!app.issue_search_mode());
@@ -4200,7 +4201,10 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE));
 
         assert_eq!(app.issues_for_view().len(), 1);
-        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(777));
+        assert_eq!(
+            app.selected_issue_row().map(|issue| issue.number),
+            Some(777)
+        );
     }
 
     #[test]
@@ -4331,7 +4335,10 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
 
-        assert_eq!(app.take_action(), Some(AppAction::TogglePullRequestFileViewed));
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::TogglePullRequestFileViewed)
+        );
     }
 
     #[test]
@@ -4506,7 +4513,10 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         });
 
-        assert_eq!(app.pull_request_review_focus(), PullRequestReviewFocus::Diff);
+        assert_eq!(
+            app.pull_request_review_focus(),
+            PullRequestReviewFocus::Diff
+        );
         assert_eq!(app.pull_request_review_side(), ReviewSide::Left);
         assert_eq!(app.selected_pull_request_diff_line(), 2);
     }
@@ -4596,9 +4606,7 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
         app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
 
-        let target = app
-            .selected_pull_request_review_target()
-            .expect("target");
+        let target = app.selected_pull_request_review_target().expect("target");
         assert_eq!(target.side, ReviewSide::Right);
         assert_eq!(target.start_line, Some(1));
         assert_eq!(target.line, 2);
@@ -5208,7 +5216,10 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
-        assert_eq!(app.selected_labels(), vec!["bug".to_string(), "docs".to_string()]);
+        assert_eq!(
+            app.selected_labels(),
+            vec!["bug".to_string(), "docs".to_string()]
+        );
     }
 
     #[test]
@@ -5280,7 +5291,11 @@ mod tests {
         let mut app = App::new(Config::default());
         app.open_label_picker(
             View::Issues,
-            vec!["bug".to_string(), "customer".to_string(), "docs".to_string()],
+            vec![
+                "bug".to_string(),
+                "customer".to_string(),
+                "docs".to_string(),
+            ],
             "",
         );
 
@@ -5289,7 +5304,6 @@ mod tests {
         assert_eq!(app.label_query(), "c");
         assert_eq!(app.filtered_label_indices().len(), 2);
         assert_eq!(app.selected_label_option(), app.filtered_label_indices()[0]);
-
     }
 
     #[test]

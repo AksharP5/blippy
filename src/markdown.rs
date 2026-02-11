@@ -30,10 +30,7 @@ pub fn render(input: &str) -> RenderedMarkdown {
 
     let links = state.links.clone();
     let lines = state.finish();
-    RenderedMarkdown {
-        lines,
-        links,
-    }
+    RenderedMarkdown { lines, links }
 }
 
 struct RenderState {
@@ -94,7 +91,9 @@ impl RenderState {
             }
             Tag::Emphasis => self.push_style(Style::default().add_modifier(Modifier::ITALIC)),
             Tag::Strong => self.push_style(Style::default().add_modifier(Modifier::BOLD)),
-            Tag::Strikethrough => self.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT)),
+            Tag::Strikethrough => {
+                self.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT))
+            }
             Tag::BlockQuote(_) => {
                 self.blockquote_depth += 1;
                 self.new_line();
@@ -106,7 +105,10 @@ impl RenderState {
             }
             Tag::Item => {
                 self.new_line();
-                self.push_text(&format!("{}- ", "  ".repeat(self.list_depth.saturating_sub(1))));
+                self.push_text(&format!(
+                    "{}- ",
+                    "  ".repeat(self.list_depth.saturating_sub(1))
+                ));
             }
             Tag::CodeBlock(_) => {
                 self.in_code_block = true;
@@ -172,12 +174,7 @@ impl RenderState {
     }
 
     fn finish(mut self) -> Vec<Line<'static>> {
-        while self
-            .lines
-            .last()
-            .is_some_and(|line| line.is_empty())
-            && self.lines.len() > 1
-        {
+        while self.lines.last().is_some_and(|line| line.is_empty()) && self.lines.len() > 1 {
             self.lines.pop();
         }
 
@@ -188,11 +185,7 @@ impl RenderState {
     }
 
     fn ensure_blank_line(&mut self) {
-        if self
-            .lines
-            .last()
-            .is_some_and(|line| !line.is_empty())
-        {
+        if self.lines.last().is_some_and(|line| !line.is_empty()) {
             self.new_line();
         }
     }
@@ -217,10 +210,7 @@ impl RenderState {
     }
 
     fn current_style(&self) -> Style {
-        self.style_stack
-            .last()
-            .copied()
-            .unwrap_or_default()
+        self.style_stack.last().copied().unwrap_or_default()
     }
 
     fn push_text(&mut self, text: &str) {
@@ -244,9 +234,15 @@ impl RenderState {
 
 fn heading_style(level: HeadingLevel) -> Style {
     match level {
-        HeadingLevel::H1 => Style::default().fg(ACCENT_PURPLE).add_modifier(Modifier::BOLD),
-        HeadingLevel::H2 => Style::default().fg(ACCENT_BLUE).add_modifier(Modifier::BOLD),
-        HeadingLevel::H3 => Style::default().fg(ACCENT_CYAN).add_modifier(Modifier::BOLD),
+        HeadingLevel::H1 => Style::default()
+            .fg(ACCENT_PURPLE)
+            .add_modifier(Modifier::BOLD),
+        HeadingLevel::H2 => Style::default()
+            .fg(ACCENT_BLUE)
+            .add_modifier(Modifier::BOLD),
+        HeadingLevel::H3 => Style::default()
+            .fg(ACCENT_CYAN)
+            .add_modifier(Modifier::BOLD),
         _ => Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
     }
 }

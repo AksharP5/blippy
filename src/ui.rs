@@ -1,60 +1,49 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::Frame;
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
+};
 
 use crate::app::{
-    App,
-    EditorMode,
-    Focus,
-    IssueFilter,
-    MouseTarget,
-    PullRequestReviewFocus,
-    ReviewSide,
-    View,
+    App, EditorMode, Focus, IssueFilter, MouseTarget, PullRequestReviewFocus, ReviewSide, View,
 };
 use crate::markdown;
-use crate::pr_diff::{parse_patch, DiffKind};
+use crate::pr_diff::{DiffKind, parse_patch};
+use crate::theme::{ThemePalette, resolve_theme};
 
-const GITHUB_BLUE: Color = Color::Rgb(65, 105, 225);
-const GITHUB_GREEN: Color = Color::Rgb(74, 222, 128);
-const GITHUB_RED: Color = Color::Rgb(234, 92, 124);
-const GITHUB_VIOLET: Color = Color::Rgb(145, 171, 255);
-const GITHUB_BG: Color = Color::Rgb(0, 0, 0);
-const GITHUB_PANEL: Color = Color::Rgb(0, 0, 0);
-const GITHUB_PANEL_ALT: Color = Color::Rgb(0, 0, 0);
-const GITHUB_MUTED: Color = Color::Rgb(124, 138, 175);
-const PANEL_BORDER: Color = Color::Rgb(35, 50, 88);
-const FOCUS_BORDER: Color = Color::Rgb(105, 138, 255);
-const POPUP_BORDER: Color = Color::Rgb(128, 160, 255);
-const POPUP_BG: Color = Color::Rgb(0, 0, 0);
-const OVERLAY_BG: Color = Color::Rgb(0, 0, 0);
-const TEXT_PRIMARY: Color = Color::Rgb(226, 235, 255);
-const SELECT_BG: Color = Color::Rgb(12, 24, 54);
-const VISUAL_RANGE_BG: Color = Color::Rgb(7, 15, 36);
 const RECENT_COMMENTS_HEIGHT: u16 = 10;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
+    let theme = resolve_theme(app.theme_name());
     let area = frame.area();
     app.clear_mouse_regions();
-    frame.render_widget(Block::default().style(Style::default().bg(GITHUB_BG)), area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.bg_app)),
+        area,
+    );
     match app.view() {
-        View::RepoPicker => draw_repo_picker(frame, app, area),
-        View::RemoteChooser => draw_remote_chooser(frame, app, area),
-        View::Issues => draw_issues(frame, app, area),
-        View::IssueDetail => draw_issue_detail(frame, app, area),
-        View::IssueComments => draw_issue_comments(frame, app, area),
-        View::PullRequestFiles => draw_pull_request_files(frame, app, area),
-        View::LabelPicker => draw_label_picker(frame, app, area),
-        View::AssigneePicker => draw_assignee_picker(frame, app, area),
-        View::CommentPresetPicker => draw_preset_picker(frame, app, area),
-        View::CommentPresetName => draw_preset_name(frame, app, area),
-        View::CommentEditor => draw_comment_editor(frame, app, area),
+        View::RepoPicker => draw_repo_picker(frame, app, area, theme),
+        View::RemoteChooser => draw_remote_chooser(frame, app, area, theme),
+        View::Issues => draw_issues(frame, app, area, theme),
+        View::IssueDetail => draw_issue_detail(frame, app, area, theme),
+        View::IssueComments => draw_issue_comments(frame, app, area, theme),
+        View::PullRequestFiles => draw_pull_request_files(frame, app, area, theme),
+        View::LabelPicker => draw_label_picker(frame, app, area, theme),
+        View::AssigneePicker => draw_assignee_picker(frame, app, area, theme),
+        View::CommentPresetPicker => draw_preset_picker(frame, app, area, theme),
+        View::CommentPresetName => draw_preset_name(frame, app, area, theme),
+        View::CommentEditor => draw_comment_editor(frame, app, area, theme),
     }
 }
 
-fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_repo_picker(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -71,23 +60,28 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
     let total_count = app.repos().len();
     let header = Text::from(vec![
         Line::from(vec![
-            Span::styled("Repositories", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Repositories",
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
             Span::styled(
                 format!("{} shown", visible_count),
-                Style::default().fg(TEXT_PRIMARY),
+                Style::default().fg(theme.text_primary),
             ),
             Span::raw("  "),
             Span::styled(
                 format!("{} total", total_count),
-                Style::default().fg(GITHUB_MUTED),
+                Style::default().fg(theme.text_muted),
             ),
         ]),
         Line::from(vec![
-            Span::styled("search: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("search: ", Style::default().fg(theme.text_muted)),
             Span::raw(query_display.clone()),
             Span::raw("  "),
-            Span::styled("(/ to search)", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("(/ to search)", Style::default().fg(theme.text_muted)),
         ]),
     ]);
     let header_area = sections[0].inner(Margin {
@@ -100,10 +94,10 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(PANEL_BORDER))
-                    .style(Style::default().bg(GITHUB_PANEL)),
+                    .border_style(Style::default().fg(theme.border_panel))
+                    .style(Style::default().bg(theme.bg_panel)),
             )
-            .style(Style::default().fg(TEXT_PRIMARY)),
+            .style(Style::default().fg(theme.text_primary)),
         header_area,
     );
     if app.repo_search_mode() {
@@ -121,12 +115,16 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
         }
     }
 
-    let block = panel_block("Repositories");
+    let block = panel_block("Repositories", theme);
     let items = if app.filtered_repo_rows().is_empty() {
         if app.repos().is_empty() {
-            vec![ListItem::new("No repos found. Run `glyph sync` or press Ctrl+R to rescan.")]
+            vec![ListItem::new(
+                "No repos found. Run `glyph sync` or press Ctrl+R to rescan.",
+            )]
         } else {
-            vec![ListItem::new("No repos match current search. Press Esc to clear.")]
+            vec![ListItem::new(
+                "No repos match current search. Press Esc to clear.",
+            )]
         }
     } else {
         app.filtered_repo_rows()
@@ -135,28 +133,30 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
                 let line1 = Line::from(vec![
                     Span::styled(
                         format!("{} / {}", repo.owner, repo.repo),
-                        Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_primary)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw("  "),
                     Span::styled(
                         format!("{}", repo.remote_name),
-                        Style::default().fg(GITHUB_MUTED),
+                        Style::default().fg(theme.text_muted),
                     ),
                 ]);
                 let line2 = Line::from(ellipsize(repo.path.as_str(), 96))
-                    .style(Style::default().fg(GITHUB_MUTED));
+                    .style(Style::default().fg(theme.text_muted));
                 ListItem::new(vec![line1, line2])
             })
             .collect()
     };
     let list = List::new(items)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     let list_area = sections[1].inner(Margin {
@@ -185,42 +185,52 @@ fn draw_repo_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
     for row in 0..visible {
         let index = start + row;
         let y = list_inner.y.saturating_add((row * 2) as u16);
-        app.register_mouse_region(MouseTarget::RepoRow(index), list_inner.x, y, list_inner.width, 2);
+        app.register_mouse_region(
+            MouseTarget::RepoRow(index),
+            list_inner.x,
+            y,
+            list_inner.width,
+            2,
+        );
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_remote_chooser(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_remote_chooser(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
-    let block = panel_block("Choose Remote");
+    let block = panel_block("Choose Remote", theme);
     let items = app
         .remotes()
         .iter()
         .map(|remote| {
-            let label = format!("{} -> {}/{}", remote.name, remote.slug.owner, remote.slug.repo);
+            let label = format!(
+                "{} -> {}/{}",
+                remote.name, remote.slug.owner, remote.slug.repo
+            );
             ListItem::new(label)
         })
         .collect::<Vec<ListItem>>();
     let list = List::new(items)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     let list_area = main.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
-    frame.render_stateful_widget(
-        list,
-        list_area,
-        &mut list_state(app.selected_remote()),
-    );
+    frame.render_stateful_widget(list, list_area, &mut list_state(app.selected_remote()));
 
     register_mouse_region(app, MouseTarget::RemoteListPane, list_area);
     let list_inner = list_area.inner(Margin {
@@ -235,13 +245,24 @@ fn draw_remote_chooser(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     for row in 0..visible {
         let index = start + row;
         let y = list_inner.y.saturating_add(row as u16);
-        app.register_mouse_region(MouseTarget::RemoteRow(index), list_inner.x, y, list_inner.width, 1);
+        app.register_mouse_region(
+            MouseTarget::RemoteRow(index),
+            list_inner.x,
+            y,
+            list_inner.width,
+            1,
+        );
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_issues(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -283,47 +304,47 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let visible_count = visible_issues.len();
     let total_count = open_count + closed_count;
     let header_text = Text::from(vec![
-        issue_tabs_line(app.issue_filter(), open_count, closed_count),
+        issue_tabs_line(app.issue_filter(), open_count, closed_count, theme),
         Line::from(vec![
-            Span::styled("mode: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("mode: ", Style::default().fg(theme.text_muted)),
             Span::styled(
                 item_label,
                 Style::default()
-                    .fg(GITHUB_BLUE)
+                    .fg(theme.accent_primary)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             ),
             Span::raw("  "),
-            Span::styled("(p toggle)", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("(p toggle)", Style::default().fg(theme.text_muted)),
             Span::raw("  "),
-            Span::styled("assignee: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("assignee: ", Style::default().fg(theme.text_muted)),
             if app.has_assignee_filter() {
                 Span::styled(
                     assignee.clone(),
                     Style::default()
-                        .fg(GITHUB_BLUE)
+                        .fg(theme.accent_primary)
                         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                 )
             } else {
-                Span::styled(assignee.clone(), Style::default().fg(GITHUB_MUTED))
+                Span::styled(assignee.clone(), Style::default().fg(theme.text_muted))
             },
             Span::raw("  "),
-            Span::styled("(a cycle)", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("(a cycle)", Style::default().fg(theme.text_muted)),
             Span::raw("  "),
             Span::styled(
                 format!("showing {} of {}", visible_count, total_count),
-                Style::default().fg(GITHUB_MUTED),
+                Style::default().fg(theme.text_muted),
             ),
         ]),
         Line::from(vec![
-            Span::styled("search: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("search: ", Style::default().fg(theme.text_muted)),
             Span::raw(query_display.clone()),
         ]),
     ]);
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(PANEL_BORDER))
-        .style(Style::default().bg(GITHUB_PANEL));
+        .border_style(Style::default().fg(theme.border_panel))
+        .style(Style::default().bg(theme.bg_panel));
     let header_area = sections[0].inner(Margin {
         vertical: 0,
         horizontal: 2,
@@ -331,7 +352,7 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     frame.render_widget(
         Paragraph::new(header_text)
             .block(header_block)
-            .style(Style::default().fg(TEXT_PRIMARY)),
+            .style(Style::default().fg(theme.text_primary)),
         header_area,
     );
     let header_content = header_area.inner(Margin {
@@ -375,7 +396,11 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let list_focused = app.focus() == Focus::IssuesList;
     let preview_focused = app.focus() == Focus::IssuesPreview;
     let list_block_title = focused_title(list_title, list_focused);
-    let block = panel_block_with_border(list_block_title.as_str(), focus_border(list_focused));
+    let block = panel_block_with_border(
+        list_block_title.as_str(),
+        focus_border(list_focused, theme),
+        theme,
+    );
     let items = if visible_issues.is_empty() {
         if app.issues().is_empty() {
             let message = if item_mode == crate::app::WorkItemMode::PullRequests {
@@ -413,14 +438,16 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                         } else {
                             format!("#{} ", issue.number)
                         },
-                        Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!("[{}] ", issue.state),
-                        Style::default().fg(issue_state_color(issue.state.as_str())),
+                        Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
                     ),
                     Span::raw(issue.title.clone()),
-                    pending_issue_span(app.pending_issue_badge(issue.number)),
+                    pending_issue_span(app.pending_issue_badge(issue.number), theme),
                 ]);
                 let line2 = Line::from(format!(
                     "@{}  comments:{}  labels:{}",
@@ -428,19 +455,19 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                     issue.comments_count,
                     ellipsize(labels, 24)
                 ))
-                .style(Style::default().fg(GITHUB_MUTED));
+                .style(Style::default().fg(theme.text_muted));
                 ListItem::new(vec![line1, line2])
             })
             .collect()
     };
     let list = List::new(items)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     let issues_list_area = panes[0].inner(Margin {
@@ -450,7 +477,10 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     frame.render_stateful_widget(
         list,
         issues_list_area,
-        &mut list_state(selected_for_list(app.selected_issue(), visible_issues.len())),
+        &mut list_state(selected_for_list(
+            app.selected_issue(),
+            visible_issues.len(),
+        )),
     );
     register_mouse_region(app, MouseTarget::IssuesListPane, issues_list_area);
     let issues_list_inner = issues_list_area.inner(Margin {
@@ -460,7 +490,13 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let max_rows = (issues_list_inner.height as usize) / 2;
     for index in 0..visible_issues.len().min(max_rows) {
         let y = issues_list_inner.y.saturating_add((index * 2) as u16);
-        app.register_mouse_region(MouseTarget::IssueRow(index), issues_list_inner.x, y, issues_list_inner.width, 2);
+        app.register_mouse_region(
+            MouseTarget::IssueRow(index),
+            issues_list_inner.x,
+            y,
+            issues_list_inner.width,
+            2,
+        );
     }
 
     let (preview_title, preview_lines) = match app.selected_issue_row() {
@@ -483,11 +519,13 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
                     } else {
                         format!("#{}", issue.number)
                     },
-                    Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.accent_primary)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  {}", issue.state),
-                    Style::default().fg(issue_state_color(issue.state.as_str())),
+                    Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
                 ),
             ]));
             lines.push(Line::from(format!("assignees: {}", assignees)));
@@ -511,11 +549,13 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
         }
         None => (
             preview_title_text.to_string(),
-            vec![Line::from(if item_mode == crate::app::WorkItemMode::PullRequests {
-                "Select a pull request to preview."
-            } else {
-                "Select an issue to preview."
-            })],
+            vec![Line::from(
+                if item_mode == crate::app::WorkItemMode::PullRequests {
+                    "Select a pull request to preview."
+                } else {
+                    "Select an issue to preview."
+                },
+            )],
         ),
     };
 
@@ -532,20 +572,30 @@ fn draw_issues(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect
     let preview_block_title = focused_title(preview_title.as_str(), preview_focused);
     let preview_block = panel_block_with_border(
         preview_block_title.as_str(),
-        focus_border(preview_focused),
+        focus_border(preview_focused, theme),
+        theme,
     );
     let preview_widget = Paragraph::new(Text::from(preview_lines))
         .block(preview_block)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL_ALT))
+        .style(
+            Style::default()
+                .fg(theme.text_primary)
+                .bg(theme.bg_panel_alt),
+        )
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(preview_widget, preview_area);
     register_mouse_region(app, MouseTarget::IssuesPreviewPane, preview_area);
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_issue_detail(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -557,20 +607,28 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     });
     let body_focused = app.focus() == Focus::IssueBody;
     let comments_focused = app.focus() == Focus::IssueRecentComments;
-    let (issue_number, issue_title, issue_state, body, assignees, labels, comment_count, updated_at) =
-        match app.current_issue_row() {
-            Some(issue) => (
-                Some(issue.number),
-                if issue.is_pr {
-                    format!("PR #{} {}", issue.number, issue.title)
-                } else {
-                    format!("#{} {}", issue.number, issue.title)
-                },
-                issue.state.clone(),
-                issue.body.clone(),
-                if issue.assignees.is_empty() {
-                    "unassigned".to_string()
-                } else {
+    let (
+        issue_number,
+        issue_title,
+        issue_state,
+        body,
+        assignees,
+        labels,
+        comment_count,
+        updated_at,
+    ) = match app.current_issue_row() {
+        Some(issue) => (
+            Some(issue.number),
+            if issue.is_pr {
+                format!("PR #{} {}", issue.number, issue.title)
+            } else {
+                format!("#{} {}", issue.number, issue.title)
+            },
+            issue.state.clone(),
+            issue.body.clone(),
+            if issue.assignees.is_empty() {
+                "unassigned".to_string()
+            } else {
                 issue.assignees.clone()
             },
             if issue.labels.is_empty() {
@@ -581,23 +639,25 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             issue.comments_count,
             issue.updated_at.clone(),
         ),
-            None => (
-                None,
-                String::new(),
-                String::new(),
-                String::new(),
-                "unassigned".to_string(),
-                "none".to_string(),
-                0,
-                None,
-            ),
-        };
+        None => (
+            None,
+            String::new(),
+            String::new(),
+            String::new(),
+            "unassigned".to_string(),
+            "none".to_string(),
+            0,
+            None,
+        ),
+    };
 
     let header_text = if issue_title.is_empty() {
         Text::from(vec![
             Line::from(Span::styled(
                 "[Back]",
-                Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from("Issue detail"),
         ])
@@ -606,26 +666,33 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         Text::from(vec![
             Line::from(Span::styled(
                 "[Back]",
-                Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled(issue_title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    issue_title.clone(),
+                    Style::default()
+                        .fg(theme.accent_primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("  "),
                 Span::styled(
                     format!("[{}]", issue_state),
                     Style::default()
-                        .fg(issue_state_color(issue_state.as_str()))
+                        .fg(issue_state_color(issue_state.as_str(), theme))
                         .add_modifier(Modifier::BOLD),
                 ),
-                pending_issue_span(pending),
+                pending_issue_span(pending, theme),
             ]),
         ])
     };
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(PANEL_BORDER))
-        .style(Style::default().bg(GITHUB_PANEL));
+        .border_style(Style::default().fg(theme.border_panel))
+        .style(Style::default().bg(theme.bg_panel));
     let header_area = sections[0].inner(Margin {
         vertical: 0,
         horizontal: 2,
@@ -633,7 +700,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     frame.render_widget(
         Paragraph::new(header_text)
             .block(header_block)
-            .style(Style::default().fg(TEXT_PRIMARY)),
+            .style(Style::default().fg(theme.text_primary)),
         header_area,
     );
     let header_content = header_area.inner(Margin {
@@ -648,7 +715,9 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     } else {
         body_lines.push(Line::from(Span::styled(
             issue_title,
-            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     let metadata = Line::from(format!(
@@ -657,7 +726,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         comment_count,
         ellipsize(labels.as_str(), 44)
     ));
-    body_lines.push(metadata.style(Style::default().fg(GITHUB_MUTED)));
+    body_lines.push(metadata.style(Style::default().fg(theme.text_muted)));
     if let Some(updated) = format_datetime(updated_at.as_deref()) {
         body_lines.push(Line::from(format!("updated: {}", updated)));
     }
@@ -676,13 +745,17 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     if is_pr {
         side_lines.push(Line::from(Span::styled(
             "Press Enter for full-screen changes",
-            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.border_popup)
+                .add_modifier(Modifier::BOLD),
         )));
         side_lines.push(Line::from(""));
     } else {
         side_lines.push(Line::from(Span::styled(
             "Press Enter for full comments",
-            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.border_popup)
+                .add_modifier(Modifier::BOLD),
         )));
         side_lines.push(Line::from(""));
     }
@@ -690,31 +763,35 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         if app.pull_request_files_syncing() {
             side_lines.push(Line::from("Loading pull request changes..."));
         } else if app.pull_request_files().is_empty() {
-            side_lines.push(Line::from("No changed files cached yet. Press r to refresh."));
+            side_lines.push(Line::from(
+                "No changed files cached yet. Press r to refresh.",
+            ));
         } else {
             for file in app.pull_request_files() {
                 side_lines.push(Line::from(vec![
-                    Span::styled(file_status_symbol(file.status.as_str()), Style::default().fg(file_status_color(file.status.as_str()))),
+                    Span::styled(
+                        file_status_symbol(file.status.as_str()),
+                        Style::default().fg(file_status_color(file.status.as_str(), theme)),
+                    ),
                     Span::raw(" "),
-                    Span::styled(file.filename.clone(), Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        file.filename.clone(),
+                        Style::default()
+                            .fg(theme.text_primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
                 side_lines.push(
-                    Line::from(format!(
-                        "  +{} -{}",
-                        file.additions,
-                        file.deletions
-                    ))
-                    .style(Style::default().fg(GITHUB_MUTED)),
+                    Line::from(format!("  +{} -{}", file.additions, file.deletions))
+                        .style(Style::default().fg(theme.text_muted)),
                 );
                 if let Some(patch) = file.patch.as_deref() {
                     for patch_line in patch.lines().take(8) {
-                        side_lines.push(styled_patch_line(patch_line, 100));
+                        side_lines.push(styled_patch_line(patch_line, 100, theme));
                     }
                     if patch.lines().count() > 8 {
-                        side_lines.push(
-                            Line::from("  ...")
-                                .style(Style::default().fg(GITHUB_MUTED)),
-                        );
+                        side_lines
+                            .push(Line::from("  ...").style(Style::default().fg(theme.text_muted)));
                     }
                 }
                 side_lines.push(Line::from(""));
@@ -730,6 +807,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                 comment.author.as_str(),
                 comment.created_at.as_deref(),
                 false,
+                theme,
             ));
             let rendered_comment = markdown::render(comment.body.as_str());
             if rendered_comment.lines.is_empty() {
@@ -771,23 +849,27 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
         .title(Line::from(Span::styled(
             body_title,
             Style::default()
-                .fg(if body_focused { GITHUB_BLUE } else { GITHUB_MUTED })
+                .fg(if body_focused {
+                    theme.accent_primary
+                } else {
+                    theme.text_muted
+                })
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(focus_border(body_focused)))
+        .border_style(Style::default().fg(focus_border(body_focused, theme)))
         .style(Style::default().bg(if body_focused {
-            GITHUB_PANEL_ALT
+            theme.bg_panel_alt
         } else {
-            GITHUB_PANEL
+            theme.bg_panel
         }));
     let body_paragraph = Paragraph::new(Text::from(body_lines))
         .block(body_block)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(if body_focused {
-            GITHUB_PANEL_ALT
+        .style(Style::default().fg(theme.text_primary).bg(if body_focused {
+            theme.bg_panel_alt
         } else {
-            GITHUB_PANEL
+            theme.bg_panel
         }))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
@@ -800,7 +882,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let side_max_scroll = side_total_lines.saturating_sub(side_viewport) as u16;
     app.set_issue_recent_comments_max_scroll(side_max_scroll);
     let side_scroll = app.issue_recent_comments_scroll();
-    let side_border = focus_border(comments_focused);
+    let side_border = focus_border(comments_focused, theme);
     let side_title = if is_pr {
         format!("Changed files ({})", app.pull_request_files().len())
     } else {
@@ -812,36 +894,45 @@ fn draw_issue_detail(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             side_title,
             Style::default()
                 .fg(if comments_focused {
-                    GITHUB_BLUE
+                    theme.accent_primary
                 } else {
-                    GITHUB_MUTED
+                    theme.text_muted
                 })
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().bg(if comments_focused {
-            GITHUB_PANEL_ALT
+            theme.bg_panel_alt
         } else {
-            GITHUB_PANEL
+            theme.bg_panel
         }))
         .border_style(Style::default().fg(side_border));
     let side_paragraph = Paragraph::new(Text::from(side_lines))
         .block(side_block)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(if comments_focused {
-            GITHUB_PANEL_ALT
-        } else {
-            GITHUB_PANEL
-        }))
+        .style(
+            Style::default()
+                .fg(theme.text_primary)
+                .bg(if comments_focused {
+                    theme.bg_panel_alt
+                } else {
+                    theme.bg_panel
+                }),
+        )
         .wrap(Wrap { trim: false })
         .scroll((side_scroll, 0));
     frame.render_widget(side_paragraph, panes[1]);
     register_mouse_region(app, MouseTarget::IssueSidePane, panes[1]);
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_issue_comments(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -869,19 +960,29 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     let header = Text::from(vec![
         Line::from(Span::styled(
             "[Back]",
-            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(title.clone(), Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD))),
         Line::from(Span::styled(
-            format!("j/k jump comments • selected {} • e edit • x delete", selected),
-            Style::default().fg(GITHUB_MUTED),
+            title.clone(),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "j/k jump comments • selected {} • e edit • x delete",
+                selected
+            ),
+            Style::default().fg(theme.text_muted),
         )),
     ]);
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(PANEL_BORDER))
-        .style(Style::default().bg(GITHUB_PANEL));
+        .border_style(Style::default().fg(theme.border_panel))
+        .style(Style::default().bg(theme.bg_panel));
     let header_area = sections[0].inner(Margin {
         vertical: 0,
         horizontal: 2,
@@ -889,7 +990,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     frame.render_widget(
         Paragraph::new(header)
             .block(header_block)
-            .style(Style::default().fg(TEXT_PRIMARY)),
+            .style(Style::default().fg(theme.text_primary)),
         header_area,
     );
     let header_content = header_area.inner(Margin {
@@ -898,7 +999,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
     });
     app.register_mouse_region(MouseTarget::Back, header_content.x, header_content.y, 8, 1);
 
-    let block = panel_block(&title);
+    let block = panel_block(&title, theme);
     let mut lines = Vec::new();
     let mut comment_header_offsets = Vec::new();
     if app.comments().is_empty() {
@@ -911,6 +1012,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
                 comment.author.as_str(),
                 comment.created_at.as_deref(),
                 index == app.selected_comment(),
+                theme,
             ));
             let rendered = markdown::render(comment.body.as_str());
             if rendered.lines.is_empty() {
@@ -933,7 +1035,7 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
 
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(paragraph, content_area);
@@ -961,10 +1063,15 @@ fn draw_issue_comments(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         );
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_pull_request_files(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -1004,38 +1111,58 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     let header = Text::from(vec![
         Line::from(Span::styled(
             title.clone(),
-            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
-            Span::styled("[Back]", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Back]",
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
-            Span::styled("[Files]", if focused == "files" {
-                Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(GITHUB_MUTED)
-            }),
+            Span::styled(
+                "[Files]",
+                if focused == "files" {
+                    Style::default()
+                        .fg(theme.accent_success)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.text_muted)
+                },
+            ),
             Span::raw("  "),
-            Span::styled("[Diff]", if focused == "diff" {
-                Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(GITHUB_MUTED)
-            }),
+            Span::styled(
+                "[Diff]",
+                if focused == "diff" {
+                    Style::default()
+                        .fg(theme.accent_success)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.text_muted)
+                },
+            ),
             Span::raw("  "),
             Span::styled(
                 format!("x:{}", horizontal_scroll),
-                Style::default().fg(GITHUB_MUTED),
+                Style::default().fg(theme.text_muted),
             ),
         ]),
         Line::from(Span::styled(
-            format!("Ctrl+h/l pane • h/l side • [/ ] pan • 0 reset pan • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}", focused, side, visual, visual_range),
-            Style::default().fg(GITHUB_MUTED),
+            format!(
+                "Ctrl+h/l pane • h/l side • [/ ] pan • 0 reset pan • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}",
+                focused, side, visual, visual_range
+            ),
+            Style::default().fg(theme.text_muted),
         )),
     ]);
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(PANEL_BORDER))
-        .style(Style::default().bg(GITHUB_PANEL));
+        .border_style(Style::default().fg(theme.border_panel))
+        .style(Style::default().bg(theme.bg_panel));
     let header_area = sections[0].inner(Margin {
         vertical: 0,
         horizontal: 2,
@@ -1043,14 +1170,20 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     frame.render_widget(
         Paragraph::new(header)
             .block(header_block)
-            .style(Style::default().fg(TEXT_PRIMARY)),
+            .style(Style::default().fg(theme.text_primary)),
         header_area,
     );
     let header_content = header_area.inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
-    app.register_mouse_region(MouseTarget::Back, header_content.x, header_content.y.saturating_add(1), 8, 1);
+    app.register_mouse_region(
+        MouseTarget::Back,
+        header_content.x,
+        header_content.y.saturating_add(1),
+        8,
+        1,
+    );
     app.register_mouse_region(
         MouseTarget::PullRequestFocusFiles,
         header_content.x.saturating_add(9),
@@ -1067,41 +1200,48 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     );
 
     let file_items = if app.pull_request_files().is_empty() {
-        vec![ListItem::new("No changed files cached yet. Press r to refresh.")]
+        vec![ListItem::new(
+            "No changed files cached yet. Press r to refresh.",
+        )]
     } else {
         app.pull_request_files()
             .iter()
             .map(|file| {
-                let comment_count = app.pull_request_comments_count_for_path(file.filename.as_str());
+                let comment_count =
+                    app.pull_request_comments_count_for_path(file.filename.as_str());
                 let viewed = app.pull_request_file_is_viewed(file.filename.as_str());
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         if viewed { "✓" } else { "·" },
                         if viewed {
-                            Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(theme.accent_success)
+                                .add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default().fg(GITHUB_MUTED)
+                            Style::default().fg(theme.text_muted)
                         },
                     ),
                     Span::raw(" "),
                     Span::styled(
                         file_status_symbol(file.status.as_str()),
-                        Style::default().fg(file_status_color(file.status.as_str())),
+                        Style::default().fg(file_status_color(file.status.as_str(), theme)),
                     ),
                     Span::raw(" "),
                     Span::styled(
                         ellipsize(file.filename.as_str(), 34),
-                        Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_primary)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
                     Span::styled(
                         format!("+{} -{}", file.additions, file.deletions),
-                        Style::default().fg(GITHUB_MUTED),
+                        Style::default().fg(theme.text_muted),
                     ),
                     Span::raw(" "),
                     Span::styled(
                         format!("c:{}", comment_count),
-                        Style::default().fg(POPUP_BORDER),
+                        Style::default().fg(theme.border_popup),
                     ),
                 ]))
             })
@@ -1112,14 +1252,15 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     let files_list = List::new(file_items)
         .block(panel_block_with_border(
             files_block_title.as_str(),
-            focus_border(files_focused),
+            focus_border(files_focused, theme),
+            theme,
         ))
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -1138,7 +1279,13 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     let max_file_rows = files_inner.height as usize;
     for index in 0..app.pull_request_files().len().min(max_file_rows) {
         let y = files_inner.y.saturating_add(index as u16);
-        app.register_mouse_region(MouseTarget::PullRequestFileRow(index), files_inner.x, y, files_inner.width, 1);
+        app.register_mouse_region(
+            MouseTarget::PullRequestFileRow(index),
+            files_inner.x,
+            y,
+            files_inner.width,
+            1,
+        );
     }
 
     let diff_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Diff;
@@ -1158,7 +1305,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         if rows.is_empty() {
             lines.push(Line::from(Span::styled(
                 "No textual patch available for this file.",
-                Style::default().fg(GITHUB_MUTED),
+                Style::default().fg(theme.text_muted),
             )));
         } else {
             row_offsets = vec![None; rows.len()];
@@ -1174,8 +1321,8 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                 }
                 row_offsets[index] = Some(lines.len() as u16);
                 let selected = index == app.selected_pull_request_diff_line();
-                let in_visual_range = visual_range
-                    .is_some_and(|(start, end)| index >= start && index <= end);
+                let in_visual_range =
+                    visual_range.is_some_and(|(start, end)| index >= start && index <= end);
 
                 if row.kind == DiffKind::Hunk
                     && app.pull_request_hunk_is_collapsed(file_name.as_str(), index)
@@ -1195,17 +1342,23 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     } else {
                         "▶"
                     };
-                    let mut style = Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD);
+                    let mut style = Style::default()
+                        .fg(theme.border_popup)
+                        .add_modifier(Modifier::BOLD);
                     if in_visual_range {
-                        style = style.bg(VISUAL_RANGE_BG);
+                        style = style.bg(theme.bg_visual_range);
                     }
                     if selected {
-                        style = style.bg(SELECT_BG);
+                        style = style.bg(theme.bg_selected);
                     }
                     let text = format!(
                         " {} {}  [{} lines hidden]",
                         indicator,
-                        clip_horizontal(row.raw.as_str(), horizontal_offset, panel_width.saturating_sub(24)),
+                        clip_horizontal(
+                            row.raw.as_str(),
+                            horizontal_offset,
+                            panel_width.saturating_sub(24)
+                        ),
                         hidden_lines,
                     );
                     lines.push(Line::from(Span::styled(text, style)));
@@ -1220,15 +1373,18 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                     left_width,
                     right_width,
                     horizontal_offset,
+                    theme,
                 ));
 
                 let target_right = row
                     .new_line
-                    .map(|line| app.pull_request_comments_for_path_and_line(
-                        file_name.as_str(),
-                        ReviewSide::Right,
-                        line,
-                    ))
+                    .map(|line| {
+                        app.pull_request_comments_for_path_and_line(
+                            file_name.as_str(),
+                            ReviewSide::Right,
+                            line,
+                        )
+                    })
                     .unwrap_or_default();
                 for comment in target_right {
                     lines.push(render_inline_review_comment(
@@ -1241,16 +1397,19 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                         left_width,
                         right_width,
                         app.selected_pull_request_review_comment_id() == Some(comment.id),
+                        theme,
                     ));
                 }
 
                 let target_left = row
                     .old_line
-                    .map(|line| app.pull_request_comments_for_path_and_line(
-                        file_name.as_str(),
-                        ReviewSide::Left,
-                        line,
-                    ))
+                    .map(|line| {
+                        app.pull_request_comments_for_path_and_line(
+                            file_name.as_str(),
+                            ReviewSide::Left,
+                            line,
+                        )
+                    })
                     .unwrap_or_default();
                 for comment in target_left {
                     lines.push(render_inline_review_comment(
@@ -1263,6 +1422,7 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
                         left_width,
                         right_width,
                         app.selected_pull_request_review_comment_id() == Some(comment.id),
+                        theme,
                     ));
                 }
             }
@@ -1303,9 +1463,10 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
     let paragraph = Paragraph::new(Text::from(lines))
         .block(panel_block_with_border(
             diff_block_title.as_str(),
-            focus_border(diff_focused),
+            focus_border(diff_focused, theme),
+            theme,
         ))
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     frame.render_widget(paragraph, panes[1]);
@@ -1327,7 +1488,13 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         if y >= diff_inner.y.saturating_add(diff_inner.height) {
             continue;
         }
-        app.register_mouse_region(MouseTarget::PullRequestDiffRow(index, ReviewSide::Left), diff_inner.x, y, half.max(1), 1);
+        app.register_mouse_region(
+            MouseTarget::PullRequestDiffRow(index, ReviewSide::Left),
+            diff_inner.x,
+            y,
+            half.max(1),
+            1,
+        );
         app.register_mouse_region(
             MouseTarget::PullRequestDiffRow(index, ReviewSide::Right),
             diff_inner.x.saturating_add(half),
@@ -1337,14 +1504,19 @@ fn draw_pull_request_files(frame: &mut Frame<'_>, app: &mut App, area: ratatui::
         );
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
-    draw_modal_background(frame, app, area);
+fn draw_label_picker(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
+    draw_modal_background(frame, app, area, theme);
     let popup = centered_rect(74, 76, area);
     frame.render_widget(Clear, popup);
-    let shell = popup_block("Label Picker");
+    let shell = popup_block("Label Picker", theme);
     let popup_inner = shell.inner(popup).inner(Margin {
         vertical: 1,
         horizontal: 1,
@@ -1353,7 +1525,11 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
         .split(popup_inner);
 
     let filtered = app.filtered_label_indices();
@@ -1365,19 +1541,21 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let header = Paragraph::new(Text::from(vec![
         Line::from(Span::styled(
             "Edit Labels",
-            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
-            Span::styled("filter: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("filter: ", Style::default().fg(theme.text_muted)),
             Span::raw(query_display),
         ]),
         Line::from(Span::styled(
             "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
-            Style::default().fg(GITHUB_MUTED),
+            Style::default().fg(theme.text_muted),
         )),
     ]))
-    .block(panel_block_with_border("Labels", POPUP_BORDER))
-    .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG));
+    .block(panel_block_with_border("Labels", theme.border_popup, theme))
+    .style(Style::default().fg(theme.text_primary).bg(theme.bg_popup));
     frame.render_widget(header, sections[0]);
 
     let items = if filtered.is_empty() {
@@ -1393,7 +1571,7 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
                     "[ ]"
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(checked, Style::default().fg(GITHUB_BLUE)),
+                    Span::styled(checked, Style::default().fg(theme.accent_primary)),
                     Span::raw(" "),
                     Span::raw(label.clone()),
                 ]))
@@ -1401,13 +1579,17 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
             .collect::<Vec<ListItem>>()
     };
     let list = List::new(items)
-        .block(panel_block_with_border("Available labels", POPUP_BORDER))
-        .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG))
+        .block(panel_block_with_border(
+            "Available labels",
+            theme.border_popup,
+            theme,
+        ))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_popup))
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -1428,30 +1610,54 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     let max_rows = labels_inner.height as usize;
     for index in 0..filtered.len().min(max_rows) {
         let y = labels_inner.y.saturating_add(index as u16);
-        app.register_mouse_region(MouseTarget::LabelOption(index), labels_inner.x, y, labels_inner.width, 1);
+        app.register_mouse_region(
+            MouseTarget::LabelOption(index),
+            labels_inner.x,
+            y,
+            labels_inner.width,
+            1,
+        );
     }
 
     let selection = if app.selected_labels_csv().is_empty() {
         "selected: none".to_string()
     } else {
-        format!("selected: {}", ellipsize(app.selected_labels_csv().as_str(), 80))
+        format!(
+            "selected: {}",
+            ellipsize(app.selected_labels_csv().as_str(), 80)
+        )
     };
     let footer = Paragraph::new(Text::from(vec![
         Line::from(selection),
         Line::from(vec![
-            Span::styled("[Apply]", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Apply]",
+                Style::default()
+                    .fg(theme.accent_success)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
-            Span::styled("[Cancel]", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("[Cancel]", Style::default().fg(theme.text_muted)),
         ]),
     ]))
-        .style(Style::default().fg(GITHUB_MUTED))
-        .block(panel_block_with_border("Selection", POPUP_BORDER));
+    .style(Style::default().fg(theme.text_muted))
+    .block(panel_block_with_border(
+        "Selection",
+        theme.border_popup,
+        theme,
+    ));
     frame.render_widget(footer, sections[2]);
     let footer_content = sections[2].inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
-    app.register_mouse_region(MouseTarget::LabelApply, footer_content.x, footer_content.y.saturating_add(1), 8, 1);
+    app.register_mouse_region(
+        MouseTarget::LabelApply,
+        footer_content.x,
+        footer_content.y.saturating_add(1),
+        8,
+        1,
+    );
     app.register_mouse_region(
         MouseTarget::LabelCancel,
         footer_content.x.saturating_add(10),
@@ -1461,11 +1667,16 @@ fn draw_label_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout
     );
 }
 
-fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
-    draw_modal_background(frame, app, area);
+fn draw_assignee_picker(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
+    draw_modal_background(frame, app, area, theme);
     let popup = centered_rect(74, 76, area);
     frame.render_widget(Clear, popup);
-    let shell = popup_block("Assignee Picker");
+    let shell = popup_block("Assignee Picker", theme);
     let popup_inner = shell.inner(popup).inner(Margin {
         vertical: 1,
         horizontal: 1,
@@ -1474,7 +1685,11 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
         .split(popup_inner);
 
     let filtered = app.filtered_assignee_indices();
@@ -1486,19 +1701,25 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
     let header = Paragraph::new(Text::from(vec![
         Line::from(Span::styled(
             "Edit Assignees",
-            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
-            Span::styled("filter: ", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("filter: ", Style::default().fg(theme.text_muted)),
             Span::raw(query_display),
         ]),
         Line::from(Span::styled(
             "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
-            Style::default().fg(GITHUB_MUTED),
+            Style::default().fg(theme.text_muted),
         )),
     ]))
-    .block(panel_block_with_border("Assignees", POPUP_BORDER))
-    .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG));
+    .block(panel_block_with_border(
+        "Assignees",
+        theme.border_popup,
+        theme,
+    ))
+    .style(Style::default().fg(theme.text_primary).bg(theme.bg_popup));
     frame.render_widget(header, sections[0]);
 
     let items = if filtered.is_empty() {
@@ -1514,7 +1735,7 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
                     "[ ]"
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(checked, Style::default().fg(GITHUB_BLUE)),
+                    Span::styled(checked, Style::default().fg(theme.accent_primary)),
                     Span::raw(" "),
                     Span::raw(assignee.clone()),
                 ]))
@@ -1522,13 +1743,17 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
             .collect::<Vec<ListItem>>()
     };
     let list = List::new(items)
-        .block(panel_block_with_border("Available assignees", POPUP_BORDER))
-        .style(Style::default().fg(TEXT_PRIMARY).bg(POPUP_BG))
+        .block(panel_block_with_border(
+            "Available assignees",
+            theme.border_popup,
+            theme,
+        ))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_popup))
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(
@@ -1569,13 +1794,22 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
     let footer = Paragraph::new(Text::from(vec![
         Line::from(selection),
         Line::from(vec![
-            Span::styled("[Apply]", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Apply]",
+                Style::default()
+                    .fg(theme.accent_success)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
-            Span::styled("[Cancel]", Style::default().fg(GITHUB_MUTED)),
+            Span::styled("[Cancel]", Style::default().fg(theme.text_muted)),
         ]),
     ]))
-        .style(Style::default().fg(GITHUB_MUTED))
-        .block(panel_block_with_border("Selection", POPUP_BORDER));
+    .style(Style::default().fg(theme.text_muted))
+    .block(panel_block_with_border(
+        "Selection",
+        theme.border_popup,
+        theme,
+    ));
     frame.render_widget(footer, sections[2]);
     let footer_content = sections[2].inner(Margin {
         vertical: 1,
@@ -1597,14 +1831,19 @@ fn draw_assignee_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::lay
     );
 }
 
-fn draw_preset_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_preset_picker(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let close_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request"
     } else {
         "Close Issue"
     };
-    let block = panel_block(close_title);
+    let block = panel_block(close_title, theme);
     let mut items = Vec::new();
     items.push(ListItem::new("Close without comment"));
     items.push(ListItem::new("Custom message..."));
@@ -1614,24 +1853,20 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layou
     items.push(ListItem::new("Add preset..."));
 
     let list = List::new(items)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .block(block)
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
-                .bg(SELECT_BG)
-                .fg(TEXT_PRIMARY)
+                .bg(theme.bg_selected)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
     let list_area = main.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
-    frame.render_stateful_widget(
-        list,
-        list_area,
-        &mut list_state(app.selected_preset()),
-    );
+    frame.render_stateful_widget(list, list_area, &mut list_state(app.selected_preset()));
     let list_inner = list_area.inner(Margin {
         vertical: 1,
         horizontal: 1,
@@ -1639,23 +1874,34 @@ fn draw_preset_picker(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layou
     let max_rows = list_inner.height as usize;
     for index in 0..app.preset_items_len().min(max_rows) {
         let y = list_inner.y.saturating_add(index as u16);
-        app.register_mouse_region(MouseTarget::PresetOption(index), list_inner.x, y, list_inner.width, 1);
+        app.register_mouse_region(
+            MouseTarget::PresetOption(index),
+            list_inner.x,
+            y,
+            list_inner.width,
+            1,
+        );
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_preset_name(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_preset_name(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let input_area = main.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
-    let block = panel_block("Preset Name");
+    let block = panel_block("Preset Name", theme);
     let text = app.editor().name();
     let paragraph = Paragraph::new(text)
         .block(block)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, input_area);
 
@@ -1667,14 +1913,23 @@ fn draw_preset_name(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout:
         let cursor_x = text_area
             .x
             .saturating_add(app.editor().name().chars().count() as u16)
-            .min(text_area.x.saturating_add(text_area.width.saturating_sub(1)));
+            .min(
+                text_area
+                    .x
+                    .saturating_add(text_area.width.saturating_sub(1)),
+            );
         frame.set_cursor_position((cursor_x, text_area.y));
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_comment_editor(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+fn draw_comment_editor(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
     let (main, footer) = split_area(area);
     let close_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request Comment"
@@ -1693,11 +1948,11 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         vertical: 1,
         horizontal: 2,
     });
-    let block = panel_block(title);
+    let block = panel_block(title, theme);
     let text = app.editor().text();
     let paragraph = Paragraph::new(text)
         .block(block)
-        .style(Style::default().fg(TEXT_PRIMARY).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, editor_area);
 
@@ -1716,46 +1971,66 @@ fn draw_comment_editor(frame: &mut Frame<'_>, app: &mut App, area: ratatui::layo
         frame.set_cursor_position((cursor_x, cursor_y));
     }
 
-    draw_status(frame, app, footer);
+    draw_status(frame, app, footer, theme);
 }
 
-fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
+fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePalette) {
     let status = app.status();
     let context = status_context(app);
     let help = help_text(app);
     let mut lines = Vec::new();
     let mut status_line = vec![Span::styled(
         "[Repos] ",
-        Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme.accent_primary)
+            .add_modifier(Modifier::BOLD),
     )];
     if !status.is_empty() {
         status_line.push(Span::styled(
             "status ",
-            Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
         ));
-        status_line.push(Span::styled(status, Style::default().fg(TEXT_PRIMARY)));
+        status_line.push(Span::styled(
+            status,
+            Style::default().fg(theme.text_primary),
+        ));
     }
     if status.is_empty() {
-        status_line.push(Span::styled("status ready", Style::default().fg(GITHUB_MUTED)));
+        status_line.push(Span::styled(
+            "status ready",
+            Style::default().fg(theme.text_muted),
+        ));
     }
     lines.push(Line::from(status_line));
     lines.push(Line::from(vec![
-        Span::styled("context ", Style::default().fg(GITHUB_GREEN).add_modifier(Modifier::BOLD)),
-        Span::styled(context, Style::default().fg(GITHUB_MUTED)),
+        Span::styled(
+            "context ",
+            Style::default()
+                .fg(theme.accent_success)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(context, Style::default().fg(theme.text_muted)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("keys ", Style::default().fg(GITHUB_VIOLET).add_modifier(Modifier::BOLD)),
-        Span::styled(help, Style::default().fg(GITHUB_MUTED)),
+        Span::styled(
+            "keys ",
+            Style::default()
+                .fg(theme.accent_subtle)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(help, Style::default().fg(theme.text_muted)),
     ]));
     let text = Text::from(lines);
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
-        .style(Style::default().fg(GITHUB_MUTED).bg(GITHUB_PANEL))
+        .style(Style::default().fg(theme.text_muted).bg(theme.bg_panel))
         .block(
             Block::default()
                 .borders(Borders::TOP)
-                .style(Style::default().bg(GITHUB_PANEL))
-                .border_style(Style::default().fg(PANEL_BORDER)),
+                .style(Style::default().bg(theme.bg_panel))
+                .border_style(Style::default().fg(theme.border_panel)),
         );
     let status_area = area.inner(Margin {
         vertical: 0,
@@ -1771,22 +2046,22 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     );
 }
 
-fn panel_block(title: &str) -> Block<'_> {
-    panel_block_with_border(title, PANEL_BORDER)
+fn panel_block<'a>(title: &'a str, theme: &ThemePalette) -> Block<'a> {
+    panel_block_with_border(title, theme.border_panel, theme)
 }
 
-fn popup_block(title: &str) -> Block<'_> {
+fn popup_block<'a>(title: &'a str, theme: &ThemePalette) -> Block<'a> {
     Block::default()
         .title(Line::from(Span::styled(
             format!(" {} ", title),
             Style::default()
-                .fg(POPUP_BORDER)
+                .fg(theme.border_popup)
                 .add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
-        .style(Style::default().bg(POPUP_BG).fg(TEXT_PRIMARY))
-        .border_style(Style::default().fg(POPUP_BORDER))
+        .style(Style::default().bg(theme.bg_popup).fg(theme.text_primary))
+        .border_style(Style::default().fg(theme.border_popup))
 }
 
 fn focused_title(title: &str, focused: bool) -> String {
@@ -1796,13 +2071,13 @@ fn focused_title(title: &str, focused: bool) -> String {
     title.to_string()
 }
 
-fn panel_block_with_border(title: &str, border: Color) -> Block<'_> {
-    let title_color = if border == FOCUS_BORDER {
-        FOCUS_BORDER
+fn panel_block_with_border<'a>(title: &'a str, border: Color, theme: &ThemePalette) -> Block<'a> {
+    let title_color = if border == theme.border_focus {
+        theme.border_focus
     } else {
-        GITHUB_BLUE
+        theme.accent_primary
     };
-    let border_type = if border == FOCUS_BORDER {
+    let border_type = if border == theme.border_focus {
         BorderType::Thick
     } else {
         BorderType::Rounded
@@ -1816,31 +2091,34 @@ fn panel_block_with_border(title: &str, border: Color) -> Block<'_> {
         )))
         .borders(Borders::ALL)
         .border_type(border_type)
-        .style(Style::default().bg(GITHUB_PANEL).fg(TEXT_PRIMARY))
+        .style(Style::default().bg(theme.bg_panel).fg(theme.text_primary))
         .border_style(Style::default().fg(border))
 }
 
-fn focus_border(focused: bool) -> Color {
+fn focus_border(focused: bool, theme: &ThemePalette) -> Color {
     if focused {
-        FOCUS_BORDER
+        theme.border_focus
     } else {
-        PANEL_BORDER
+        theme.border_panel
     }
 }
 
-fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
+fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePalette) {
     match app.editor_cancel_view() {
-        View::Issues => draw_issues(frame, app, area),
-        View::IssueDetail => draw_issue_detail(frame, app, area),
-        View::IssueComments => draw_issue_comments(frame, app, area),
-        View::PullRequestFiles => draw_pull_request_files(frame, app, area),
+        View::Issues => draw_issues(frame, app, area, theme),
+        View::IssueDetail => draw_issue_detail(frame, app, area, theme),
+        View::IssueComments => draw_issue_comments(frame, app, area, theme),
+        View::PullRequestFiles => draw_pull_request_files(frame, app, area, theme),
         _ => {
             let (main, footer) = split_area(area);
-            frame.render_widget(panel_block("Glyph"), main);
-            draw_status(frame, app, footer);
+            frame.render_widget(panel_block("Glyph", theme), main);
+            draw_status(frame, app, footer, theme);
         }
     }
-    frame.render_widget(Block::default().style(Style::default().bg(OVERLAY_BG)), area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.bg_overlay)),
+        area,
+    );
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
@@ -2008,7 +2286,11 @@ fn status_context(app: &App) -> String {
             ellipsize(query, 24)
         };
         let assignee = ellipsize(app.assignee_filter_label().as_str(), 18);
-        let mode = if app.issue_search_mode() { "search" } else { "browse" };
+        let mode = if app.issue_search_mode() {
+            "search"
+        } else {
+            "browse"
+        };
         let item_mode = app.work_item_mode().label();
         return format!(
             "repo: {}  |  mode: {} ({})  |  assignee: {}  |  query: {}  |  status: {}",
@@ -2039,20 +2321,38 @@ fn list_window_start(selected: usize, len: usize, viewport_items: usize) -> usiz
     selected.saturating_sub(viewport_items.saturating_sub(1))
 }
 
-fn issue_tabs_line(filter: IssueFilter, open_count: usize, closed_count: usize) -> Line<'static> {
+fn issue_tabs_line(
+    filter: IssueFilter,
+    open_count: usize,
+    closed_count: usize,
+    theme: &ThemePalette,
+) -> Line<'static> {
     let mut spans = Vec::new();
-    spans.push(filter_tab("1 Open", open_count, filter == IssueFilter::Open, GITHUB_GREEN));
+    spans.push(filter_tab(
+        "1 Open",
+        open_count,
+        filter == IssueFilter::Open,
+        theme.accent_success,
+        theme,
+    ));
     spans.push(Span::raw("  "));
     spans.push(filter_tab(
         "2 Closed",
         closed_count,
         filter == IssueFilter::Closed,
-        GITHUB_RED,
+        theme.accent_danger,
+        theme,
     ));
     Line::from(spans)
 }
 
-fn filter_tab(label: &str, count: usize, active: bool, color: Color) -> Span<'static> {
+fn filter_tab(
+    label: &str,
+    count: usize,
+    active: bool,
+    color: Color,
+    theme: &ThemePalette,
+) -> Span<'static> {
     let text = format!("{} ({})", label, count);
     if active {
         return Span::styled(
@@ -2062,45 +2362,49 @@ fn filter_tab(label: &str, count: usize, active: bool, color: Color) -> Span<'st
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         );
     }
-    Span::styled(text, Style::default().fg(GITHUB_MUTED))
+    Span::styled(text, Style::default().fg(theme.text_muted))
 }
 
-fn issue_state_color(state: &str) -> Color {
+fn issue_state_color(state: &str, theme: &ThemePalette) -> Color {
     if state.eq_ignore_ascii_case("closed") {
-        return GITHUB_RED;
+        return theme.accent_danger;
     }
-    GITHUB_GREEN
+    theme.accent_success
 }
 
-fn styled_patch_line(line: &str, width: usize) -> Line<'static> {
+fn styled_patch_line(line: &str, width: usize, theme: &ThemePalette) -> Line<'static> {
     let trimmed = ellipsize(line, width);
     if trimmed.starts_with("+++") || trimmed.starts_with("---") {
         return Line::from(Span::styled(
             format!("  {}", trimmed),
-            Style::default().fg(FOCUS_BORDER).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.border_focus)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     if trimmed.starts_with("@@") {
         return Line::from(Span::styled(
             format!("  {}", trimmed),
-            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.border_popup)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     if trimmed.starts_with('+') {
         return Line::from(Span::styled(
             format!("  {}", trimmed),
-            Style::default().fg(GITHUB_GREEN),
+            Style::default().fg(theme.accent_success),
         ));
     }
     if trimmed.starts_with('-') {
         return Line::from(Span::styled(
             format!("  {}", trimmed),
-            Style::default().fg(GITHUB_RED),
+            Style::default().fg(theme.accent_danger),
         ));
     }
     Line::from(Span::styled(
         format!("  {}", trimmed),
-        Style::default().fg(GITHUB_MUTED),
+        Style::default().fg(theme.text_muted),
     ))
 }
 
@@ -2112,23 +2416,34 @@ fn render_split_diff_row(
     left_width: usize,
     right_width: usize,
     horizontal_offset: usize,
+    theme: &ThemePalette,
 ) -> Line<'static> {
     if row.kind == DiffKind::Hunk {
         return Line::from(Span::styled(
             format!(
                 " {}",
-                clip_horizontal(row.raw.as_str(), horizontal_offset, left_width + right_width + 4)
+                clip_horizontal(
+                    row.raw.as_str(),
+                    horizontal_offset,
+                    left_width + right_width + 4
+                )
             ),
-            Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.border_popup)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     if row.kind == DiffKind::Meta {
         return Line::from(Span::styled(
             format!(
                 " {}",
-                clip_horizontal(row.raw.as_str(), horizontal_offset, left_width + right_width + 4)
+                clip_horizontal(
+                    row.raw.as_str(),
+                    horizontal_offset,
+                    left_width + right_width + 4
+                )
             ),
-            Style::default().fg(GITHUB_MUTED),
+            Style::default().fg(theme.text_muted),
         ));
     }
 
@@ -2143,25 +2458,33 @@ fn render_split_diff_row(
 
     let left_prefix = format!("{:>4} ", left_number);
     let right_prefix = format!("{:>4} ", right_number);
-    let left_text = clip_horizontal(row.left.as_str(), horizontal_offset, left_width.saturating_sub(5));
-    let right_text = clip_horizontal(row.right.as_str(), horizontal_offset, right_width.saturating_sub(5));
+    let left_text = clip_horizontal(
+        row.left.as_str(),
+        horizontal_offset,
+        left_width.saturating_sub(5),
+    );
+    let right_text = clip_horizontal(
+        row.right.as_str(),
+        horizontal_offset,
+        right_width.saturating_sub(5),
+    );
 
-    let mut left_style = Style::default().fg(GITHUB_MUTED);
-    let mut right_style = Style::default().fg(GITHUB_MUTED);
+    let mut left_style = Style::default().fg(theme.text_muted);
+    let mut right_style = Style::default().fg(theme.text_muted);
     match row.kind {
         DiffKind::Changed => {
-            left_style = Style::default().fg(GITHUB_RED);
-            right_style = Style::default().fg(GITHUB_GREEN);
+            left_style = Style::default().fg(theme.accent_danger);
+            right_style = Style::default().fg(theme.accent_success);
         }
         DiffKind::Added => {
-            right_style = Style::default().fg(GITHUB_GREEN);
+            right_style = Style::default().fg(theme.accent_success);
         }
         DiffKind::Removed => {
-            left_style = Style::default().fg(GITHUB_RED);
+            left_style = Style::default().fg(theme.accent_danger);
         }
         DiffKind::Context => {
-            left_style = Style::default().fg(TEXT_PRIMARY);
-            right_style = Style::default().fg(TEXT_PRIMARY);
+            left_style = Style::default().fg(theme.text_primary);
+            right_style = Style::default().fg(theme.text_primary);
         }
         _ => {}
     }
@@ -2169,12 +2492,14 @@ fn render_split_diff_row(
     let mut row_style = Style::default();
     let mut bg_color = None;
     if in_visual_range {
-        bg_color = Some(VISUAL_RANGE_BG);
-        row_style = Style::default().bg(VISUAL_RANGE_BG);
+        bg_color = Some(theme.bg_visual_range);
+        row_style = Style::default().bg(theme.bg_visual_range);
     }
     if selected {
-        bg_color = Some(SELECT_BG);
-        row_style = Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD);
+        bg_color = Some(theme.bg_selected);
+        row_style = Style::default()
+            .bg(theme.bg_selected)
+            .add_modifier(Modifier::BOLD);
         if selected_side == ReviewSide::Left {
             left_style = left_style.add_modifier(Modifier::UNDERLINED);
         } else {
@@ -2207,18 +2532,20 @@ fn render_split_diff_row(
             format!("{} ", indicator),
             match bg_color {
                 Some(bg) => Style::default()
-                    .fg(POPUP_BORDER)
+                    .fg(theme.border_popup)
                     .bg(bg)
                     .add_modifier(Modifier::BOLD),
-                None => Style::default().fg(POPUP_BORDER).add_modifier(Modifier::BOLD),
+                None => Style::default()
+                    .fg(theme.border_popup)
+                    .add_modifier(Modifier::BOLD),
             },
         ),
         Span::styled(left_cell, left_style),
         Span::styled(
             " | ",
             match bg_color {
-                Some(bg) => Style::default().fg(PANEL_BORDER).bg(bg),
-                None => Style::default().fg(PANEL_BORDER),
+                Some(bg) => Style::default().fg(theme.border_panel).bg(bg),
+                None => Style::default().fg(theme.border_panel),
             },
         ),
         Span::styled(right_cell, right_style),
@@ -2239,6 +2566,7 @@ fn render_inline_review_comment(
     left_width: usize,
     right_width: usize,
     selected: bool,
+    theme: &ThemePalette,
 ) -> Line<'static> {
     let side_label = match side {
         ReviewSide::Left => "old",
@@ -2259,24 +2587,30 @@ fn render_inline_review_comment(
     let muted_right = " ".repeat(right_width);
     let comment_width = width.saturating_sub(8);
     let text = ellipsize(text.as_str(), comment_width);
-    let comment_style = Style::default().fg(POPUP_BORDER).bg(GITHUB_PANEL_ALT);
+    let comment_style = Style::default()
+        .fg(theme.border_popup)
+        .bg(theme.bg_panel_alt);
     let mut line = if side == ReviewSide::Left {
         let left_text = format!("{:width$}", text, width = left_width);
         Line::from(vec![
             Span::styled(left_text, comment_style),
-            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
-            Span::styled(muted_right, Style::default().fg(GITHUB_MUTED)),
+            Span::styled(" | ", Style::default().fg(theme.border_panel)),
+            Span::styled(muted_right, Style::default().fg(theme.text_muted)),
         ])
     } else {
         let right_text = format!("{:width$}", text, width = right_width);
         Line::from(vec![
-            Span::styled(muted_left, Style::default().fg(GITHUB_MUTED)),
-            Span::styled(" | ", Style::default().fg(PANEL_BORDER)),
+            Span::styled(muted_left, Style::default().fg(theme.text_muted)),
+            Span::styled(" | ", Style::default().fg(theme.border_panel)),
             Span::styled(right_text, comment_style),
         ])
     };
     if selected {
-        line = line.style(Style::default().bg(SELECT_BG).add_modifier(Modifier::BOLD));
+        line = line.style(
+            Style::default()
+                .bg(theme.bg_selected)
+                .add_modifier(Modifier::BOLD),
+        );
     }
     line
 }
@@ -2297,28 +2631,28 @@ fn file_status_symbol(status: &str) -> &'static str {
     "*"
 }
 
-fn file_status_color(status: &str) -> Color {
+fn file_status_color(status: &str, theme: &ThemePalette) -> Color {
     if status.eq_ignore_ascii_case("added") {
-        return GITHUB_GREEN;
+        return theme.accent_success;
     }
     if status.eq_ignore_ascii_case("removed") {
-        return GITHUB_RED;
+        return theme.accent_danger;
     }
     if status.eq_ignore_ascii_case("renamed") {
-        return GITHUB_BLUE;
+        return theme.accent_primary;
     }
     if status.eq_ignore_ascii_case("modified") {
-        return GITHUB_VIOLET;
+        return theme.accent_subtle;
     }
-    GITHUB_MUTED
+    theme.text_muted
 }
 
-fn pending_issue_span(pending: Option<&str>) -> Span<'static> {
+fn pending_issue_span(pending: Option<&str>, theme: &ThemePalette) -> Span<'static> {
     match pending {
         Some(label) => Span::styled(
             format!("  [{}]", label),
             Style::default()
-                .fg(GITHUB_VIOLET)
+                .fg(theme.accent_subtle)
                 .add_modifier(Modifier::BOLD),
         ),
         None => Span::raw(String::new()),
@@ -2348,7 +2682,10 @@ fn ellipsize(input: &str, max: usize) -> String {
     if input.chars().count() <= max {
         return input.to_string();
     }
-    let head = input.chars().take(max.saturating_sub(3)).collect::<String>();
+    let head = input
+        .chars()
+        .take(max.saturating_sub(3))
+        .collect::<String>();
     format!("{}...", head)
 }
 
@@ -2363,28 +2700,39 @@ fn clip_horizontal(input: &str, offset: usize, max: usize) -> String {
     if offset >= chars.len() {
         return String::new();
     }
-    let visible = chars
-        .iter()
-        .skip(offset)
-        .take(max)
-        .collect::<String>();
+    let visible = chars.iter().skip(offset).take(max).collect::<String>();
     if visible.chars().count() <= max {
         return visible;
     }
     ellipsize(visible.as_str(), max)
 }
 
-fn comment_header(index: usize, author: &str, created_at: Option<&str>, selected: bool) -> Line<'static> {
+fn comment_header(
+    index: usize,
+    author: &str,
+    created_at: Option<&str>,
+    selected: bool,
+    theme: &ThemePalette,
+) -> Line<'static> {
     let mut spans = Vec::new();
     if selected {
-        spans.push(Span::styled("▸ ", Style::default().fg(GITHUB_BLUE).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            "▸ ",
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        ));
     } else {
         spans.push(Span::raw("  "));
     }
     spans.push(Span::styled(
         format!("{}  {}", index, author),
         Style::default()
-            .fg(if selected { TEXT_PRIMARY } else { GITHUB_BLUE })
+            .fg(if selected {
+                theme.text_primary
+            } else {
+                theme.accent_primary
+            })
             .add_modifier(Modifier::BOLD),
     ));
     if let Some(date) = format_comment_date(created_at) {

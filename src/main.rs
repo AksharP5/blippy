@@ -9,49 +9,44 @@ mod keybinds;
 mod markdown;
 mod pr_diff;
 mod repo_index;
-mod sync;
 mod store;
+mod sync;
+mod theme;
 mod ui;
 
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{self, Stdout, Write};
-use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
-use ratatui::backend::CrosstermBackend;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 use crate::app::{
-    App,
-    AppAction,
-    IssueFilter,
-    PendingIssueAction,
-    PresetSelection,
-    PullRequestFile,
-    PullRequestReviewComment,
-    ReviewSide,
-    View,
-    WorkItemMode,
+    App, AppAction, IssueFilter, PendingIssueAction, PresetSelection, PullRequestFile,
+    PullRequestReviewComment, ReviewSide, View, WorkItemMode,
 };
-use crate::auth::{clear_auth_token, resolve_auth_token, SystemAuth};
-use crate::cli::{parse_args, CliCommand};
+use crate::auth::{SystemAuth, clear_auth_token, resolve_auth_token};
+use crate::cli::{CliCommand, parse_args};
 use crate::config::Config;
 use crate::discovery::{home_dir, quick_scan};
 use crate::git::list_github_remotes_at;
 use crate::github::GitHubClient;
 use crate::repo_index::index_repo_path;
 use crate::store::delete_db;
-use crate::sync::{sync_repo_with_progress, SyncStats};
 use crate::store::{
     comment_now_epoch, comments_for_issue, get_repo_by_slug, list_issues, list_local_repos,
     prune_comments, touch_comments_for_issue, update_issue_comments_count,
 };
+use crate::sync::{SyncStats, sync_repo_with_progress};
 
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
@@ -307,8 +302,7 @@ fn handle_actions(
                 Some(remote) => (remote.slug.owner.clone(), remote.slug.repo.clone()),
                 None => return Ok(()),
             };
-            let repo_path = crate::git::repo_root()?
-                .map(|path| path.to_string_lossy().to_string());
+            let repo_path = crate::git::repo_root()?.map(|path| path.to_string_lossy().to_string());
             load_issues_for_slug(app, conn, &owner, &repo, repo_path.as_deref())?;
             app.set_view(View::Issues);
             app.request_sync();
@@ -355,7 +349,12 @@ fn handle_actions(
             checkout_pull_request(app)?;
         }
         AppAction::OpenLinkedPullRequestInBrowser => {
-            open_linked_pull_request(app, token, event_tx.clone(), LinkedPullRequestTarget::Browser)?;
+            open_linked_pull_request(
+                app,
+                token,
+                event_tx.clone(),
+                LinkedPullRequestTarget::Browser,
+            )?;
         }
         AppAction::OpenLinkedPullRequestInTui => {
             open_linked_pull_request(app, token, event_tx.clone(), LinkedPullRequestTarget::Tui)?;
@@ -561,15 +560,16 @@ fn close_issue_with_comment(
     body: Option<String>,
     event_tx: Sender<AppEvent>,
 ) -> Result<()> {
-    let (owner, repo, issue_number) = match (app.current_owner(), app.current_repo(), issue_number(app)) {
-        (Some(owner), Some(repo), Some(issue_number)) => {
-            (owner.to_string(), repo.to_string(), issue_number)
-        }
-        _ => {
-            app.set_status("No issue selected".to_string());
-            return Ok(());
-        }
-    };
+    let (owner, repo, issue_number) =
+        match (app.current_owner(), app.current_repo(), issue_number(app)) {
+            (Some(owner), Some(repo), Some(issue_number)) => {
+                (owner.to_string(), repo.to_string(), issue_number)
+            }
+            _ => {
+                app.set_status("No issue selected".to_string());
+                return Ok(());
+            }
+        };
 
     start_close_issue(owner, repo, issue_number, token.to_string(), body, event_tx);
     app.set_pending_issue_action(issue_number, PendingIssueAction::Closing);
@@ -589,15 +589,16 @@ fn post_issue_comment(
         return Ok(());
     }
 
-    let (owner, repo, issue_number) = match (app.current_owner(), app.current_repo(), issue_number(app)) {
-        (Some(owner), Some(repo), Some(issue_number)) => {
-            (owner.to_string(), repo.to_string(), issue_number)
-        }
-        _ => {
-            app.set_status("No issue selected".to_string());
-            return Ok(());
-        }
-    };
+    let (owner, repo, issue_number) =
+        match (app.current_owner(), app.current_repo(), issue_number(app)) {
+            (Some(owner), Some(repo), Some(issue_number)) => {
+                (owner.to_string(), repo.to_string(), issue_number)
+            }
+            _ => {
+                app.set_status("No issue selected".to_string());
+                return Ok(());
+            }
+        };
 
     start_add_comment(owner, repo, issue_number, token.to_string(), body, event_tx);
     app.set_view(app.editor_cancel_view());
@@ -881,7 +882,10 @@ fn toggle_pull_request_file_viewed(
             return Ok(());
         }
     };
-    if !matches!((app.current_owner(), app.current_repo()), (Some(_), Some(_))) {
+    if !matches!(
+        (app.current_owner(), app.current_repo()),
+        (Some(_), Some(_))
+    ) {
         app.set_status("No repo selected".to_string());
         return Ok(());
     }
@@ -1053,11 +1057,16 @@ fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<String>)> {
             .map(|issue| (issue.id, issue.number, Some(issue.state.clone())));
     }
 
-    if matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
+    if matches!(
+        app.view(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles
+    ) {
         if let Some(issue) = app.current_issue_row() {
             return Some((issue.id, issue.number, Some(issue.state.clone())));
         }
-        if let (Some(issue_id), Some(issue_number)) = (app.current_issue_id(), app.current_issue_number()) {
+        if let (Some(issue_id), Some(issue_number)) =
+            (app.current_issue_id(), app.current_issue_number())
+        {
             return Some((issue_id, issue_number, None));
         }
     }
@@ -1080,7 +1089,9 @@ fn selected_issue_labels(app: &App) -> Option<String> {
 
 fn selected_issue_assignees(app: &App) -> Option<String> {
     if app.view() == View::Issues {
-        return app.selected_issue_row().map(|issue| issue.assignees.clone());
+        return app
+            .selected_issue_row()
+            .map(|issue| issue.assignees.clone());
     }
     if matches!(
         app.view(),
@@ -1163,7 +1174,10 @@ fn issue_url(app: &App) -> Option<String> {
     let issue_number = issue.number;
     let route = if issue.is_pr { "pull" } else { "issues" };
 
-    Some(format!("https://github.com/{}/{}/{}/{}", owner, repo, route, issue_number))
+    Some(format!(
+        "https://github.com/{}/{}/{}/{}",
+        owner, repo, route, issue_number
+    ))
 }
 
 fn checkout_pull_request(app: &mut App) -> Result<()> {
@@ -1213,7 +1227,10 @@ fn checkout_pull_request(app: &mut App) -> Result<()> {
         .current_dir(working_dir.as_str())
         .output();
 
-    if detached_output.as_ref().is_ok_and(|out| out.status.success()) {
+    if detached_output
+        .as_ref()
+        .is_ok_and(|out| out.status.success())
+    {
         return finalize_checkout_status(
             app,
             working_dir.as_str(),
@@ -1280,11 +1297,15 @@ fn finalize_checkout_status(
 }
 
 fn command_error_message(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(output.stderr.as_slice()).trim().to_string();
+    let stderr = String::from_utf8_lossy(output.stderr.as_slice())
+        .trim()
+        .to_string();
     if !stderr.is_empty() {
         return stderr;
     }
-    String::from_utf8_lossy(output.stdout.as_slice()).trim().to_string()
+    String::from_utf8_lossy(output.stdout.as_slice())
+        .trim()
+        .to_string()
 }
 
 fn current_git_branch(working_dir: &str) -> Option<String> {
@@ -1296,7 +1317,9 @@ fn current_git_branch(working_dir: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let value = String::from_utf8_lossy(output.stdout.as_slice()).trim().to_string();
+    let value = String::from_utf8_lossy(output.stdout.as_slice())
+        .trim()
+        .to_string();
     if value.is_empty() {
         return None;
     }
@@ -1312,7 +1335,9 @@ fn current_git_head(working_dir: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let value = String::from_utf8_lossy(output.stdout.as_slice()).trim().to_string();
+    let value = String::from_utf8_lossy(output.stdout.as_slice())
+        .trim()
+        .to_string();
     if value.is_empty() {
         return None;
     }
@@ -1692,7 +1717,11 @@ fn handle_events(
                     ));
                 }
             }
-            AppEvent::SyncFailed { owner, repo, message } => {
+            AppEvent::SyncFailed {
+                owner,
+                repo,
+                message,
+            } => {
                 app.set_syncing(false);
                 if app.current_owner() == Some(owner.as_str())
                     && app.current_repo() == Some(repo.as_str())
@@ -1713,7 +1742,10 @@ fn handle_events(
                     app.set_status(format!("Comments unavailable: {}", message));
                 }
             }
-            AppEvent::IssueUpdated { issue_number, message } => {
+            AppEvent::IssueUpdated {
+                issue_number,
+                message,
+            } => {
                 if message.starts_with("closed")
                     || message.starts_with("close failed")
                     || message.starts_with("reopened")
@@ -1864,7 +1896,10 @@ fn handle_events(
             } => {
                 if app.current_issue_id() == Some(issue_id) {
                     app.set_pull_request_file_viewed(path.as_str(), !viewed);
-                    app.set_status(format!("GitHub view state failed for {}: {}", path, message));
+                    app.set_status(format!(
+                        "GitHub view state failed for {}: {}",
+                        path, message
+                    ));
                 }
             }
             AppEvent::LinkedPullRequestResolved {
@@ -1880,7 +1915,10 @@ fn handle_events(
                         if target == LinkedPullRequestTarget::Probe {
                             continue;
                         }
-                        app.set_status(format!("No linked pull request found for #{}", issue_number));
+                        app.set_status(format!(
+                            "No linked pull request found for #{}",
+                            issue_number
+                        ));
                         continue;
                     }
                 };
@@ -1909,8 +1947,12 @@ fn handle_events(
                 let browser_url = match url {
                     Some(url) => Some(url),
                     None => {
-                        if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
-                            Some(format!("https://github.com/{}/{}/pull/{}", owner, repo, pull_number))
+                        if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo())
+                        {
+                            Some(format!(
+                                "https://github.com/{}/{}/pull/{}",
+                                owner, repo, pull_number
+                            ))
                         } else {
                             None
                         }
@@ -1922,11 +1964,17 @@ fn handle_events(
                         app.set_status(format!("Open linked PR failed: {}", error));
                         continue;
                     }
-                    app.set_status(format!("Opened linked pull request #{} in browser", pull_number));
+                    app.set_status(format!(
+                        "Opened linked pull request #{} in browser",
+                        pull_number
+                    ));
                     continue;
                 }
 
-                app.set_status(format!("Linked PR #{} found but URL unavailable", pull_number));
+                app.set_status(format!(
+                    "Linked PR #{} found but URL unavailable",
+                    pull_number
+                ));
             }
             AppEvent::LinkedPullRequestLookupFailed {
                 issue_number,
@@ -1967,7 +2015,11 @@ fn handle_events(
                 app.request_comment_sync();
                 app.request_sync();
             }
-            AppEvent::RepoLabelsSuggested { owner, repo, labels } => {
+            AppEvent::RepoLabelsSuggested {
+                owner,
+                repo,
+                labels,
+            } => {
                 if app.current_owner() == Some(owner.as_str())
                     && app.current_repo() == Some(repo.as_str())
                     && app.view() == View::LabelPicker
@@ -1997,10 +2049,24 @@ enum AppEvent {
         page: u32,
         stats: SyncStats,
     },
-    SyncFinished { owner: String, repo: String, stats: SyncStats },
-    SyncFailed { owner: String, repo: String, message: String },
-    CommentsUpdated { issue_id: i64, count: usize },
-    CommentsFailed { issue_id: i64, message: String },
+    SyncFinished {
+        owner: String,
+        repo: String,
+        stats: SyncStats,
+    },
+    SyncFailed {
+        owner: String,
+        repo: String,
+        message: String,
+    },
+    CommentsUpdated {
+        issue_id: i64,
+        count: usize,
+    },
+    CommentsFailed {
+        issue_id: i64,
+        message: String,
+    },
     PullRequestFilesUpdated {
         issue_id: i64,
         files: Vec<PullRequestFile>,
@@ -2073,9 +2139,18 @@ enum AppEvent {
         message: String,
         target: LinkedPullRequestTarget,
     },
-    IssueUpdated { issue_number: i64, message: String },
-    IssueLabelsUpdated { issue_number: i64, labels: String },
-    IssueAssigneesUpdated { issue_number: i64, assignees: String },
+    IssueUpdated {
+        issue_number: i64,
+        message: String,
+    },
+    IssueLabelsUpdated {
+        issue_number: i64,
+        labels: String,
+    },
+    IssueAssigneesUpdated {
+        issue_number: i64,
+        assignees: String,
+    },
     IssueCommentUpdated {
         issue_number: i64,
         comment_id: i64,
@@ -2139,7 +2214,10 @@ fn maybe_start_comment_poll(
     event_tx: Sender<AppEvent>,
     last_poll: &mut Instant,
 ) -> Result<()> {
-    if !matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
+    if !matches!(
+        app.view(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles
+    ) {
         return Ok(());
     }
 
@@ -2165,7 +2243,14 @@ fn maybe_start_comment_poll(
         _ => return Ok(()),
     };
 
-    start_comment_sync(owner, repo, issue_id, issue_number, token.to_string(), event_tx);
+    start_comment_sync(
+        owner,
+        repo,
+        issue_id,
+        issue_number,
+        token.to_string(),
+        event_tx,
+    );
     app.set_comment_syncing(true);
     *last_poll = Instant::now();
     Ok(())
@@ -2176,7 +2261,10 @@ fn maybe_start_pull_request_files_sync(
     token: &str,
     event_tx: Sender<AppEvent>,
 ) -> Result<()> {
-    if !matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
+    if !matches!(
+        app.view(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles
+    ) {
         return Ok(());
     }
     if app.pull_request_files_syncing() {
@@ -2219,7 +2307,10 @@ fn maybe_start_pull_request_review_comments_sync(
     token: &str,
     event_tx: Sender<AppEvent>,
 ) -> Result<()> {
-    if !matches!(app.view(), View::IssueDetail | View::IssueComments | View::PullRequestFiles) {
+    if !matches!(
+        app.view(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles
+    ) {
         return Ok(());
     }
     if app.pull_request_review_comments_syncing() {
@@ -2382,7 +2473,8 @@ fn start_comment_sync(
             }
         };
 
-        let result = runtime.block_on(async { client.list_comments(&owner, &repo, issue_number).await });
+        let result =
+            runtime.block_on(async { client.list_comments(&owner, &repo, issue_number).await });
         let comments = match result {
             Ok(comments) => comments,
             Err(error) => {
@@ -2443,8 +2535,11 @@ fn start_pull_request_files_sync(
             }
         };
 
-        let result = runtime
-            .block_on(async { client.list_pull_request_files(&owner, &repo, issue_number).await });
+        let result = runtime.block_on(async {
+            client
+                .list_pull_request_files(&owner, &repo, issue_number)
+                .await
+        });
 
         let files = match result {
             Ok(files) => files,
@@ -2555,14 +2650,11 @@ fn start_pull_request_review_comments_sync(
 
         let mut mapped = Vec::new();
         for comment in comments {
-            let anchor = anchors
-                .get(&comment.id)
-                .cloned()
-                .or_else(|| {
-                    comment
-                        .in_reply_to_id
-                        .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
-                });
+            let anchor = anchors.get(&comment.id).cloned().or_else(|| {
+                comment
+                    .in_reply_to_id
+                    .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
+            });
             let (line, side, path, anchored) = match anchor {
                 Some((line, side, path)) => (line, side, path, true),
                 None => (0, ReviewSide::Right, comment.path.clone(), false),
@@ -2822,12 +2914,7 @@ fn start_toggle_pull_request_review_thread_resolution(
 
         let result = runtime.block_on(async {
             client
-                .set_pull_request_review_thread_resolved(
-                    &owner,
-                    &repo,
-                    thread_id.as_str(),
-                    resolve,
-                )
+                .set_pull_request_review_thread_resolved(&owner, &repo, thread_id.as_str(), resolve)
                 .await
         });
         match result {
@@ -2887,11 +2974,7 @@ fn start_set_pull_request_file_viewed(
 
         let result = runtime.block_on(async {
             client
-                .set_pull_request_file_viewed(
-                    pull_request_id.as_str(),
-                    path.as_str(),
-                    viewed,
-                )
+                .set_pull_request_file_viewed(pull_request_id.as_str(), path.as_str(), viewed)
                 .await
         });
         if result.is_ok() {
@@ -2906,7 +2989,10 @@ fn start_set_pull_request_file_viewed(
             issue_id,
             path,
             viewed,
-            message: result.err().map(|error| error.to_string()).unwrap_or_default(),
+            message: result
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_default(),
         });
     });
 }
@@ -3010,7 +3096,8 @@ fn start_update_comment(
         match result {
             Ok(()) => {
                 if let Ok(conn) = crate::store::open_db() {
-                    let _ = crate::store::update_comment_body_by_id(&conn, comment_id, body.as_str());
+                    let _ =
+                        crate::store::update_comment_body_by_id(&conn, comment_id, body.as_str());
                 }
                 let _ = event_tx.send(AppEvent::IssueCommentUpdated {
                     issue_number,
@@ -3062,15 +3149,16 @@ fn start_delete_comment(
             }
         };
 
-        let result = runtime
-            .block_on(async { client.delete_comment(&owner, &repo, comment_id).await });
+        let result =
+            runtime.block_on(async { client.delete_comment(&owner, &repo, comment_id).await });
 
         match result {
             Ok(()) => {
                 let mut count = 0usize;
                 if let Ok(conn) = crate::store::open_db() {
                     let _ = crate::store::delete_comment_by_id(&conn, comment_id);
-                    let comments = crate::store::comments_for_issue(&conn, issue_id).unwrap_or_default();
+                    let comments =
+                        crate::store::comments_for_issue(&conn, issue_id).unwrap_or_default();
                     count = comments.len();
                     let _ = update_issue_comments_count(&conn, issue_id, count as i64);
                 }
@@ -3259,7 +3347,8 @@ fn start_reopen_issue(
             }
         };
 
-        let result = runtime.block_on(async { client.reopen_issue(&owner, &repo, issue_number).await });
+        let result =
+            runtime.block_on(async { client.reopen_issue(&owner, &repo, issue_number).await });
 
         match result {
             Ok(()) => {

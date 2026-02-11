@@ -126,6 +126,18 @@ name = "close_default"
 body = "Closing this issue as resolved."
 ```
 
+## Themes
+Glyph supports built-in UI themes via `~/.config/glyph/config.toml`:
+
+```toml
+theme = "midnight"
+```
+
+Available built-in themes:
+- `github_dark` (default)
+- `midnight`
+- `graphite`
+
 ## Keybind Configuration
 - Every keyboard shortcut can be overridden.
 - Copy `keybinds.example.toml` to `~/.config/glyph/keybinds.toml` and edit values.

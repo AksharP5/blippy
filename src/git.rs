@@ -153,7 +153,7 @@ fn split_owner_repo(input: &str) -> Option<RepoSlug> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_remote_url, parse_remotes_output, RemoteInfo, RepoSlug};
+    use super::{RemoteInfo, RepoSlug, parse_remote_url, parse_remotes_output};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -226,8 +226,7 @@ mod tests {
 
         let root = super::repo_root_at(&dir).expect("repo root");
         let expected = std::fs::canonicalize(&dir).expect("canonicalize dir");
-        let actual = root
-            .map(|path| std::fs::canonicalize(path).expect("canonicalize root"));
+        let actual = root.map(|path| std::fs::canonicalize(path).expect("canonicalize root"));
         assert_eq!(actual, Some(expected));
 
         let _ = fs::remove_dir_all(&dir);
@@ -237,7 +236,15 @@ mod tests {
     fn list_github_remotes_reads_origin() {
         let dir = unique_temp_dir("git-remote");
         init_git_repo(&dir);
-        run_git(&dir, &["remote", "add", "origin", "https://github.com/acme/glyph.git"]);
+        run_git(
+            &dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/glyph.git",
+            ],
+        );
 
         let remotes = super::list_github_remotes_at(&dir).expect("list remotes");
         assert_eq!(remotes.len(), 1);

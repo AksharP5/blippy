@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
-use crate::git::{list_github_remotes_at, RemoteInfo};
-use crate::store::{upsert_local_repo, LocalRepoRow};
+use crate::git::{RemoteInfo, list_github_remotes_at};
+use crate::store::{LocalRepoRow, upsert_local_repo};
 
 pub fn index_repo_path(_conn: &rusqlite::Connection, _path: &Path) -> Result<usize> {
     let remotes = list_github_remotes_at(_path)?;
@@ -75,7 +75,12 @@ mod tests {
         init_git_repo(&repo_path);
         run_git(
             &repo_path,
-            &["remote", "add", "origin", "https://github.com/acme/glyph.git"],
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/glyph.git",
+            ],
         );
 
         let db_path = dir.join("glyph.db");

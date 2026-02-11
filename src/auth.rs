@@ -160,7 +160,7 @@ fn normalize_token(raw: &str) -> Option<String> {
 mod tests {
     use std::cell::RefCell;
 
-    use super::{resolve_auth_token, AuthMethod, AuthSources};
+    use super::{AuthMethod, AuthSources, resolve_auth_token};
 
     #[test]
     fn resolve_token_prefers_gh_token() {

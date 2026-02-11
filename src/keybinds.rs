@@ -10,14 +10,26 @@ pub struct BindingSpec {
 }
 
 pub const BINDING_SPECS: &[BindingSpec] = &[
-    BindingSpec { action: "quit", default: "q", description: "Quit app" },
+    BindingSpec {
+        action: "quit",
+        default: "q",
+        description: "Quit app",
+    },
     BindingSpec {
         action: "clear_and_repo_picker",
         default: "ctrl+g",
         description: "Clear search and open repo picker",
     },
-    BindingSpec { action: "repo_search", default: "/", description: "Search repos" },
-    BindingSpec { action: "issue_search", default: "/", description: "Search issues" },
+    BindingSpec {
+        action: "repo_search",
+        default: "/",
+        description: "Search repos",
+    },
+    BindingSpec {
+        action: "issue_search",
+        default: "/",
+        description: "Search issues",
+    },
     BindingSpec {
         action: "cycle_issue_filter",
         default: "f",
@@ -43,9 +55,21 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         default: "2",
         description: "Closed issues tab",
     },
-    BindingSpec { action: "refresh", default: "r", description: "Refresh data" },
-    BindingSpec { action: "jump_prefix", default: "g", description: "Jump prefix" },
-    BindingSpec { action: "jump_bottom", default: "shift+g", description: "Jump bottom" },
+    BindingSpec {
+        action: "refresh",
+        default: "r",
+        description: "Refresh data",
+    },
+    BindingSpec {
+        action: "jump_prefix",
+        default: "g",
+        description: "Jump prefix",
+    },
+    BindingSpec {
+        action: "jump_bottom",
+        default: "shift+g",
+        description: "Jump bottom",
+    },
     BindingSpec {
         action: "open_comments",
         default: "c",
@@ -106,13 +130,21 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         default: "shift+v",
         description: "Toggle visual range selection",
     },
-    BindingSpec { action: "edit_labels", default: "l", description: "Edit labels" },
+    BindingSpec {
+        action: "edit_labels",
+        default: "l",
+        description: "Edit labels",
+    },
     BindingSpec {
         action: "edit_assignees",
         default: "shift+a",
         description: "Edit assignees",
     },
-    BindingSpec { action: "reopen_issue", default: "u", description: "Reopen issue" },
+    BindingSpec {
+        action: "reopen_issue",
+        default: "u",
+        description: "Reopen issue",
+    },
     BindingSpec {
         action: "popup_toggle",
         default: "space",
@@ -123,14 +155,26 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         default: "enter",
         description: "Submit or activate selection",
     },
-    BindingSpec { action: "back", default: "b", description: "Back" },
+    BindingSpec {
+        action: "back",
+        default: "b",
+        description: "Back",
+    },
     BindingSpec {
         action: "back_escape",
         default: "esc",
         description: "Back via escape",
     },
-    BindingSpec { action: "move_up", default: "k", description: "Move up" },
-    BindingSpec { action: "move_down", default: "j", description: "Move down" },
+    BindingSpec {
+        action: "move_up",
+        default: "k",
+        description: "Move up",
+    },
+    BindingSpec {
+        action: "move_down",
+        default: "j",
+        description: "Move down",
+    },
     BindingSpec {
         action: "open_browser",
         default: "o",
@@ -156,7 +200,11 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         default: "ctrl+y",
         description: "Copy status text",
     },
-    BindingSpec { action: "page_up", default: "ctrl+u", description: "Page up" },
+    BindingSpec {
+        action: "page_up",
+        default: "ctrl+u",
+        description: "Page up",
+    },
     BindingSpec {
         action: "page_down",
         default: "ctrl+d",
@@ -224,7 +272,9 @@ impl Keybinds {
             if let Some(override_key) = override_key {
                 remap.insert(override_key.clone(), default_event);
                 if override_key != default_key {
-                    *overridden_usage.entry(default_key.clone()).or_insert(0usize) += 1;
+                    *overridden_usage
+                        .entry(default_key.clone())
+                        .or_insert(0usize) += 1;
                 }
                 continue;
             }
@@ -234,7 +284,10 @@ impl Keybinds {
 
         let mut disabled_defaults = HashSet::new();
         for (default_key, total) in default_usage {
-            let overridden = overridden_usage.get(default_key.as_str()).copied().unwrap_or(0usize);
+            let overridden = overridden_usage
+                .get(default_key.as_str())
+                .copied()
+                .unwrap_or(0usize);
             if overridden >= total && total > 0 {
                 disabled_defaults.insert(default_key);
             }
@@ -370,7 +423,7 @@ pub fn normalize_event(event: KeyEvent) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_binding, parse_binding, Keybinds};
+    use super::{Keybinds, normalize_binding, parse_binding};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::collections::HashMap;
 
@@ -400,7 +453,8 @@ mod tests {
         assert_eq!(remapped.code, KeyCode::Char('q'));
         assert!(remapped.modifiers.is_empty());
 
-        let disabled_default = keybinds.remap_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        let disabled_default =
+            keybinds.remap_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(disabled_default.is_none());
     }
 }

@@ -1,7 +1,7 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Config {
     pub keymap: Option<String>,
+    pub theme: Option<String>,
     #[serde(default)]
     pub keybinds: HashMap<String, String>,
     #[serde(default)]
@@ -37,8 +38,9 @@ impl Config {
         if keybinds_path.exists() {
             let contents = fs::read_to_string(&keybinds_path)
                 .with_context(|| format!("Failed to read config at {}", keybinds_path.display()))?;
-            let keybinds_file: KeybindsFile = toml::from_str(&contents)
-                .with_context(|| format!("Failed to parse config at {}", keybinds_path.display()))?;
+            let keybinds_file: KeybindsFile = toml::from_str(&contents).with_context(|| {
+                format!("Failed to parse config at {}", keybinds_path.display())
+            })?;
             config.keybinds.extend(keybinds_file.keybinds);
         }
         Ok(config)
@@ -50,8 +52,8 @@ impl Config {
             fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create config dir at {}", parent.display()))?;
         }
-        let contents = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize config")?;
+        let contents =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize config")?;
         fs::write(&path, contents)
             .with_context(|| format!("Failed to write config at {}", path.display()))?;
         Ok(())
@@ -86,6 +88,16 @@ mod tests {
         let config: Config = toml::from_str(input).expect("parse config");
         assert_eq!(config.keybinds.get("quit"), Some(&"ctrl+q".to_string()));
         assert_eq!(config.keybinds.get("refresh"), Some(&"ctrl+s".to_string()));
+    }
+
+    #[test]
+    fn parses_theme_name() {
+        let input = r#"
+            theme = "midnight"
+        "#;
+
+        let config: Config = toml::from_str(input).expect("parse config");
+        assert_eq!(config.theme.as_deref(), Some("midnight"));
     }
 }
 

@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT};
+use anyhow::{Result, anyhow};
+use reqwest::header::{ACCEPT, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH, USER_AGENT};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -105,13 +105,18 @@ impl GitHubClient {
     pub fn new(token: &str) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("glyph"));
-        headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.github+json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.github+json"),
+        );
         headers.insert(
             "X-GitHub-Api-Version",
             HeaderValue::from_static(API_VERSION),
         );
 
-        let client = reqwest::Client::builder().default_headers(headers).build()?;
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()?;
         Ok(Self {
             client,
             token: token.to_string(),
@@ -154,17 +159,13 @@ impl GitHubClient {
         since: Option<&str>,
     ) -> Result<ApiIssuesPageResult> {
         let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
-        let mut request = self
-            .client
-            .get(url)
-            .bearer_auth(&self.token)
-            .query(&[
-                ("state", "all"),
-                ("sort", "updated"),
-                ("direction", "desc"),
-                ("per_page", "100"),
-                ("page", &page.to_string()),
-            ]);
+        let mut request = self.client.get(url).bearer_auth(&self.token).query(&[
+            ("state", "all"),
+            ("sort", "updated"),
+            ("direction", "desc"),
+            ("per_page", "100"),
+            ("page", &page.to_string()),
+        ]);
         if let Some(value) = if_none_match {
             request = request.header(IF_NONE_MATCH, value);
         }
@@ -401,7 +402,10 @@ impl GitHubClient {
         repo: &str,
         pull_number: i64,
     ) -> Result<String> {
-        let url = format!("{}/repos/{}/{}/pulls/{}", API_BASE, owner, repo, pull_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            API_BASE, owner, repo, pull_number
+        );
         let response = self
             .client
             .get(url)
@@ -649,7 +653,11 @@ impl GitHubClient {
         Ok(())
     }
 
-    async fn graphql(&self, query: &str, variables: serde_json::Value) -> Result<serde_json::Value> {
+    async fn graphql(
+        &self,
+        query: &str,
+        variables: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let response = self
             .client
             .post(format!("{}/graphql", API_BASE))
@@ -769,12 +777,7 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn close_issue(
-        &self,
-        owner: &str,
-        repo: &str,
-        issue_number: i64,
-    ) -> Result<()> {
+    pub async fn close_issue(&self, owner: &str, repo: &str, issue_number: i64) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}",
             API_BASE, owner, repo, issue_number
@@ -789,12 +792,7 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn reopen_issue(
-        &self,
-        owner: &str,
-        repo: &str,
-        issue_number: i64,
-    ) -> Result<()> {
+    pub async fn reopen_issue(&self, owner: &str, repo: &str, issue_number: i64) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}",
             API_BASE, owner, repo, issue_number
