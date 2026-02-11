@@ -22,12 +22,6 @@ pub trait GitHubApi {
         if_none_match: Option<&str>,
         since: Option<&str>,
     ) -> Result<ApiIssuesPageResult>;
-    async fn list_comments(
-        &self,
-        owner: &str,
-        repo: &str,
-        issue_number: i64,
-    ) -> Result<Vec<ApiComment>>;
 }
 
 #[async_trait]
@@ -46,15 +40,6 @@ impl GitHubApi for GitHubClient {
     ) -> Result<ApiIssuesPageResult> {
         self.list_issues_page_conditional(owner, repo, page, if_none_match, since)
             .await
-    }
-
-    async fn list_comments(
-        &self,
-        owner: &str,
-        repo: &str,
-        issue_number: i64,
-    ) -> Result<Vec<ApiComment>> {
-        self.list_comments(owner, repo, issue_number).await
     }
 }
 
@@ -254,7 +239,6 @@ mod tests {
     use crate::github::{ApiComment, ApiIssue, ApiIssuesPageResult, ApiLabel, ApiRepo, ApiUser};
     use crate::store::{comments_for_issue, get_repo_by_slug, list_issues, open_db_at};
     use async_trait::async_trait;
-    use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -398,7 +382,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues,
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
@@ -424,7 +407,6 @@ mod tests {
     struct FakeGitHub {
         repo: ApiRepo,
         issues: Vec<ApiIssue>,
-        comments: HashMap<i64, Vec<ApiComment>>,
         fail_get_repo: bool,
         fail_issue_page: Option<u32>,
         issue_page_size: usize,
@@ -487,19 +469,6 @@ mod tests {
                 issues: self.issues[start..end].to_vec(),
                 etag: self.page_etag.clone(),
             }))
-        }
-
-        async fn list_comments(
-            &self,
-            _owner: &str,
-            _repo: &str,
-            issue_number: i64,
-        ) -> anyhow::Result<Vec<ApiComment>> {
-            Ok(self
-                .comments
-                .get(&issue_number)
-                .cloned()
-                .unwrap_or_default())
         }
     }
 
@@ -571,7 +540,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues,
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: Some(3),
             issue_page_size: 1,
@@ -643,7 +611,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues,
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 1,
@@ -717,7 +684,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues,
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
@@ -769,7 +735,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues: Vec::new(),
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
@@ -822,7 +787,6 @@ mod tests {
                 permissions: None,
             },
             issues: Vec::new(),
-            comments: HashMap::new(),
             fail_get_repo: true,
             fail_issue_page: None,
             issue_page_size: 100,
@@ -882,7 +846,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues,
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: Some(2),
             issue_page_size: 1,
@@ -943,7 +906,6 @@ mod tests {
         let client = FakeGitHub {
             repo,
             issues,
-            comments: HashMap::new(),
             fail_get_repo: false,
             fail_issue_page: Some(2),
             issue_page_size: 1,

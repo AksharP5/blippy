@@ -9,6 +9,7 @@ const API_VERSION: &str = "2022-11-28";
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiUser {
     pub login: String,
+    #[allow(dead_code)]
     #[serde(rename = "type")]
     pub user_type: Option<String>,
 }
@@ -22,6 +23,7 @@ pub struct ApiLabel {
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct ApiRepoPermissions {
+    #[allow(dead_code)]
     #[serde(default)]
     pub pull: bool,
     #[serde(default)]
@@ -45,6 +47,7 @@ pub struct ApiIssue {
     pub updated_at: Option<String>,
     pub labels: Vec<ApiLabel>,
     pub assignees: Vec<ApiUser>,
+    #[allow(dead_code)]
     pub user: ApiUser,
     pub pull_request: Option<serde_json::Value>,
 }
@@ -153,21 +156,6 @@ impl GitHubClient {
         Ok(response.json::<ApiRepo>().await?)
     }
 
-    pub async fn list_issues_page(
-        &self,
-        owner: &str,
-        repo: &str,
-        page: u32,
-    ) -> Result<Vec<ApiIssue>> {
-        let result = self
-            .list_issues_page_conditional(owner, repo, page, None, None)
-            .await?;
-        match result {
-            ApiIssuesPageResult::NotModified => Ok(Vec::new()),
-            ApiIssuesPageResult::Page(page) => Ok(page.issues),
-        }
-    }
-
     pub async fn list_issues_page_conditional(
         &self,
         owner: &str,
@@ -204,20 +192,6 @@ impl GitHubClient {
             .map(ToString::to_string);
         let issues = response.json::<Vec<ApiIssue>>().await?;
         Ok(ApiIssuesPageResult::Page(ApiIssuesPage { issues, etag }))
-    }
-
-    pub async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<ApiIssue>> {
-        let mut page = 1u32;
-        let mut issues = Vec::new();
-        loop {
-            let batch = self.list_issues_page(owner, repo, page).await?;
-            if batch.is_empty() {
-                break;
-            }
-            issues.extend(batch);
-            page += 1;
-        }
-        Ok(issues)
     }
 
     pub async fn list_comments(

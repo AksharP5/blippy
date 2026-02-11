@@ -1053,10 +1053,6 @@ impl App {
         });
     }
 
-    pub fn pull_request_review_comments(&self) -> &[PullRequestReviewComment] {
-        &self.pull_request_review_comments
-    }
-
     pub fn pull_request_review_focus(&self) -> PullRequestReviewFocus {
         self.pull_request_review_focus
     }
@@ -1071,14 +1067,6 @@ impl App {
 
     pub fn pull_request_review_side(&self) -> ReviewSide {
         self.pull_request_review_side
-    }
-
-    pub fn pull_request_visual_mode(&self) -> bool {
-        self.pull_request_visual_mode
-    }
-
-    pub fn pull_request_visual_anchor(&self) -> Option<usize> {
-        self.pull_request_visual_anchor
     }
 
     pub fn pull_request_visual_range(&self) -> Option<(usize, usize)> {
@@ -1112,14 +1100,6 @@ impl App {
         self.pull_request_files.get(self.selected_pull_request_file)
     }
 
-    pub fn selected_pull_request_diff_rows_len(&self) -> usize {
-        let file = match self.selected_pull_request_file_row() {
-            Some(file) => file,
-            None => return 0,
-        };
-        parse_patch(file.patch.as_deref()).len()
-    }
-
     pub fn selected_pull_request_review_target(&self) -> Option<PullRequestReviewTarget> {
         let file = self.selected_pull_request_file_row()?;
         let rows = parse_patch(file.patch.as_deref());
@@ -1140,16 +1120,6 @@ impl App {
                     && comment.side == side
                     && comment.line == line
             })
-            .collect::<Vec<&PullRequestReviewComment>>()
-    }
-
-    pub fn pull_request_unanchored_comments_for_path(
-        &self,
-        path: &str,
-    ) -> Vec<&PullRequestReviewComment> {
-        self.pull_request_review_comments
-            .iter()
-            .filter(|comment| !comment.anchored && comment.path == path)
             .collect::<Vec<&PullRequestReviewComment>>()
     }
 

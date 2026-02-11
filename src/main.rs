@@ -51,7 +51,7 @@ use crate::sync::{SyncStats, sync_repo_with_progress};
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
 
-const AUTH_DEBUG_ENV: &str = "blippy_AUTH_DEBUG";
+const AUTH_DEBUG_ENV: &str = "BLIPPY_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const COMMENT_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;

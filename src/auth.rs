@@ -65,10 +65,6 @@ pub fn resolve_auth_token<S: AuthSources>(sources: &S) -> Result<AuthToken> {
     })
 }
 
-pub fn resolve_token<S: AuthSources>(sources: &S) -> Result<String> {
-    Ok(resolve_auth_token(sources)?.value)
-}
-
 pub struct SystemAuth;
 
 impl SystemAuth {

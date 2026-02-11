@@ -75,10 +75,6 @@ pub fn repo_root() -> Result<Option<std::path::PathBuf>> {
     repo_root_at(std::path::Path::new("."))
 }
 
-pub fn list_github_remotes() -> Result<Vec<RemoteInfo>> {
-    list_github_remotes_at(std::path::Path::new("."))
-}
-
 fn repo_root_at(_path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
     let output = std::process::Command::new("git")
         .arg("-C")

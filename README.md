@@ -48,7 +48,7 @@ gh auth token --hostname github.com
 
 To see which auth source was used (development only):
 ```bash
-blippy_AUTH_DEBUG=1 cargo run
+BLIPPY_AUTH_DEBUG=1 cargo run
 ```
 
 To force the PAT prompt:
