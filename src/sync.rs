@@ -268,6 +268,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let row = map_repo_to_row(&repo);
         assert_eq!(row.id, 1);
@@ -310,6 +311,7 @@ mod tests {
             updated_at: Some("2024-01-01T00:00:00Z".to_string()),
             labels: vec![ApiLabel {
                 name: "bug".to_string(),
+                color: "ff0000".to_string(),
             }],
             assignees: vec![ApiUser {
                 login: "dev".to_string(),
@@ -357,6 +359,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let issues = vec![
             ApiIssue {
@@ -442,6 +445,7 @@ mod tests {
                     login: self.repo.owner.login.clone(),
                     user_type: None,
                 },
+                permissions: None,
             })
         }
 
@@ -512,6 +516,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let issues = vec![
             ApiIssue {
@@ -599,6 +604,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let issues = vec![
             ApiIssue {
@@ -672,6 +678,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let issues = vec![
             ApiIssue {
@@ -757,6 +764,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let client = FakeGitHub {
             repo,
@@ -811,6 +819,7 @@ mod tests {
                     login: "acme".to_string(),
                     user_type: None,
                 },
+                permissions: None,
             },
             issues: Vec::new(),
             comments: HashMap::new(),
@@ -852,6 +861,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let issues = vec![ApiIssue {
             id: 10,
@@ -912,6 +922,7 @@ mod tests {
                 login: "acme".to_string(),
                 user_type: None,
             },
+            permissions: None,
         };
         let issues = vec![ApiIssue {
             id: 11,

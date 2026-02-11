@@ -255,10 +255,10 @@ fn pull_request_hunk_range_for_row(
 impl PendingIssueAction {
     fn label(self) -> &'static str {
         match self {
-            Self::Closing => "closing...",
-            Self::Reopening => "reopening...",
-            Self::UpdatingLabels => "updating labels...",
-            Self::UpdatingAssignees => "updating assignees...",
+            Self::Closing => "closing",
+            Self::Reopening => "reopening",
+            Self::UpdatingLabels => "updating labels",
+            Self::UpdatingAssignees => "updating assignees",
         }
     }
 }
@@ -362,6 +362,12 @@ pub struct App {
     status: String,
     scanning: bool,
     syncing: bool,
+    repo_permissions_syncing: bool,
+    repo_permissions_sync_requested: bool,
+    repo_issue_metadata_editable: Option<bool>,
+    repo_labels_syncing: bool,
+    repo_labels_sync_requested: bool,
+    repo_label_colors: HashMap<String, String>,
     comment_syncing: bool,
     pull_request_files_syncing: bool,
     pull_request_review_comments_syncing: bool,
@@ -457,6 +463,12 @@ impl App {
             status: String::new(),
             scanning: false,
             syncing: false,
+            repo_permissions_syncing: false,
+            repo_permissions_sync_requested: false,
+            repo_issue_metadata_editable: None,
+            repo_labels_syncing: false,
+            repo_labels_sync_requested: false,
+            repo_label_colors: HashMap::new(),
             comment_syncing: false,
             pull_request_files_syncing: false,
             pull_request_review_comments_syncing: false,
@@ -941,6 +953,23 @@ impl App {
         self.syncing
     }
 
+    pub fn repo_permissions_syncing(&self) -> bool {
+        self.repo_permissions_syncing
+    }
+
+    pub fn repo_labels_syncing(&self) -> bool {
+        self.repo_labels_syncing
+    }
+
+    pub fn repo_issue_metadata_editable(&self) -> Option<bool> {
+        self.repo_issue_metadata_editable
+    }
+
+    pub fn repo_label_color(&self, label: &str) -> Option<&str> {
+        let key = label.trim().to_ascii_lowercase();
+        self.repo_label_colors.get(&key).map(String::as_str)
+    }
+
     pub fn comment_syncing(&self) -> bool {
         self.comment_syncing
     }
@@ -1200,7 +1229,7 @@ impl App {
             if self.view == View::RepoPicker {
                 self.rescan_requested = true;
                 self.scanning = true;
-                self.status = "Scanning...".to_string();
+                self.status = "Scanning".to_string();
             }
             return;
         }
@@ -1276,7 +1305,7 @@ impl App {
             }
             KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.request_sync();
-                self.status = "Syncing...".to_string();
+                self.status = "Syncing".to_string();
             }
             KeyCode::Char('r')
                 if key.modifiers.is_empty()
@@ -1291,7 +1320,7 @@ impl App {
                     self.request_pull_request_files_sync();
                     self.request_pull_request_review_comments_sync();
                 }
-                self.status = "Syncing issue and comments...".to_string();
+                self.status = "Syncing issue and comments".to_string();
             }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
                 if self.pending_g {
@@ -2079,6 +2108,18 @@ impl App {
         self.syncing = syncing;
     }
 
+    pub fn set_repo_permissions_syncing(&mut self, syncing: bool) {
+        self.repo_permissions_syncing = syncing;
+    }
+
+    pub fn set_repo_labels_syncing(&mut self, syncing: bool) {
+        self.repo_labels_syncing = syncing;
+    }
+
+    pub fn set_repo_issue_metadata_editable(&mut self, editable: Option<bool>) {
+        self.repo_issue_metadata_editable = editable;
+    }
+
     pub fn set_comment_syncing(&mut self, syncing: bool) {
         self.comment_syncing = syncing;
     }
@@ -2125,6 +2166,26 @@ impl App {
         self.sync_requested = true;
     }
 
+    pub fn request_repo_permissions_sync(&mut self) {
+        self.repo_permissions_sync_requested = true;
+    }
+
+    pub fn take_repo_permissions_sync_request(&mut self) -> bool {
+        let requested = self.repo_permissions_sync_requested;
+        self.repo_permissions_sync_requested = false;
+        requested
+    }
+
+    pub fn request_repo_labels_sync(&mut self) {
+        self.repo_labels_sync_requested = true;
+    }
+
+    pub fn take_repo_labels_sync_request(&mut self) -> bool {
+        let requested = self.repo_labels_sync_requested;
+        self.repo_labels_sync_requested = false;
+        requested
+    }
+
     pub fn take_sync_request(&mut self) -> bool {
         let requested = self.sync_requested;
         self.sync_requested = false;
@@ -2137,6 +2198,12 @@ impl App {
         self.current_repo_path = path.map(ToString::to_string);
         self.current_issue_id = None;
         self.current_issue_number = None;
+        self.repo_permissions_syncing = false;
+        self.repo_permissions_sync_requested = true;
+        self.repo_issue_metadata_editable = None;
+        self.repo_labels_syncing = false;
+        self.repo_labels_sync_requested = true;
+        self.repo_label_colors.clear();
         self.linked_pull_requests.clear();
         self.linked_issues.clear();
         self.linked_pull_request_lookups.clear();
@@ -2382,6 +2449,17 @@ impl App {
         self.label_options = merged;
         if let Some(index) = self.filtered_label_indices().first() {
             self.selected_label_option = *index;
+        }
+    }
+
+    pub fn merge_repo_label_colors(&mut self, labels: Vec<(String, String)>) {
+        for (name, color) in labels {
+            let key = name.trim().to_ascii_lowercase();
+            let value = color.trim().trim_start_matches('#').to_string();
+            if key.is_empty() || value.len() != 6 {
+                continue;
+            }
+            self.repo_label_colors.insert(key, value);
         }
     }
 

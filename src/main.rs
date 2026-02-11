@@ -79,7 +79,7 @@ fn main() -> Result<()> {
     let (event_tx, event_rx) = mpsc::channel();
     if app.view() == View::RepoPicker {
         app.set_scanning(true);
-        app.set_status("Scanning...");
+        app.set_status("Scanning");
     }
     maybe_start_scan(&app, event_tx.clone())?;
 
@@ -230,6 +230,8 @@ fn drive_background_tasks(
 ) -> Result<()> {
     maybe_start_issue_poll(app, last_issue_poll);
     maybe_start_repo_sync(app, token, event_tx.clone())?;
+    maybe_start_repo_permissions_sync(app, token, event_tx.clone());
+    maybe_start_repo_labels_sync(app, token, event_tx.clone());
     maybe_start_comment_poll(app, token, event_tx.clone(), last_comment_poll)?;
     maybe_start_pull_request_files_sync(app, token, event_tx.clone())?;
     maybe_start_pull_request_review_comments_sync(app, token, event_tx.clone())?;
@@ -512,6 +514,9 @@ fn handle_actions(
             update_pull_request_review_comment(app, token, comment, event_tx.clone())?;
         }
         AppAction::EditLabels => {
+            if !ensure_can_edit_issue_metadata(app) {
+                return Ok(());
+            }
             let return_view = app.view();
             let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
                 Some(issue) => issue,
@@ -524,16 +529,12 @@ fn handle_actions(
             let labels = selected_issue_labels(app).unwrap_or_default();
             let options = label_options_for_repo(app);
             app.open_label_picker(return_view, options, labels.as_str());
-            if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
-                start_fetch_labels(
-                    owner.to_string(),
-                    repo.to_string(),
-                    token.to_string(),
-                    event_tx.clone(),
-                );
-            }
+            app.request_repo_labels_sync();
         }
         AppAction::EditAssignees => {
+            if !ensure_can_edit_issue_metadata(app) {
+                return Ok(());
+            }
             let return_view = app.view();
             let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
                 Some(issue) => issue,
@@ -664,7 +665,7 @@ fn close_issue_with_comment(
     start_close_issue(owner, repo, issue_number, token.to_string(), body, event_tx);
     app.set_pending_issue_action(issue_number, PendingIssueAction::Closing);
     app.set_view(View::Issues);
-    app.set_status("Closing issue...".to_string());
+    app.set_status("Closing issue".to_string());
     Ok(())
 }
 
@@ -692,7 +693,7 @@ fn post_issue_comment(
 
     start_add_comment(owner, repo, issue_number, token.to_string(), body, event_tx);
     app.set_view(app.editor_cancel_view());
-    app.set_status("Posting comment...".to_string());
+    app.set_status("Posting comment".to_string());
     Ok(())
 }
 
@@ -741,7 +742,7 @@ fn update_issue_comment(
         event_tx,
     );
     app.set_view(app.editor_cancel_view());
-    app.set_status("Updating comment...".to_string());
+    app.set_status("Updating comment".to_string());
     Ok(())
 }
 
@@ -801,7 +802,7 @@ fn submit_pull_request_review_comment(
         event_tx,
     );
     app.set_view(app.editor_cancel_view());
-    app.set_status("Submitting review comment...".to_string());
+    app.set_status("Submitting review comment".to_string());
     Ok(())
 }
 
@@ -849,7 +850,7 @@ fn update_pull_request_review_comment(
         event_tx,
     );
     app.set_view(app.editor_cancel_view());
-    app.set_status("Updating review comment...".to_string());
+    app.set_status("Updating review comment".to_string());
     Ok(())
 }
 
@@ -889,7 +890,7 @@ fn delete_pull_request_review_comment(
         token.to_string(),
         event_tx,
     );
-    app.set_status("Deleting review comment...".to_string());
+    app.set_status("Deleting review comment".to_string());
     Ok(())
 }
 
@@ -938,10 +939,10 @@ fn resolve_pull_request_review_comment(
         event_tx,
     );
     if resolve {
-        app.set_status("Resolving review thread...".to_string());
+        app.set_status("Resolving review thread".to_string());
         return Ok(());
     }
-    app.set_status("Reopening review thread...".to_string());
+    app.set_status("Reopening review thread".to_string());
     Ok(())
 }
 
@@ -968,7 +969,7 @@ fn toggle_pull_request_file_viewed(
         Some(pull_request_id) => pull_request_id.to_string(),
         None => {
             app.request_pull_request_files_sync();
-            app.set_status("Loading pull request metadata...".to_string());
+            app.set_status("Loading pull request metadata".to_string());
             return Ok(());
         }
     };
@@ -990,10 +991,10 @@ fn toggle_pull_request_file_viewed(
         event_tx,
     );
     if viewed {
-        app.set_status(format!("Marking {} viewed on GitHub...", path));
+        app.set_status(format!("Marking {} viewed on GitHub", path));
         return Ok(());
     }
-    app.set_status(format!("Marking {} unviewed on GitHub...", path));
+    app.set_status(format!("Marking {} unviewed on GitHub", path));
     Ok(())
 }
 
@@ -1030,7 +1031,7 @@ fn delete_issue_comment(app: &mut App, token: &str, event_tx: Sender<AppEvent>) 
         token.to_string(),
         event_tx,
     );
-    app.set_status("Deleting comment...".to_string());
+    app.set_status("Deleting comment".to_string());
     Ok(())
 }
 
@@ -1067,7 +1068,7 @@ fn update_issue_labels(
     );
     app.set_pending_issue_action(issue_number, PendingIssueAction::UpdatingLabels);
     app.set_view(app.editor_cancel_view());
-    app.set_status(format!("Updating labels for #{}...", issue_number));
+    app.set_status(format!("Updating labels for #{}", issue_number));
     Ok(())
 }
 
@@ -1104,7 +1105,7 @@ fn update_issue_assignees(
     );
     app.set_pending_issue_action(issue_number, PendingIssueAction::UpdatingAssignees);
     app.set_view(app.editor_cancel_view());
-    app.set_status(format!("Updating assignees for #{}...", issue_number));
+    app.set_status(format!("Updating assignees for #{}", issue_number));
     Ok(())
 }
 
@@ -1136,8 +1137,26 @@ fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent>) -> Resul
 
     start_reopen_issue(owner, repo, issue_number, token.to_string(), event_tx);
     app.set_pending_issue_action(issue_number, PendingIssueAction::Reopening);
-    app.set_status("Reopening issue...".to_string());
+    app.set_status("Reopening issue".to_string());
     Ok(())
+}
+
+fn ensure_can_edit_issue_metadata(app: &mut App) -> bool {
+    if app.repo_issue_metadata_editable() == Some(true) {
+        return true;
+    }
+    if app.repo_issue_metadata_editable() == Some(false) {
+        app.set_status("No permission to edit labels/assignees in this repo".to_string());
+        return false;
+    }
+
+    app.request_repo_permissions_sync();
+    if app.repo_permissions_syncing() {
+        app.set_status("Checking repo permissions".to_string());
+        return false;
+    }
+    app.set_status("Checking repo permissions, try again in a moment".to_string());
+    false
 }
 
 fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<String>)> {
@@ -1649,10 +1668,10 @@ fn open_linked_pull_request(
         target,
     );
     if target == LinkedPullRequestTarget::Tui {
-        app.set_status("Looking up linked pull request for TUI...".to_string());
+        app.set_status("Looking up linked pull request for TUI".to_string());
         return Ok(());
     }
-    app.set_status("Looking up linked pull request for browser...".to_string());
+    app.set_status("Looking up linked pull request for browser".to_string());
     Ok(())
 }
 
@@ -1692,10 +1711,10 @@ fn open_linked_issue(
         target,
     );
     if target == LinkedIssueTarget::Tui {
-        app.set_status("Looking up linked issue for TUI...".to_string());
+        app.set_status("Looking up linked issue for TUI".to_string());
         return Ok(());
     }
-    app.set_status("Looking up linked issue for browser...".to_string());
+    app.set_status("Looking up linked issue for browser".to_string());
     Ok(())
 }
 
@@ -2029,6 +2048,7 @@ fn handle_events(
                     && app.current_repo() == Some(repo.as_str())
                 {
                     refresh_current_repo_issues(app, conn)?;
+                    app.request_repo_labels_sync();
                     let (open_count, closed_count) = app.issue_counts();
                     if stats.not_modified {
                         app.set_status(format!(
@@ -2452,11 +2472,18 @@ fn handle_events(
                 repo,
                 labels,
             } => {
+                app.set_repo_labels_syncing(false);
                 if app.current_owner() == Some(owner.as_str())
                     && app.current_repo() == Some(repo.as_str())
-                    && app.view() == View::LabelPicker
                 {
-                    app.merge_label_options(labels);
+                    app.merge_repo_label_colors(labels.clone());
+                    if app.view() == View::LabelPicker {
+                        let options = labels
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<String>>();
+                        app.merge_label_options(options);
+                    }
                 }
             }
             AppEvent::RepoAssigneesSuggested {
@@ -2469,6 +2496,36 @@ fn handle_events(
                     && app.view() == View::AssigneePicker
                 {
                     app.merge_assignee_options(assignees);
+                }
+            }
+            AppEvent::RepoPermissionsResolved {
+                owner,
+                repo,
+                can_edit_issue_metadata,
+            } => {
+                if app.current_owner() == Some(owner.as_str())
+                    && app.current_repo() == Some(repo.as_str())
+                {
+                    app.set_repo_permissions_syncing(false);
+                    app.set_repo_issue_metadata_editable(Some(can_edit_issue_metadata));
+                    if !can_edit_issue_metadata {
+                        app.set_status(
+                            "No permission to edit labels/assignees in this repo".to_string(),
+                        );
+                    }
+                }
+            }
+            AppEvent::RepoPermissionsFailed {
+                owner,
+                repo,
+                message,
+            } => {
+                if app.current_owner() == Some(owner.as_str())
+                    && app.current_repo() == Some(repo.as_str())
+                {
+                    app.set_repo_permissions_syncing(false);
+                    app.set_repo_issue_metadata_editable(None);
+                    app.set_status(format!("Repo permission check failed: {}", message));
                 }
             }
         }
@@ -2619,12 +2676,22 @@ enum AppEvent {
     RepoLabelsSuggested {
         owner: String,
         repo: String,
-        labels: Vec<String>,
+        labels: Vec<(String, String)>,
     },
     RepoAssigneesSuggested {
         owner: String,
         repo: String,
         assignees: Vec<String>,
+    },
+    RepoPermissionsResolved {
+        owner: String,
+        repo: String,
+        can_edit_issue_metadata: bool,
+    },
+    RepoPermissionsFailed {
+        owner: String,
+        repo: String,
+        message: String,
     },
 }
 
@@ -2648,8 +2715,42 @@ fn maybe_start_repo_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>)
 
     start_repo_sync(owner, repo, token.to_string(), event_tx);
     app.set_syncing(true);
-    app.set_status("Syncing...".to_string());
+    app.set_status("Syncing".to_string());
     Ok(())
+}
+
+fn maybe_start_repo_permissions_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) {
+    if app.repo_permissions_syncing() {
+        return;
+    }
+    if !app.take_repo_permissions_sync_request() {
+        return;
+    }
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => return,
+    };
+
+    start_fetch_repo_permissions(owner, repo, token.to_string(), event_tx);
+    app.set_repo_permissions_syncing(true);
+}
+
+fn maybe_start_repo_labels_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) {
+    if app.repo_labels_syncing() {
+        return;
+    }
+    if !app.take_repo_labels_sync_request() {
+        return;
+    }
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => return,
+    };
+
+    start_fetch_labels(owner, repo, token.to_string(), event_tx);
+    app.set_repo_labels_syncing(true);
 }
 
 fn maybe_start_issue_poll(app: &mut App, last_poll: &mut Instant) {
@@ -2758,7 +2859,7 @@ fn maybe_start_pull_request_files_sync(
         event_tx,
     );
     app.set_pull_request_files_syncing(true);
-    app.set_status("Loading pull request changes...".to_string());
+    app.set_status("Loading pull request changes".to_string());
     Ok(())
 }
 
@@ -3754,24 +3855,41 @@ fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Send
     thread::spawn(move || {
         let client = match GitHubClient::new(&token) {
             Ok(client) => client,
-            Err(_) => return,
+            Err(_) => {
+                let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
+                    owner,
+                    repo,
+                    labels: Vec::new(),
+                });
+                return;
+            }
         };
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
             Ok(runtime) => runtime,
-            Err(_) => return,
+            Err(_) => {
+                let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
+                    owner,
+                    repo,
+                    labels: Vec::new(),
+                });
+                return;
+            }
         };
 
         let labels = runtime.block_on(async { client.list_labels(&owner, &repo).await });
-        if let Ok(labels) = labels {
-            let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
-                owner,
-                repo,
-                labels,
-            });
-        }
+        let labels = labels
+            .unwrap_or_default()
+            .into_iter()
+            .map(|label| (label.name, label.color))
+            .collect::<Vec<(String, String)>>();
+        let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
+            owner,
+            repo,
+            labels,
+        });
     });
 }
 
@@ -3779,23 +3897,93 @@ fn start_fetch_assignees(owner: String, repo: String, token: String, event_tx: S
     thread::spawn(move || {
         let client = match GitHubClient::new(&token) {
             Ok(client) => client,
-            Err(_) => return,
+            Err(_) => {
+                let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
+                    owner,
+                    repo,
+                    assignees: Vec::new(),
+                });
+                return;
+            }
         };
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
             Ok(runtime) => runtime,
-            Err(_) => return,
+            Err(_) => {
+                let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
+                    owner,
+                    repo,
+                    assignees: Vec::new(),
+                });
+                return;
+            }
         };
 
         let assignees = runtime.block_on(async { client.list_assignees(&owner, &repo).await });
-        if let Ok(assignees) = assignees {
-            let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
-                owner,
-                repo,
-                assignees,
-            });
+        let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
+            owner,
+            repo,
+            assignees: assignees.unwrap_or_default(),
+        });
+    });
+}
+
+fn start_fetch_repo_permissions(
+    owner: String,
+    repo: String,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
+                    owner,
+                    repo,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
+                    owner,
+                    repo,
+                    message: error.to_string(),
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async { client.get_repo(&owner, &repo).await });
+        match result {
+            Ok(repo_info) => {
+                let permissions = repo_info.permissions.unwrap_or_default();
+                let can_edit_issue_metadata = permissions.push
+                    || permissions.triage
+                    || permissions.maintain
+                    || permissions.admin;
+                let _ = event_tx.send(AppEvent::RepoPermissionsResolved {
+                    owner,
+                    repo,
+                    can_edit_issue_metadata,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
+                    owner,
+                    repo,
+                    message: error.to_string(),
+                });
+            }
         }
     });
 }

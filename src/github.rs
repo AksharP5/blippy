@@ -16,6 +16,22 @@ pub struct ApiUser {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiLabel {
     pub name: String,
+    #[serde(default)]
+    pub color: String,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ApiRepoPermissions {
+    #[serde(default)]
+    pub pull: bool,
+    #[serde(default)]
+    pub triage: bool,
+    #[serde(default)]
+    pub push: bool,
+    #[serde(default)]
+    pub maintain: bool,
+    #[serde(default)]
+    pub admin: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -46,6 +62,8 @@ pub struct ApiRepo {
     pub id: i64,
     pub name: String,
     pub owner: ApiUser,
+    #[serde(default)]
+    pub permissions: Option<ApiRepoPermissions>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -894,7 +912,7 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
+    pub async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<ApiLabel>> {
         let mut page = 1u32;
         let mut labels = Vec::new();
         loop {
@@ -911,9 +929,7 @@ impl GitHubClient {
             if batch.is_empty() {
                 break;
             }
-            for label in batch {
-                labels.push(label.name);
-            }
+            labels.extend(batch);
             page += 1;
         }
         Ok(labels)
