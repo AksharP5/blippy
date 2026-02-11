@@ -14,28 +14,117 @@ use crate::pr_diff::{DiffKind, parse_patch};
 use crate::theme::{ThemePalette, resolve_theme};
 
 const RECENT_COMMENTS_HEIGHT: u16 = 10;
+const HEADER_HEIGHT: u16 = 1;
+
+fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &ThemePalette) {
+    let view_name = match app.view() {
+        View::RepoPicker => "Repositories",
+        View::RemoteChooser => "Remotes",
+        View::Issues => {
+            if app.work_item_mode() == crate::app::WorkItemMode::PullRequests {
+                "Pull Requests"
+            } else {
+                "Issues"
+            }
+        }
+        View::IssueDetail => {
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                "Pull Request Detail"
+            } else {
+                "Issue Detail"
+            }
+        }
+        View::IssueComments => "Comments",
+        View::PullRequestFiles => "Files",
+        View::LabelPicker => "Labels",
+        View::AssigneePicker => "Assignees",
+        View::CommentPresetPicker => "Close",
+        View::CommentPresetName => "Preset Name",
+        View::CommentEditor => "Editor",
+    };
+
+    let repo_context = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => format!("{}/{}", owner, repo),
+        _ => "no repo selected".to_string(),
+    };
+    let (open_count, closed_count) = app.issue_counts();
+    let counts = format!("open {} • closed {}", open_count, closed_count);
+    let context = if app.view() == View::Issues {
+        format!("{} • {}", repo_context, counts)
+    } else {
+        repo_context
+    };
+
+    let title_prefix = format!("{} • ", view_name);
+    let title_width = title_prefix.chars().count();
+    let max_context = (area.width as usize).saturating_sub(title_width + 10);
+    let context = fit_inline(context.as_str(), max_context);
+
+    let line = Line::from(vec![
+        Span::styled(
+            " Glyph ",
+            Style::default()
+                .fg(theme.bg_app)
+                .bg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            title_prefix,
+            Style::default()
+                .fg(theme.text_primary)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(context, Style::default().fg(theme.text_muted)),
+    ]);
+    let header = Paragraph::new(line).style(
+        Style::default()
+            .bg(theme.bg_panel_alt)
+            .fg(theme.text_primary),
+    );
+
+    frame.render_widget(header, area);
+}
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let theme = resolve_theme(app.theme_name());
     let area = frame.area();
     app.clear_mouse_regions();
+
+    // Clear background
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.bg_app)),
         area,
     );
+
+    // Standard 3-row layout: header | content | footer
+    let [header_area, content_area, footer_area] = Layout::vertical([
+        Constraint::Length(HEADER_HEIGHT),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+
+    // Draw header
+    draw_header(frame, app, header_area, theme);
+
+    // Draw main content based on view
     match app.view() {
-        View::RepoPicker => draw_repo_picker(frame, app, area, theme),
-        View::RemoteChooser => draw_remote_chooser(frame, app, area, theme),
-        View::Issues => draw_issues(frame, app, area, theme),
-        View::IssueDetail => draw_issue_detail(frame, app, area, theme),
-        View::IssueComments => draw_issue_comments(frame, app, area, theme),
-        View::PullRequestFiles => draw_pull_request_files(frame, app, area, theme),
-        View::LabelPicker => draw_label_picker(frame, app, area, theme),
-        View::AssigneePicker => draw_assignee_picker(frame, app, area, theme),
-        View::CommentPresetPicker => draw_preset_picker(frame, app, area, theme),
-        View::CommentPresetName => draw_preset_name(frame, app, area, theme),
-        View::CommentEditor => draw_comment_editor(frame, app, area, theme),
+        View::RepoPicker => draw_repo_picker(frame, app, content_area, theme),
+        View::RemoteChooser => draw_remote_chooser(frame, app, content_area, theme),
+        View::Issues => draw_issues(frame, app, content_area, theme),
+        View::IssueDetail => draw_issue_detail(frame, app, content_area, theme),
+        View::IssueComments => draw_issue_comments(frame, app, content_area, theme),
+        View::PullRequestFiles => draw_pull_request_files(frame, app, content_area, theme),
+        View::LabelPicker => draw_label_picker(frame, app, content_area, theme),
+        View::AssigneePicker => draw_assignee_picker(frame, app, content_area, theme),
+        View::CommentPresetPicker => draw_preset_picker(frame, app, content_area, theme),
+        View::CommentPresetName => draw_preset_name(frame, app, content_area, theme),
+        View::CommentEditor => draw_comment_editor(frame, app, content_area, theme),
     }
+
+    // Draw footer status bar
+    draw_status(frame, app, footer_area, theme);
 }
 
 fn draw_repo_picker(
@@ -44,11 +133,10 @@ fn draw_repo_picker(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(4), Constraint::Min(0)])
-        .split(main);
+        .split(area);
 
     let query = app.repo_query().trim();
     let query_display = if query.is_empty() {
@@ -193,8 +281,6 @@ fn draw_repo_picker(
             2,
         );
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_remote_chooser(
@@ -203,7 +289,6 @@ fn draw_remote_chooser(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let block = panel_block("Choose Remote", theme);
     let items = app
         .remotes()
@@ -226,7 +311,7 @@ fn draw_remote_chooser(
                 .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
-    let list_area = main.inner(Margin {
+    let list_area = area.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
@@ -253,8 +338,6 @@ fn draw_remote_chooser(
             1,
         );
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_issues(
@@ -263,11 +346,10 @@ fn draw_issues(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(5), Constraint::Min(0)])
-        .split(main);
+        .split(area);
     let panes = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
@@ -845,8 +927,6 @@ fn draw_issues(
             MouseTarget::LinkedIssueWebButton,
         );
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_issue_detail(
@@ -855,11 +935,10 @@ fn draw_issue_detail(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(4), Constraint::Min(0)])
-        .split(main);
+        .split(area);
     let content_area = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 2,
@@ -1348,8 +1427,6 @@ fn draw_issue_detail(
         .scroll((side_scroll, 0));
     frame.render_widget(side_paragraph, panes[1]);
     register_mouse_region(app, MouseTarget::IssueSidePane, panes[1]);
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_issue_comments(
@@ -1358,11 +1435,10 @@ fn draw_issue_comments(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(main);
+        .split(area);
     let content_area = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 2,
@@ -1487,8 +1563,6 @@ fn draw_issue_comments(
             1,
         );
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_pull_request_files(
@@ -1497,11 +1571,10 @@ fn draw_pull_request_files(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(5), Constraint::Min(0)])
-        .split(main);
+        .split(area);
     let content = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 2,
@@ -1928,8 +2001,6 @@ fn draw_pull_request_files(
             1,
         );
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_label_picker(
@@ -2312,7 +2383,6 @@ fn draw_preset_picker(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let close_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request"
     } else {
@@ -2337,7 +2407,7 @@ fn draw_preset_picker(
                 .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
-    let list_area = main.inner(Margin {
+    let list_area = area.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
@@ -2357,8 +2427,6 @@ fn draw_preset_picker(
             1,
         );
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_preset_name(
@@ -2367,8 +2435,7 @@ fn draw_preset_name(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
-    let input_area = main.inner(Margin {
+    let input_area = area.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
@@ -2395,8 +2462,6 @@ fn draw_preset_name(
             );
         frame.set_cursor_position((cursor_x, text_area.y));
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_comment_editor(
@@ -2405,7 +2470,6 @@ fn draw_comment_editor(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
-    let (main, footer) = split_area(area);
     let close_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request Comment"
     } else {
@@ -2419,7 +2483,7 @@ fn draw_comment_editor(
         EditorMode::EditPullRequestReviewComment => "Edit Pull Request Review Comment",
         EditorMode::AddPreset => "Preset Body",
     };
-    let editor_area = main.inner(Margin {
+    let editor_area = area.inner(Margin {
         vertical: 1,
         horizontal: 2,
     });
@@ -2445,90 +2509,111 @@ fn draw_comment_editor(
             .saturating_add(col.min(text_area.width.saturating_sub(1)));
         frame.set_cursor_position((cursor_x, cursor_y));
     }
-
-    draw_status(frame, app, footer, theme);
 }
 
 fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePalette) {
-    let status = app.status();
-    let context_raw = status_context(app);
-    let help_raw = help_text(app);
+    let (mode, mode_color) = mode_meta(app, theme);
     let sync = sync_state_label(app);
-    let line_width = area.width.saturating_sub(4) as usize;
+    let status = app.status();
+    let context = status_context(app);
+    let help_raw = help_text(app);
+    let width = area.width as usize;
     let sync_label = format!("[{}]", sync);
-    let status_prefix_width = "[Repos] ".chars().count() + 1 + sync_label.chars().count() + 2;
-    let context_prefix_width = "context ".chars().count();
-    let keys_prefix_width = "keys ".chars().count();
-    let status_value = if status.is_empty() { "ready" } else { status };
-    let status_text = fit_inline(status_value, line_width.saturating_sub(status_prefix_width));
-    let context = fit_inline(
-        context_raw.as_str(),
-        line_width.saturating_sub(context_prefix_width),
-    );
-    let help = fit_help_tokens(
-        help_raw.as_str(),
-        line_width.saturating_sub(keys_prefix_width),
-    );
-    let mut lines = Vec::new();
-    let mut status_line = vec![Span::styled(
-        "[Repos] ",
+    let mode_badge = format!(" {} ", mode);
+    let mode_badge_width = mode_badge.chars().count();
+    let status_text = if status.is_empty() { "ready" } else { status };
+
+    let fixed_width = mode_badge.chars().count() + 1 + sync_label.chars().count() + 1;
+    let remaining = width.saturating_sub(fixed_width);
+    let status_max = remaining.min(36);
+    let status_fit = fit_inline(status_text, status_max);
+    let after_status = remaining.saturating_sub(status_fit.chars().count());
+    let context_max = after_status.saturating_sub(3).min(34);
+    let context_fit = fit_inline(context.as_str(), context_max);
+    let after_context = after_status
+        .saturating_sub(context_fit.chars().count())
+        .saturating_sub(3);
+    let help_fit = fit_help_tokens(help_raw.as_str(), after_context);
+
+    let mut spans = vec![Span::styled(
+        mode_badge,
         Style::default()
-            .fg(theme.accent_primary)
+            .fg(theme.bg_app)
+            .bg(mode_color)
             .add_modifier(Modifier::BOLD),
     )];
-    status_line.push(Span::raw(" "));
-    status_line.push(Span::styled(
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
         sync_label,
         Style::default()
             .fg(sync_state_color(sync, theme))
             .add_modifier(Modifier::BOLD),
     ));
-    status_line.push(Span::raw("  "));
-    status_line.push(Span::styled(
-        status_text,
-        Style::default().fg(theme.text_primary),
-    ));
-    lines.push(Line::from(status_line));
-    lines.push(Line::from(vec![
-        Span::styled(
-            "context ",
-            Style::default()
-                .fg(theme.accent_success)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(context, Style::default().fg(theme.text_muted)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled(
-            "keys ",
-            Style::default()
-                .fg(theme.accent_subtle)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(help, Style::default().fg(theme.text_muted)),
-    ]));
-    let text = Text::from(lines);
-    let paragraph = Paragraph::new(text)
-        .wrap(Wrap { trim: true })
-        .style(Style::default().fg(theme.text_muted).bg(theme.bg_panel))
-        .block(
-            Block::default()
-                .borders(Borders::TOP)
-                .style(Style::default().bg(theme.bg_panel))
-                .border_style(Style::default().fg(theme.border_panel)),
-        );
-    let status_area = area.inner(Margin {
-        vertical: 0,
-        horizontal: 2,
-    });
-    frame.render_widget(paragraph, status_area);
+    if !status_fit.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            status_fit,
+            Style::default().fg(theme.text_primary),
+        ));
+    }
+    if !context_fit.is_empty() {
+        spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
+        spans.push(Span::styled(
+            context_fit,
+            Style::default().fg(theme.text_muted),
+        ));
+    }
+    if !help_fit.is_empty() {
+        spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
+        spans.push(Span::styled(
+            help_fit,
+            Style::default().fg(theme.text_muted),
+        ));
+    }
+
+    let status_line = Line::from(spans);
+    let paragraph = Paragraph::new(status_line)
+        .style(Style::default().bg(theme.bg_panel_alt))
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(paragraph, area);
     app.register_mouse_region(
         MouseTarget::RepoPicker,
-        status_area.x,
-        status_area.y.saturating_add(1),
-        10,
+        area.x,
+        area.y,
+        mode_badge_width.saturating_add(1) as u16,
         1,
     );
+}
+
+fn mode_meta(app: &App, theme: &ThemePalette) -> (&'static str, Color) {
+    let (label, color) = if app.issue_search_mode() || app.repo_search_mode() {
+        ("SEARCH", theme.accent_subtle)
+    } else if app.scanning() || app.syncing() {
+        ("SYNCING", theme.accent_primary)
+    } else {
+        match app.view() {
+            View::RepoPicker => ("REPOS", theme.accent_primary),
+            View::RemoteChooser => ("REMOTES", theme.accent_primary),
+            View::Issues => {
+                if app.work_item_mode() == crate::app::WorkItemMode::PullRequests {
+                    ("PRS", theme.accent_success)
+                } else {
+                    ("ISSUES", theme.accent_success)
+                }
+            }
+            View::IssueDetail => ("DETAIL", theme.accent_primary),
+            View::IssueComments => ("COMMENTS", theme.accent_primary),
+            View::PullRequestFiles => ("FILES", theme.accent_primary),
+            View::LabelPicker => ("LABELS", theme.accent_subtle),
+            View::AssigneePicker => ("ASSIGNEES", theme.accent_subtle),
+            View::CommentPresetPicker => ("CLOSE", theme.accent_danger),
+            View::CommentPresetName => ("PRESET", theme.accent_subtle),
+            View::CommentEditor => ("EDIT", theme.accent_subtle),
+        }
+    };
+
+    (label, color)
 }
 
 fn panel_block<'a>(title: &'a str, theme: &ThemePalette) -> Block<'a> {
@@ -2595,9 +2680,7 @@ fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme
         View::IssueComments => draw_issue_comments(frame, app, area, theme),
         View::PullRequestFiles => draw_pull_request_files(frame, app, area, theme),
         _ => {
-            let (main, footer) = split_area(area);
-            frame.render_widget(panel_block("Glyph", theme), main);
-            draw_status(frame, app, footer, theme);
+            frame.render_widget(panel_block("Glyph", theme), area);
         }
     }
     frame.render_widget(
@@ -2624,14 +2707,6 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         ])
         .split(vertical[1]);
     horizontal[1]
-}
-
-fn split_area(area: Rect) -> (Rect, Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(4)])
-        .split(area);
-    (chunks[0], chunks[1])
 }
 
 fn register_mouse_region(app: &mut App, target: MouseTarget, area: Rect) {

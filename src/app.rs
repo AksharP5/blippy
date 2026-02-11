@@ -5,7 +5,7 @@ use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
 use crate::keybinds::Keybinds;
 use crate::markdown;
-use crate::pr_diff::{parse_patch, DiffKind};
+use crate::pr_diff::{DiffKind, parse_patch};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
 use anyhow::Result;
 
