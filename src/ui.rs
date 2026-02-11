@@ -518,7 +518,7 @@ fn draw_issues(
                 } else {
                     issue.labels.as_str()
                 };
-                let mut line1_spans = vec![
+                let line1_spans = vec![
                     Span::styled(
                         if issue.is_pr {
                             format!("PR #{} ", issue.number)
@@ -539,27 +539,6 @@ fn draw_issues(
                     ),
                     pending_issue_span(app.pending_issue_badge(issue.number), theme),
                 ];
-                if issue.is_pr {
-                    if let Some(linked_issue) = app.linked_issue_for_pull_request(issue.number) {
-                        line1_spans.push(Span::raw(" "));
-                        line1_spans.push(Span::styled(
-                            format!("[Issue#{}]", linked_issue),
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_subtle)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                    }
-                } else if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
-                    line1_spans.push(Span::raw(" "));
-                    line1_spans.push(Span::styled(
-                        format!("[PR#{}]", linked_pr),
-                        Style::default()
-                            .fg(theme.bg_app)
-                            .bg(theme.accent_success)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
                 let line1 = Line::from(line1_spans);
                 let mut line2_spans = vec![
                     Span::styled(
@@ -583,15 +562,48 @@ fn draw_issues(
                         issue.comments_count.to_string(),
                         Style::default().fg(theme.text_muted),
                     ),
-                    Span::raw("  "),
-                    Span::styled(
-                        "L:",
-                        Style::default()
-                            .fg(theme.accent_primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
                 ];
-                line2_spans.extend(label_chip_spans(labels, 2, theme));
+                if issue.is_pr {
+                    if let Some(linked_issue) = app.linked_issue_for_pull_request(issue.number) {
+                        line2_spans.push(Span::raw("  "));
+                        line2_spans.push(Span::styled(
+                            "I:",
+                            Style::default()
+                                .fg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        line2_spans.push(Span::styled(
+                            format!("#{}", linked_issue),
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    }
+                } else if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
+                    line2_spans.push(Span::raw("  "));
+                    line2_spans.push(Span::styled(
+                        "PR:",
+                        Style::default()
+                            .fg(theme.accent_success)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    line2_spans.push(Span::styled(
+                        format!("#{}", linked_pr),
+                        Style::default()
+                            .fg(theme.bg_app)
+                            .bg(theme.accent_success)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                line2_spans.push(Span::raw("  "));
+                line2_spans.push(Span::styled(
+                    "L:",
+                    Style::default()
+                        .fg(theme.accent_primary)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                line2_spans.extend(label_chip_spans(app, labels, 2, theme));
                 let line2 = Line::from(line2_spans);
                 ListItem::new(vec![line1, line2])
             })
@@ -774,7 +786,7 @@ fn draw_issues(
                     .fg(theme.accent_primary)
                     .add_modifier(Modifier::BOLD),
             )];
-            label_row.extend(label_chip_spans(labels.as_str(), 4, theme));
+            label_row.extend(label_chip_spans(app, labels.as_str(), 4, theme));
             lines.push(Line::from(label_row));
             if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
                 lines.push(Line::from(vec![
@@ -1110,7 +1122,7 @@ fn draw_issue_detail(
         "labels: ",
         Style::default().fg(theme.text_muted),
     )];
-    labels_row.extend(label_chip_spans(labels.as_str(), 5, theme));
+    labels_row.extend(label_chip_spans(app, labels.as_str(), 5, theme));
     body_lines.push(Line::from(labels_row));
     if let Some(updated) = format_datetime(updated_at.as_deref()) {
         body_lines.push(Line::from(format!("updated: {}", updated)));
@@ -1145,7 +1157,7 @@ fn draw_issue_detail(
     }
     if is_pr {
         if app.pull_request_files_syncing() {
-            side_lines.push(Line::from("Loading pull request changes..."));
+            side_lines.push(Line::from("Loading pull request changes"));
         } else if app.pull_request_files().is_empty() {
             side_lines.push(Line::from(
                 "No changed files cached yet. Press r to refresh.",
@@ -1174,8 +1186,9 @@ fn draw_issue_detail(
                         side_lines.push(styled_patch_line(patch_line, 100, theme));
                     }
                     if patch.lines().count() > 8 {
-                        side_lines
-                            .push(Line::from("  ...").style(Style::default().fg(theme.text_muted)));
+                        side_lines.push(
+                            Line::from("  more").style(Style::default().fg(theme.text_muted)),
+                        );
                     }
                 }
                 side_lines.push(Line::from(""));
@@ -1737,7 +1750,7 @@ fn draw_pull_request_files(
     let mut horizontal_max = 0usize;
 
     if app.pull_request_files_syncing() {
-        lines.push(Line::from("Loading pull request changes..."));
+        lines.push(Line::from("Loading pull request changes"));
     } else if selected_file.is_none() {
         lines.push(Line::from("Select a file to start reviewing."));
     } else {
@@ -2350,11 +2363,11 @@ fn draw_preset_picker(
     let block = panel_block(close_title, theme);
     let mut items = Vec::new();
     items.push(ListItem::new("Close without comment"));
-    items.push(ListItem::new("Custom message..."));
+    items.push(ListItem::new("Custom message"));
     for preset in app.comment_defaults() {
         items.push(ListItem::new(preset.name.as_str()));
     }
-    items.push(ListItem::new("Add preset..."));
+    items.push(ListItem::new("Add preset"));
 
     let list = List::new(items)
         .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
@@ -3594,6 +3607,7 @@ fn pending_issue_span(pending: Option<&str>, theme: &ThemePalette) -> Span<'stat
 }
 
 fn label_chip_spans(
+    app: &App,
     labels_csv: &str,
     max_labels: usize,
     theme: &ThemePalette,
@@ -3609,10 +3623,10 @@ fn label_chip_spans(
 
     let mut spans = Vec::new();
     for (index, label) in labels.iter().take(max_labels).enumerate() {
-        let color = label_chip_color(label, index, theme);
+        let (background, foreground) = label_chip_colors(app, label, index, theme);
         spans.push(Span::styled(
             format!(" {} ", ellipsize(label, 14)),
-            Style::default().fg(theme.bg_app).bg(color),
+            Style::default().fg(foreground).bg(background),
         ));
         spans.push(Span::raw(" "));
     }
@@ -3630,16 +3644,37 @@ fn label_chip_spans(
     spans
 }
 
-fn label_chip_color(label: &str, index: usize, theme: &ThemePalette) -> Color {
+fn label_chip_colors(app: &App, label: &str, index: usize, theme: &ThemePalette) -> (Color, Color) {
+    if let Some((red, green, blue)) = parse_hex_color(app.repo_label_color(label)) {
+        let background = Color::Rgb(red, green, blue);
+        let luminance = (red as u32 * 299 + green as u32 * 587 + blue as u32 * 114) / 1000;
+        let foreground = if luminance > 150 {
+            Color::Black
+        } else {
+            Color::White
+        };
+        return (background, foreground);
+    }
+
     let mut hasher = DefaultHasher::new();
     label.to_ascii_lowercase().hash(&mut hasher);
     let hash = hasher.finish() as usize;
-    match (hash + index) % 4 {
+    let background = match (hash + index) % 4 {
         0 => theme.accent_primary,
         1 => theme.accent_subtle,
         2 => theme.accent_success,
         _ => theme.border_focus,
+    };
+    (background, theme.bg_app)
+}
+
+fn parse_hex_color(value: Option<&str>) -> Option<(u8, u8, u8)> {
+    let value = value?.trim().trim_start_matches('#');
+    if value.len() != 6 {
+        return None;
     }
+    let parsed = u32::from_str_radix(value, 16).ok()?;
+    Some(((parsed >> 16) as u8, (parsed >> 8) as u8, parsed as u8))
 }
 
 fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
@@ -3668,14 +3703,7 @@ fn ellipsize(input: &str, max: usize) -> String {
     if input.chars().count() <= max {
         return input.to_string();
     }
-    if max <= 3 {
-        return ".".repeat(max);
-    }
-    let head = input
-        .chars()
-        .take(max.saturating_sub(3))
-        .collect::<String>();
-    format!("{}...", head)
+    input.chars().take(max).collect::<String>()
 }
 
 fn clip_horizontal(input: &str, offset: usize, max: usize) -> String {
