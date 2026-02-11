@@ -2548,7 +2548,7 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     let status_line = Line::from(spans);
     let paragraph = Paragraph::new(status_line)
         .style(Style::default().bg(theme.bg_panel_alt))
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
     app.register_mouse_region(
