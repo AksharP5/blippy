@@ -431,7 +431,7 @@ fn draw_issues(
                 } else {
                     issue.labels.as_str()
                 };
-                let line1 = Line::from(vec![
+                let mut line1_spans = vec![
                     Span::styled(
                         if issue.is_pr {
                             format!("PR #{} ", issue.number)
@@ -447,11 +447,23 @@ fn draw_issues(
                         Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
                     ),
                     Span::styled(
-                        ellipsize(issue.title.as_str(), 74),
+                        ellipsize(issue.title.as_str(), 60),
                         Style::default().fg(theme.text_primary),
                     ),
                     pending_issue_span(app.pending_issue_badge(issue.number), theme),
-                ]);
+                ];
+                if !issue.is_pr {
+                    if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
+                        line1_spans.push(Span::raw(" "));
+                        line1_spans.push(Span::styled(
+                            format!("[PR#{}]", linked_pr),
+                            Style::default()
+                                .fg(theme.accent_success)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    }
+                }
+                let line1 = Line::from(line1_spans);
                 let line2 = Line::from(vec![
                     Span::styled(
                         "A:",
@@ -526,103 +538,170 @@ fn draw_issues(
         );
     }
 
-    let (preview_title, preview_lines) = match app.selected_issue_row() {
-        Some(issue) => {
-            let assignees = if issue.assignees.is_empty() {
-                "unassigned".to_string()
-            } else {
-                issue.assignees.clone()
-            };
-            let labels = if issue.labels.is_empty() {
-                "none".to_string()
-            } else {
-                issue.labels.clone()
-            };
-            let mut lines = Vec::new();
-            lines.push(Line::from(vec![
-                Span::styled(
-                    if issue.is_pr {
-                        format!("PR #{}", issue.number)
-                    } else {
-                        format!("#{}", issue.number)
-                    },
-                    Style::default()
-                        .fg(theme.accent_primary)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("  {}", issue.state),
-                    Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "assignees ",
-                    Style::default()
-                        .fg(theme.accent_subtle)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    ellipsize(assignees.as_str(), 80),
-                    Style::default().fg(theme.text_muted),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "comments  ",
-                    Style::default()
-                        .fg(theme.accent_success)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    issue.comments_count.to_string(),
-                    Style::default().fg(theme.text_muted),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "labels    ",
-                    Style::default()
-                        .fg(theme.accent_primary)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    ellipsize(labels.as_str(), 80),
-                    Style::default().fg(theme.text_muted),
-                ),
-            ]));
-            if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
+    let (preview_title, preview_lines, linked_tui_button, linked_web_button) =
+        match app.selected_issue_row() {
+            Some(issue) => {
+                let assignees = if issue.assignees.is_empty() {
+                    "unassigned".to_string()
+                } else {
+                    issue.assignees.clone()
+                };
+                let labels = if issue.labels.is_empty() {
+                    "none".to_string()
+                } else {
+                    issue.labels.clone()
+                };
+                let mut lines = Vec::new();
                 lines.push(Line::from(vec![
                     Span::styled(
-                        "updated   ",
+                        if issue.is_pr {
+                            format!("PR #{}", issue.number)
+                        } else {
+                            format!("#{}", issue.number)
+                        },
+                        Style::default()
+                            .fg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("  {}", issue.state),
+                        Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
+                    ),
+                ]));
+                let mut tui_button_hit = None;
+                let mut web_button_hit = None;
+                if !issue.is_pr {
+                    let line_index = lines.len();
+                    let prefix = "linked PR ";
+                    if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
+                        let open_label = format!("[ Open PR #{} ]", linked_pr);
+                        let web_label = "[ Web ]";
+                        lines.push(Line::from(vec![
+                            Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                            Span::styled(
+                                open_label.clone(),
+                                Style::default()
+                                    .fg(theme.bg_app)
+                                    .bg(theme.accent_success)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(
+                                web_label,
+                                Style::default()
+                                    .fg(theme.bg_app)
+                                    .bg(theme.accent_primary)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                        let prefix_width = prefix.chars().count() as u16;
+                        let open_width = open_label.chars().count() as u16;
+                        let web_width = web_label.chars().count() as u16;
+                        tui_button_hit = Some((line_index, prefix_width, open_width));
+                        web_button_hit = Some((
+                            line_index,
+                            prefix_width.saturating_add(open_width).saturating_add(1),
+                            web_width,
+                        ));
+                    } else if app.linked_pull_request_known(issue.number) {
+                        lines.push(Line::from(vec![
+                            Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                            Span::styled("none found", Style::default().fg(theme.accent_danger)),
+                        ]));
+                    } else {
+                        let probe_label = "[ Find linked PR ]";
+                        lines.push(Line::from(vec![
+                            Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                            Span::styled(
+                                probe_label,
+                                Style::default()
+                                    .fg(theme.bg_app)
+                                    .bg(theme.accent_subtle)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                        tui_button_hit = Some((
+                            line_index,
+                            prefix.chars().count() as u16,
+                            probe_label.chars().count() as u16,
+                        ));
+                    }
+                }
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "assignees ",
                         Style::default()
                             .fg(theme.accent_subtle)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(updated, Style::default().fg(theme.text_muted)),
+                    Span::styled(
+                        ellipsize(assignees.as_str(), 80),
+                        Style::default().fg(theme.text_muted),
+                    ),
                 ]));
-            }
-            lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "comments  ",
+                        Style::default()
+                            .fg(theme.accent_success)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        issue.comments_count.to_string(),
+                        Style::default().fg(theme.text_muted),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "labels    ",
+                        Style::default()
+                            .fg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        ellipsize(labels.as_str(), 80),
+                        Style::default().fg(theme.text_muted),
+                    ),
+                ]));
+                if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "updated   ",
+                            Style::default()
+                                .fg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(updated, Style::default().fg(theme.text_muted)),
+                    ]));
+                }
+                lines.push(Line::from(""));
 
-            let rendered = markdown::render(issue.body.as_str());
-            if rendered.lines.is_empty() {
-                lines.push(Line::from("No description."));
-            } else {
-                lines.extend(rendered.lines);
-            }
-            (preview_title_text.to_string(), lines)
-        }
-        None => (
-            preview_title_text.to_string(),
-            vec![Line::from(
-                if item_mode == crate::app::WorkItemMode::PullRequests {
-                    "Select a pull request to preview."
+                let rendered = markdown::render(issue.body.as_str());
+                if rendered.lines.is_empty() {
+                    lines.push(Line::from("No description."));
                 } else {
-                    "Select an issue to preview."
-                },
-            )],
-        ),
-    };
+                    lines.extend(rendered.lines);
+                }
+                (
+                    preview_title_text.to_string(),
+                    lines,
+                    tui_button_hit,
+                    web_button_hit,
+                )
+            }
+            None => (
+                preview_title_text.to_string(),
+                vec![Line::from(
+                    if item_mode == crate::app::WorkItemMode::PullRequests {
+                        "Select a pull request to preview."
+                    } else {
+                        "Select an issue to preview."
+                    },
+                )],
+                None,
+                None,
+            ),
+        };
 
     let preview_area = panes[1].inner(Margin {
         vertical: 1,
@@ -651,6 +730,32 @@ fn draw_issues(
         .scroll((scroll, 0));
     frame.render_widget(preview_widget, preview_area);
     register_mouse_region(app, MouseTarget::IssuesPreviewPane, preview_area);
+    let preview_inner = preview_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if let Some((line, x_offset, width)) = linked_tui_button {
+        register_inline_button(
+            app,
+            preview_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedPullRequestTuiButton,
+        );
+    }
+    if let Some((line, x_offset, width)) = linked_web_button {
+        register_inline_button(
+            app,
+            preview_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedPullRequestWebButton,
+        );
+    }
 
     draw_status(frame, app, footer, theme);
 }
@@ -2091,9 +2196,24 @@ fn draw_comment_editor(
 
 fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePalette) {
     let status = app.status();
-    let context = status_context(app);
-    let help = help_text(app);
+    let context_raw = status_context(app);
+    let help_raw = help_text(app);
     let sync = sync_state_label(app);
+    let line_width = area.width.saturating_sub(4) as usize;
+    let sync_label = format!("[{}]", sync);
+    let status_prefix_width = "[Repos] ".chars().count() + 1 + sync_label.chars().count() + 2;
+    let context_prefix_width = "ctx ".chars().count();
+    let keys_prefix_width = "keys ".chars().count();
+    let status_value = if status.is_empty() { "ready" } else { status };
+    let status_text = fit_inline(status_value, line_width.saturating_sub(status_prefix_width));
+    let context = fit_inline(
+        context_raw.as_str(),
+        line_width.saturating_sub(context_prefix_width),
+    );
+    let help = fit_help_tokens(
+        help_raw.as_str(),
+        line_width.saturating_sub(keys_prefix_width),
+    );
     let mut lines = Vec::new();
     let mut status_line = vec![Span::styled(
         "[Repos] ",
@@ -2103,21 +2223,16 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     )];
     status_line.push(Span::raw(" "));
     status_line.push(Span::styled(
-        format!("[{}]", sync),
+        sync_label,
         Style::default()
             .fg(sync_state_color(sync, theme))
             .add_modifier(Modifier::BOLD),
     ));
     status_line.push(Span::raw("  "));
-    if !status.is_empty() {
-        status_line.push(Span::styled(
-            status,
-            Style::default().fg(theme.text_primary),
-        ));
-    }
-    if status.is_empty() {
-        status_line.push(Span::styled("ready", Style::default().fg(theme.text_muted)));
-    }
+    status_line.push(Span::styled(
+        status_text,
+        Style::default().fg(theme.text_primary),
+    ));
     lines.push(Line::from(status_line));
     lines.push(Line::from(vec![
         Span::styled(
@@ -2266,6 +2381,37 @@ fn split_area(area: Rect) -> (Rect, Rect) {
 
 fn register_mouse_region(app: &mut App, target: MouseTarget, area: Rect) {
     app.register_mouse_region(target, area.x, area.y, area.width, area.height);
+}
+
+fn register_inline_button(
+    app: &mut App,
+    area: Rect,
+    scroll: u16,
+    line: usize,
+    x_offset: u16,
+    width: u16,
+    target: MouseTarget,
+) {
+    if area.width == 0 || area.height == 0 || width == 0 {
+        return;
+    }
+    let line = line as u16;
+    if line < scroll {
+        return;
+    }
+    let y = area.y.saturating_add(line.saturating_sub(scroll));
+    if y >= area.y.saturating_add(area.height) {
+        return;
+    }
+    let x = area.x.saturating_add(x_offset);
+    if x >= area.x.saturating_add(area.width) {
+        return;
+    }
+    let max_width = area.width.saturating_sub(x_offset);
+    if max_width == 0 {
+        return;
+    }
+    app.register_mouse_region(target, x, y, width.min(max_width), 1);
 }
 
 fn help_text(app: &App) -> String {
@@ -2430,6 +2576,45 @@ fn sync_state_color(sync: &str, theme: &ThemePalette) -> Color {
         return theme.accent_subtle;
     }
     theme.accent_success
+}
+
+fn fit_inline(value: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    ellipsize(value, max)
+}
+
+fn fit_help_tokens(value: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    let parts = value.split(" • ").collect::<Vec<&str>>();
+    if parts.is_empty() {
+        return fit_inline(value, max);
+    }
+    let mut compact = String::new();
+    for part in parts {
+        let separator = if compact.is_empty() { "" } else { " • " };
+        let next = format!("{}{}", separator, part);
+        if compact.chars().count() + next.chars().count() > max.saturating_sub(4) {
+            break;
+        }
+        compact.push_str(next.as_str());
+    }
+    if compact.is_empty() {
+        return fit_inline(value, max);
+    }
+    if compact.chars().count() + 4 <= max {
+        compact.push_str(" ...");
+    }
+    fit_inline(compact.as_str(), max)
 }
 
 fn list_state(selected: usize) -> ListState {
@@ -2811,8 +2996,14 @@ fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
 }
 
 fn ellipsize(input: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
     if input.chars().count() <= max {
         return input.to_string();
+    }
+    if max <= 3 {
+        return ".".repeat(max);
     }
     let head = input
         .chars()

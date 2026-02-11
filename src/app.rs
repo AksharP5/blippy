@@ -72,6 +72,8 @@ pub enum MouseTarget {
     IssuesPreviewPane,
     IssueBodyPane,
     IssueSidePane,
+    LinkedPullRequestTuiButton,
+    LinkedPullRequestWebButton,
     CommentRow(usize),
     CommentsPane,
     PullRequestFilesPane,
@@ -1535,6 +1537,14 @@ impl App {
                 }
                 self.reset_issue_comments_scroll();
                 self.set_view(View::IssueComments);
+            }
+            Some(MouseTarget::LinkedPullRequestTuiButton) => {
+                self.focus = Focus::IssuesPreview;
+                self.action = Some(AppAction::OpenLinkedPullRequestInTui);
+            }
+            Some(MouseTarget::LinkedPullRequestWebButton) => {
+                self.focus = Focus::IssuesPreview;
+                self.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
             }
             Some(MouseTarget::CommentsPane) => {}
             Some(MouseTarget::CommentRow(index)) => {
@@ -4447,6 +4457,36 @@ mod tests {
         });
 
         assert_eq!(app.take_action(), Some(AppAction::PickIssue));
+    }
+
+    #[test]
+    fn mouse_click_linked_pr_buttons_trigger_actions() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+
+        app.register_mouse_region(MouseTarget::LinkedPullRequestTuiButton, 0, 0, 16, 1);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::OpenLinkedPullRequestInTui)
+        );
+
+        app.register_mouse_region(MouseTarget::LinkedPullRequestWebButton, 0, 1, 10, 1);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(
+            app.take_action(),
+            Some(AppAction::OpenLinkedPullRequestInBrowser)
+        );
     }
 
     #[test]
