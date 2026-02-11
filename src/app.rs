@@ -1302,6 +1302,11 @@ impl App {
             KeyCode::Char('a') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.cycle_assignee_filter(true);
             }
+            KeyCode::Char('a')
+                if key.modifiers == KeyModifiers::CONTROL && self.view == View::Issues =>
+            {
+                self.reset_assignee_filter();
+            }
             KeyCode::Char(ch)
                 if key.modifiers.is_empty()
                     && self.view == View::Issues
@@ -3526,6 +3531,17 @@ impl App {
         );
     }
 
+    fn reset_assignee_filter(&mut self) {
+        self.assignee_filter = AssigneeFilter::All;
+        self.rebuild_issue_filter();
+        self.issues_preview_scroll = 0;
+        self.status = format!(
+            "Assignee: {} ({} items)",
+            self.assignee_filter.label(),
+            self.filtered_issue_indices.len()
+        );
+    }
+
     fn assignee_filter_options(&self) -> Vec<AssigneeFilter> {
         let mut users = self
             .issues
@@ -4539,6 +4555,47 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
         assert_eq!(app.assignee_filter_label(), "all");
+    }
+
+    #[test]
+    fn ctrl_a_resets_assignee_filter_to_all() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(vec![
+            IssueRow {
+                id: 1,
+                repo_id: 1,
+                number: 1,
+                state: "open".to_string(),
+                title: "One".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: "alex".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+            IssueRow {
+                id: 2,
+                repo_id: 1,
+                number: 2,
+                state: "open".to_string(),
+                title: "Two".to_string(),
+                body: String::new(),
+                labels: String::new(),
+                assignees: "sam".to_string(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr: false,
+            },
+        ]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.assignee_filter_label(), "alex");
+
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert_eq!(app.assignee_filter_label(), "all");
+        assert_eq!(app.issues_for_view().len(), 2);
     }
 
     #[test]

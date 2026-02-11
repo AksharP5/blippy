@@ -49,13 +49,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &ThemePalett
         (Some(owner), Some(repo)) => format!("{}/{}", owner, repo),
         _ => "no repo selected".to_string(),
     };
-    let (open_count, closed_count) = app.issue_counts();
-    let counts = format!("open {} • closed {}", open_count, closed_count);
-    let context = if app.view() == View::Issues {
-        format!("{} • {}", repo_context, counts)
-    } else {
-        repo_context
-    };
+    let context = repo_context;
 
     let title_prefix = format!("{} • ", view_name);
     let title_width = title_prefix.chars().count();
@@ -720,20 +714,6 @@ fn draw_issues(
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
                     ));
-                    if let Some(linked_pr_row) = app.issue_by_number(linked_pr) {
-                        lines.push(Line::from(vec![
-                            Span::styled(
-                                "linked title ",
-                                Style::default()
-                                    .fg(theme.accent_subtle)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                ellipsize(linked_pr_row.title.as_str(), 80),
-                                Style::default().fg(theme.text_muted),
-                            ),
-                        ]));
-                    }
                 }
             } else {
                 let prefix = "linked issue ";
@@ -767,6 +747,20 @@ fn draw_issues(
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
                     ));
+                    if let Some(linked_issue_row) = app.issue_by_number(linked_issue) {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "linked title ",
+                                Style::default()
+                                    .fg(theme.accent_subtle)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                ellipsize(linked_issue_row.title.as_str(), 80),
+                                Style::default().fg(theme.text_muted),
+                            ),
+                        ]));
+                    }
                 }
             }
             lines.push(Line::from(vec![
@@ -2504,7 +2498,7 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     let help_raw = primary_help_text(app);
     let width = area.width as usize;
     let sync_label = format!("[{}]", sync);
-    let mode_badge = format!(" {} ", mode);
+    let mode_badge = format!("{:^10}", mode);
     let mode_badge_width = mode_badge.chars().count();
     let status_text = if status.is_empty() { "ready" } else { status };
 
@@ -2664,6 +2658,8 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Enter", "Open selected item"),
             ("Tab", "Switch open/closed"),
             ("1 / 2", "Jump to open/closed tab"),
+            ("a", "Cycle assignee filter"),
+            ("Ctrl+a", "Reset assignee to all"),
             ("p", "Toggle issues/PR mode"),
             ("/", "Search with qualifiers"),
         ],
@@ -2954,7 +2950,8 @@ fn primary_help_text(app: &App) -> String {
             if app.issue_search_mode() {
                 return "Search mode • Enter keep • Esc clear • ? help".to_string();
             }
-            "j/k move • Enter open • Tab open/closed • p issues/prs • / search • ? help".to_string()
+            "j/k move • Enter open • Tab open/closed • a assignee • Ctrl+a all • / search • ? help"
+                .to_string()
         }
         View::IssueDetail => {
             if app.focus() == Focus::IssueRecentComments {
@@ -3023,6 +3020,7 @@ fn help_text(app: &App) -> String {
                 "1/2 tabs",
                 "Tab open/closed",
                 "a assignee",
+                "Ctrl+a all assignees",
                 "l labels",
                 "Shift+A assignees",
                 "m comment",
