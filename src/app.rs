@@ -5,7 +5,7 @@ use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
 use crate::keybinds::Keybinds;
 use crate::markdown;
-use crate::pr_diff::{DiffKind, parse_patch};
+use crate::pr_diff::{parse_patch, DiffKind};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
 use anyhow::Result;
 
@@ -33,6 +33,8 @@ pub enum AppAction {
     CheckoutPullRequest,
     OpenLinkedPullRequestInBrowser,
     OpenLinkedPullRequestInTui,
+    OpenLinkedIssueInBrowser,
+    OpenLinkedIssueInTui,
     CopyStatus,
     CloseIssue,
     ReopenIssue,
@@ -74,6 +76,8 @@ pub enum MouseTarget {
     IssueSidePane,
     LinkedPullRequestTuiButton,
     LinkedPullRequestWebButton,
+    LinkedIssueTuiButton,
+    LinkedIssueWebButton,
     CommentRow(usize),
     CommentsPane,
     PullRequestFilesPane,
@@ -372,6 +376,7 @@ pub struct App {
     current_issue_id: Option<i64>,
     current_issue_number: Option<i64>,
     linked_pull_requests: HashMap<i64, Option<i64>>,
+    linked_issues: HashMap<i64, Option<i64>>,
     pull_request_files_issue_id: Option<i64>,
     pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
@@ -460,6 +465,7 @@ impl App {
             current_issue_id: None,
             current_issue_number: None,
             linked_pull_requests: HashMap::new(),
+            linked_issues: HashMap::new(),
             pull_request_files_issue_id: None,
             pull_request_id: None,
             pull_request_files: Vec::new(),
@@ -586,12 +592,37 @@ impl App {
             .and_then(|pull_number| *pull_number)
     }
 
+    pub fn linked_issue_for_pull_request(&self, pull_number: i64) -> Option<i64> {
+        self.linked_issues
+            .get(&pull_number)
+            .and_then(|issue_number| *issue_number)
+    }
+
     pub fn linked_pull_request_known(&self, issue_number: i64) -> bool {
         self.linked_pull_requests.contains_key(&issue_number)
     }
 
+    pub fn linked_issue_known(&self, pull_number: i64) -> bool {
+        self.linked_issues.contains_key(&pull_number)
+    }
+
     pub fn set_linked_pull_request(&mut self, issue_number: i64, pull_number: Option<i64>) {
         self.linked_pull_requests.insert(issue_number, pull_number);
+        if let Some(pull_number) = pull_number {
+            self.linked_issues.insert(pull_number, Some(issue_number));
+        }
+    }
+
+    pub fn set_linked_issue_for_pull_request(
+        &mut self,
+        pull_number: i64,
+        issue_number: Option<i64>,
+    ) {
+        self.linked_issues.insert(pull_number, issue_number);
+        if let Some(issue_number) = issue_number {
+            self.linked_pull_requests
+                .insert(issue_number, Some(pull_number));
+        }
     }
 
     pub fn selected_issue_has_known_linked_pr(&self) -> bool {
@@ -603,6 +634,17 @@ impl App {
             return false;
         }
         self.linked_pull_request_for_issue(issue.number).is_some()
+    }
+
+    pub fn selected_pull_request_has_known_linked_issue(&self) -> bool {
+        let issue = match self.current_or_selected_issue() {
+            Some(issue) => issue,
+            None => return false,
+        };
+        if !issue.is_pr {
+            return false;
+        }
+        self.linked_issue_for_pull_request(issue.number).is_some()
     }
 
     pub fn set_issue_filter(&mut self, filter: IssueFilter) {
@@ -1350,6 +1392,13 @@ impl App {
                             | View::PullRequestFiles
                     ) =>
             {
+                if self
+                    .current_or_selected_issue()
+                    .is_some_and(|issue| issue.is_pr)
+                {
+                    self.action = Some(AppAction::OpenLinkedIssueInBrowser);
+                    return;
+                }
                 self.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
             }
             KeyCode::Char('P')
@@ -1362,6 +1411,13 @@ impl App {
                             | View::PullRequestFiles
                     ) =>
             {
+                if self
+                    .current_or_selected_issue()
+                    .is_some_and(|issue| issue.is_pr)
+                {
+                    self.action = Some(AppAction::OpenLinkedIssueInTui);
+                    return;
+                }
                 self.action = Some(AppAction::OpenLinkedPullRequestInTui);
             }
             KeyCode::Char('v')
@@ -1545,6 +1601,14 @@ impl App {
             Some(MouseTarget::LinkedPullRequestWebButton) => {
                 self.focus = Focus::IssuesPreview;
                 self.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
+            }
+            Some(MouseTarget::LinkedIssueTuiButton) => {
+                self.focus = Focus::IssuesPreview;
+                self.action = Some(AppAction::OpenLinkedIssueInTui);
+            }
+            Some(MouseTarget::LinkedIssueWebButton) => {
+                self.focus = Focus::IssuesPreview;
+                self.action = Some(AppAction::OpenLinkedIssueInBrowser);
             }
             Some(MouseTarget::CommentsPane) => {}
             Some(MouseTarget::CommentRow(index)) => {
@@ -1903,6 +1967,7 @@ impl App {
         self.current_issue_id = None;
         self.current_issue_number = None;
         self.linked_pull_requests.clear();
+        self.linked_issues.clear();
         self.pull_request_files_issue_id = None;
         self.pull_request_id = None;
         self.pull_request_files.clear();
@@ -3981,6 +4046,54 @@ mod tests {
     }
 
     #[test]
+    fn shift_o_on_selected_pr_triggers_open_linked_issue_in_browser_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_work_item_mode(WorkItemMode::PullRequests);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 42,
+            state: "open".to_string(),
+            title: "PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT));
+
+        assert_eq!(app.take_action(), Some(AppAction::OpenLinkedIssueInBrowser));
+    }
+
+    #[test]
+    fn shift_p_on_selected_pr_triggers_open_linked_issue_in_tui_action() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_work_item_mode(WorkItemMode::PullRequests);
+        app.set_issues(vec![IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 42,
+            state: "open".to_string(),
+            title: "PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        }]);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT));
+
+        assert_eq!(app.take_action(), Some(AppAction::OpenLinkedIssueInTui));
+    }
+
+    #[test]
     fn ctrl_y_triggers_copy_status_action() {
         let mut app = App::new(Config::default());
 
@@ -4487,6 +4600,24 @@ mod tests {
             app.take_action(),
             Some(AppAction::OpenLinkedPullRequestInBrowser)
         );
+
+        app.register_mouse_region(MouseTarget::LinkedIssueTuiButton, 0, 2, 16, 1);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.take_action(), Some(AppAction::OpenLinkedIssueInTui));
+
+        app.register_mouse_region(MouseTarget::LinkedIssueWebButton, 0, 3, 10, 1);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.take_action(), Some(AppAction::OpenLinkedIssueInBrowser));
     }
 
     #[test]

@@ -721,6 +721,51 @@ impl GitHubClient {
         Ok(None)
     }
 
+    pub async fn find_linked_issue_for_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<Option<(i64, String)>> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/timeline",
+            API_BASE, owner, repo, pull_number
+        );
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(&self.token)
+            .query(&[("per_page", "100")])
+            .send()
+            .await?
+            .error_for_status()?;
+        let events = response.json::<Vec<serde_json::Value>>().await?;
+
+        for event in events {
+            let issue = match event.get("source").and_then(|value| value.get("issue")) {
+                Some(issue) => issue,
+                None => continue,
+            };
+            if issue.get("pull_request").is_some() {
+                continue;
+            }
+            let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
+                Some(html_url) => html_url,
+                None => continue,
+            };
+            let issue_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
+                Some(issue_number) => issue_number,
+                None => continue,
+            };
+            if !html_url.contains("/issues/") {
+                continue;
+            }
+            return Ok(Some((issue_number, html_url.to_string())));
+        }
+
+        Ok(None)
+    }
+
     pub async fn create_comment(
         &self,
         owner: &str,

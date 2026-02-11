@@ -538,170 +538,237 @@ fn draw_issues(
         );
     }
 
-    let (preview_title, preview_lines, linked_tui_button, linked_web_button) =
-        match app.selected_issue_row() {
-            Some(issue) => {
-                let assignees = if issue.assignees.is_empty() {
-                    "unassigned".to_string()
-                } else {
-                    issue.assignees.clone()
-                };
-                let labels = if issue.labels.is_empty() {
-                    "none".to_string()
-                } else {
-                    issue.labels.clone()
-                };
-                let mut lines = Vec::new();
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        if issue.is_pr {
-                            format!("PR #{}", issue.number)
-                        } else {
-                            format!("#{}", issue.number)
-                        },
-                        Style::default()
-                            .fg(theme.accent_primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("  {}", issue.state),
-                        Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
-                    ),
-                ]));
-                let mut tui_button_hit = None;
-                let mut web_button_hit = None;
-                if !issue.is_pr {
-                    let line_index = lines.len();
-                    let prefix = "linked PR ";
-                    if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
-                        let open_label = format!("[ Open PR #{} ]", linked_pr);
-                        let web_label = "[ Web ]";
-                        lines.push(Line::from(vec![
-                            Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                            Span::styled(
-                                open_label.clone(),
-                                Style::default()
-                                    .fg(theme.bg_app)
-                                    .bg(theme.accent_success)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::raw(" "),
-                            Span::styled(
-                                web_label,
-                                Style::default()
-                                    .fg(theme.bg_app)
-                                    .bg(theme.accent_primary)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        ]));
-                        let prefix_width = prefix.chars().count() as u16;
-                        let open_width = open_label.chars().count() as u16;
-                        let web_width = web_label.chars().count() as u16;
-                        tui_button_hit = Some((line_index, prefix_width, open_width));
-                        web_button_hit = Some((
-                            line_index,
-                            prefix_width.saturating_add(open_width).saturating_add(1),
-                            web_width,
-                        ));
-                    } else if app.linked_pull_request_known(issue.number) {
-                        lines.push(Line::from(vec![
-                            Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                            Span::styled("none found", Style::default().fg(theme.accent_danger)),
-                        ]));
+    let (
+        preview_title,
+        preview_lines,
+        linked_pr_tui_button,
+        linked_pr_web_button,
+        linked_issue_tui_button,
+        linked_issue_web_button,
+    ) = match app.selected_issue_row() {
+        Some(issue) => {
+            let assignees = if issue.assignees.is_empty() {
+                "unassigned".to_string()
+            } else {
+                issue.assignees.clone()
+            };
+            let labels = if issue.labels.is_empty() {
+                "none".to_string()
+            } else {
+                issue.labels.clone()
+            };
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if issue.is_pr {
+                        format!("PR #{}", issue.number)
                     } else {
-                        let probe_label = "[ Find linked PR ]";
-                        lines.push(Line::from(vec![
-                            Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                            Span::styled(
-                                probe_label,
-                                Style::default()
-                                    .fg(theme.bg_app)
-                                    .bg(theme.accent_subtle)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        ]));
-                        tui_button_hit = Some((
-                            line_index,
-                            prefix.chars().count() as u16,
-                            probe_label.chars().count() as u16,
-                        ));
-                    }
+                        format!("#{}", issue.number)
+                    },
+                    Style::default()
+                        .fg(theme.accent_primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {}", issue.state),
+                    Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
+                ),
+            ]));
+            let mut pr_tui_button_hit = None;
+            let mut pr_web_button_hit = None;
+            let mut issue_tui_button_hit = None;
+            let mut issue_web_button_hit = None;
+            let line_index = lines.len();
+            if !issue.is_pr {
+                let prefix = "linked PR ";
+                if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
+                    let open_label = format!("[ Open PR #{} ]", linked_pr);
+                    let web_label = "[ Web ]";
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            open_label.clone(),
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            web_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    let prefix_width = prefix.chars().count() as u16;
+                    let open_width = open_label.chars().count() as u16;
+                    let web_width = web_label.chars().count() as u16;
+                    pr_tui_button_hit = Some((line_index, prefix_width, open_width));
+                    pr_web_button_hit = Some((
+                        line_index,
+                        prefix_width.saturating_add(open_width).saturating_add(1),
+                        web_width,
+                    ));
+                } else if app.linked_pull_request_known(issue.number) {
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
+                    ]));
+                } else {
+                    let probe_label = "[ Find linked PR ]";
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            probe_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    pr_tui_button_hit = Some((
+                        line_index,
+                        prefix.chars().count() as u16,
+                        probe_label.chars().count() as u16,
+                    ));
                 }
+            } else {
+                let prefix = "linked issue ";
+                if let Some(linked_issue) = app.linked_issue_for_pull_request(issue.number) {
+                    let open_label = format!("[ Open Issue #{} ]", linked_issue);
+                    let web_label = "[ Web ]";
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            open_label.clone(),
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            web_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    let prefix_width = prefix.chars().count() as u16;
+                    let open_width = open_label.chars().count() as u16;
+                    let web_width = web_label.chars().count() as u16;
+                    issue_tui_button_hit = Some((line_index, prefix_width, open_width));
+                    issue_web_button_hit = Some((
+                        line_index,
+                        prefix_width.saturating_add(open_width).saturating_add(1),
+                        web_width,
+                    ));
+                } else if app.linked_issue_known(issue.number) {
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
+                    ]));
+                } else {
+                    let probe_label = "[ Find linked issue ]";
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            probe_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    issue_tui_button_hit = Some((
+                        line_index,
+                        prefix.chars().count() as u16,
+                        probe_label.chars().count() as u16,
+                    ));
+                }
+            }
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "assignees ",
+                    Style::default()
+                        .fg(theme.accent_subtle)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    ellipsize(assignees.as_str(), 80),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "comments  ",
+                    Style::default()
+                        .fg(theme.accent_success)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    issue.comments_count.to_string(),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "labels    ",
+                    Style::default()
+                        .fg(theme.accent_primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    ellipsize(labels.as_str(), 80),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]));
+            if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        "assignees ",
+                        "updated   ",
                         Style::default()
                             .fg(theme.accent_subtle)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        ellipsize(assignees.as_str(), 80),
-                        Style::default().fg(theme.text_muted),
-                    ),
+                    Span::styled(updated, Style::default().fg(theme.text_muted)),
                 ]));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "comments  ",
-                        Style::default()
-                            .fg(theme.accent_success)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        issue.comments_count.to_string(),
-                        Style::default().fg(theme.text_muted),
-                    ),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "labels    ",
-                        Style::default()
-                            .fg(theme.accent_primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        ellipsize(labels.as_str(), 80),
-                        Style::default().fg(theme.text_muted),
-                    ),
-                ]));
-                if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "updated   ",
-                            Style::default()
-                                .fg(theme.accent_subtle)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(updated, Style::default().fg(theme.text_muted)),
-                    ]));
-                }
-                lines.push(Line::from(""));
-
-                let rendered = markdown::render(issue.body.as_str());
-                if rendered.lines.is_empty() {
-                    lines.push(Line::from("No description."));
-                } else {
-                    lines.extend(rendered.lines);
-                }
-                (
-                    preview_title_text.to_string(),
-                    lines,
-                    tui_button_hit,
-                    web_button_hit,
-                )
             }
-            None => (
+            lines.push(Line::from(""));
+
+            let rendered = markdown::render(issue.body.as_str());
+            if rendered.lines.is_empty() {
+                lines.push(Line::from("No description."));
+            } else {
+                lines.extend(rendered.lines);
+            }
+            (
                 preview_title_text.to_string(),
-                vec![Line::from(
-                    if item_mode == crate::app::WorkItemMode::PullRequests {
-                        "Select a pull request to preview."
-                    } else {
-                        "Select an issue to preview."
-                    },
-                )],
-                None,
-                None,
-            ),
-        };
+                lines,
+                pr_tui_button_hit,
+                pr_web_button_hit,
+                issue_tui_button_hit,
+                issue_web_button_hit,
+            )
+        }
+        None => (
+            preview_title_text.to_string(),
+            vec![Line::from(
+                if item_mode == crate::app::WorkItemMode::PullRequests {
+                    "Select a pull request to preview."
+                } else {
+                    "Select an issue to preview."
+                },
+            )],
+            None,
+            None,
+            None,
+            None,
+        ),
+    };
 
     let preview_area = panes[1].inner(Margin {
         vertical: 1,
@@ -734,7 +801,7 @@ fn draw_issues(
         vertical: 1,
         horizontal: 1,
     });
-    if let Some((line, x_offset, width)) = linked_tui_button {
+    if let Some((line, x_offset, width)) = linked_pr_tui_button {
         register_inline_button(
             app,
             preview_inner,
@@ -745,7 +812,7 @@ fn draw_issues(
             MouseTarget::LinkedPullRequestTuiButton,
         );
     }
-    if let Some((line, x_offset, width)) = linked_web_button {
+    if let Some((line, x_offset, width)) = linked_pr_web_button {
         register_inline_button(
             app,
             preview_inner,
@@ -754,6 +821,28 @@ fn draw_issues(
             x_offset,
             width,
             MouseTarget::LinkedPullRequestWebButton,
+        );
+    }
+    if let Some((line, x_offset, width)) = linked_issue_tui_button {
+        register_inline_button(
+            app,
+            preview_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedIssueTuiButton,
+        );
+    }
+    if let Some((line, x_offset, width)) = linked_issue_web_button {
+        register_inline_button(
+            app,
+            preview_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedIssueWebButton,
         );
     }
 
@@ -777,6 +866,7 @@ fn draw_issue_detail(
     });
     let body_focused = app.focus() == Focus::IssueBody;
     let comments_focused = app.focus() == Focus::IssueRecentComments;
+    let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
     let (
         issue_number,
         issue_title,
@@ -880,6 +970,10 @@ fn draw_issue_detail(
     app.register_mouse_region(MouseTarget::Back, header_content.x, header_content.y, 8, 1);
 
     let mut body_lines = Vec::new();
+    let mut linked_pr_tui_hit = None;
+    let mut linked_pr_web_hit = None;
+    let mut linked_issue_tui_hit = None;
+    let mut linked_issue_web_hit = None;
     if issue_title.is_empty() {
         body_lines.push(Line::from("No issue selected."));
     } else {
@@ -889,6 +983,120 @@ fn draw_issue_detail(
                 .fg(theme.accent_primary)
                 .add_modifier(Modifier::BOLD),
         )));
+        if let Some(number) = issue_number {
+            let link_line = body_lines.len();
+            if is_pr {
+                let prefix = "linked issue ";
+                if let Some(linked_issue) = app.linked_issue_for_pull_request(number) {
+                    let open_label = format!("[ Open Issue #{} ]", linked_issue);
+                    let web_label = "[ Web ]";
+                    body_lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            open_label.clone(),
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            web_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    let prefix_width = prefix.chars().count() as u16;
+                    let open_width = open_label.chars().count() as u16;
+                    let web_width = web_label.chars().count() as u16;
+                    linked_issue_tui_hit = Some((link_line, prefix_width, open_width));
+                    linked_issue_web_hit = Some((
+                        link_line,
+                        prefix_width.saturating_add(open_width).saturating_add(1),
+                        web_width,
+                    ));
+                } else if app.linked_issue_known(number) {
+                    body_lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
+                    ]));
+                } else {
+                    let probe_label = "[ Find linked issue ]";
+                    body_lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            probe_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    linked_issue_tui_hit = Some((
+                        link_line,
+                        prefix.chars().count() as u16,
+                        probe_label.chars().count() as u16,
+                    ));
+                }
+            } else {
+                let prefix = "linked PR ";
+                if let Some(linked_pr) = app.linked_pull_request_for_issue(number) {
+                    let open_label = format!("[ Open PR #{} ]", linked_pr);
+                    let web_label = "[ Web ]";
+                    body_lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            open_label.clone(),
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            web_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    let prefix_width = prefix.chars().count() as u16;
+                    let open_width = open_label.chars().count() as u16;
+                    let web_width = web_label.chars().count() as u16;
+                    linked_pr_tui_hit = Some((link_line, prefix_width, open_width));
+                    linked_pr_web_hit = Some((
+                        link_line,
+                        prefix_width.saturating_add(open_width).saturating_add(1),
+                        web_width,
+                    ));
+                } else if app.linked_pull_request_known(number) {
+                    body_lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
+                    ]));
+                } else {
+                    let probe_label = "[ Find linked PR ]";
+                    body_lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
+                        Span::styled(
+                            probe_label,
+                            Style::default()
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_subtle)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    linked_pr_tui_hit = Some((
+                        link_line,
+                        prefix.chars().count() as u16,
+                        probe_label.chars().count() as u16,
+                    ));
+                }
+            }
+        }
     }
     let metadata = Line::from(format!(
         "assignees: {} | comments: {} | labels: {}",
@@ -910,7 +1118,6 @@ fn draw_issue_detail(
         }
     }
 
-    let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
     let mut side_lines = Vec::new();
     if is_pr {
         side_lines.push(Line::from(Span::styled(
@@ -1045,6 +1252,54 @@ fn draw_issue_detail(
         .scroll((scroll, 0));
     frame.render_widget(body_paragraph, panes[0]);
     register_mouse_region(app, MouseTarget::IssueBodyPane, panes[0]);
+    let body_inner = panes[0].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if let Some((line, x_offset, width)) = linked_pr_tui_hit {
+        register_inline_button(
+            app,
+            body_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedPullRequestTuiButton,
+        );
+    }
+    if let Some((line, x_offset, width)) = linked_pr_web_hit {
+        register_inline_button(
+            app,
+            body_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedPullRequestWebButton,
+        );
+    }
+    if let Some((line, x_offset, width)) = linked_issue_tui_hit {
+        register_inline_button(
+            app,
+            body_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedIssueTuiButton,
+        );
+    }
+    if let Some((line, x_offset, width)) = linked_issue_web_hit {
+        register_inline_button(
+            app,
+            body_inner,
+            scroll,
+            line,
+            x_offset,
+            width,
+            MouseTarget::LinkedIssueWebButton,
+        );
+    }
 
     let side_content_width = panes[1].width.saturating_sub(2);
     let side_viewport = panes[1].height.saturating_sub(2) as usize;
@@ -2202,7 +2457,7 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     let line_width = area.width.saturating_sub(4) as usize;
     let sync_label = format!("[{}]", sync);
     let status_prefix_width = "[Repos] ".chars().count() + 1 + sync_label.chars().count() + 2;
-    let context_prefix_width = "ctx ".chars().count();
+    let context_prefix_width = "context ".chars().count();
     let keys_prefix_width = "keys ".chars().count();
     let status_value = if status.is_empty() { "ready" } else { status };
     let status_text = fit_inline(status_value, line_width.saturating_sub(status_prefix_width));
@@ -2236,7 +2491,7 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     lines.push(Line::from(status_line));
     lines.push(Line::from(vec![
         Span::styled(
-            "ctx ",
+            "context ",
             Style::default()
                 .fg(theme.accent_success)
                 .add_modifier(Modifier::BOLD),
@@ -2433,10 +2688,9 @@ fn help_text(app: &App) -> String {
                 return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            let reviewing_pr = app
-                .selected_issue_row()
-                .is_some_and(|issue| issue.is_pr)
-                || app.work_item_mode() == crate::app::WorkItemMode::PullRequests;
+            let selected_is_pr = app.selected_issue_row().is_some_and(|issue| issue.is_pr);
+            let reviewing_pr =
+                selected_is_pr || app.work_item_mode() == crate::app::WorkItemMode::PullRequests;
             let mut parts = vec![
                 "j/k move",
                 "Enter open",
@@ -2456,6 +2710,8 @@ fn help_text(app: &App) -> String {
                 parts.insert(10, "u reopen");
                 parts.insert(11, "dd close");
                 parts.insert(12, "v checkout");
+                parts.insert(13, "Shift+P linked issue (TUI)");
+                parts.insert(14, "Shift+O linked issue (web)");
             } else {
                 parts.insert(10, "u reopen");
                 parts.insert(11, "dd close");
@@ -2469,8 +2725,16 @@ fn help_text(app: &App) -> String {
         View::IssueDetail => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • r refresh • Esc back • q quit"
-                    .to_string();
+                let linked_hint = if app.selected_pull_request_has_known_linked_issue() {
+                    "Shift+P linked issue (TUI) • Shift+O linked issue (web)"
+                } else {
+                    "Shift+P find/open linked issue • Shift+O open linked issue (web)"
+                };
+                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • q quit"
+                    .replace(
+                        "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
+                        linked_hint,
+                    );
             }
             if app.selected_issue_has_known_linked_pr() {
                 return "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • q quit"
@@ -2482,8 +2746,16 @@ fn help_text(app: &App) -> String {
         View::IssueComments => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
-                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • r refresh • Esc back • q quit"
-                    .to_string();
+                let linked_hint = if app.selected_pull_request_has_known_linked_issue() {
+                    "Shift+P linked issue (TUI) • Shift+O linked issue (web)"
+                } else {
+                    "Shift+P find/open linked issue • Shift+O open linked issue (web)"
+                };
+                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • q quit"
+                    .replace(
+                        "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
+                        linked_hint,
+                    );
             }
             if app.selected_issue_has_known_linked_pr() {
                 return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • q quit"
@@ -2675,11 +2947,12 @@ fn filter_tab(
         return Span::styled(
             format!("[{}]", text),
             Style::default()
-                .fg(color)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                .fg(theme.bg_app)
+                .bg(color)
+                .add_modifier(Modifier::BOLD),
         );
     }
-    Span::styled(text, Style::default().fg(theme.text_muted))
+    Span::styled(format!(" {} ", text), Style::default().fg(theme.text_muted))
 }
 
 fn issue_state_color(state: &str, theme: &ThemePalette) -> Color {

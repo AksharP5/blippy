@@ -321,6 +321,18 @@ fn handle_actions(
             if is_pr {
                 app.request_pull_request_files_sync();
                 app.request_pull_request_review_comments_sync();
+                if !app.linked_issue_known(issue_number) {
+                    if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
+                        start_linked_issue_lookup(
+                            owner.to_string(),
+                            repo.to_string(),
+                            issue_number,
+                            token.to_string(),
+                            event_tx.clone(),
+                            LinkedIssueTarget::Probe,
+                        );
+                    }
+                }
             } else if !app.linked_pull_request_known(issue_number) {
                 if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                     start_linked_pull_request_lookup(
@@ -358,6 +370,12 @@ fn handle_actions(
         }
         AppAction::OpenLinkedPullRequestInTui => {
             open_linked_pull_request(app, token, event_tx.clone(), LinkedPullRequestTarget::Tui)?;
+        }
+        AppAction::OpenLinkedIssueInBrowser => {
+            open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Browser)?;
+        }
+        AppAction::OpenLinkedIssueInTui => {
+            open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Tui)?;
         }
         AppAction::CopyStatus => {
             copy_status_to_clipboard(app)?;
@@ -1409,6 +1427,13 @@ enum LinkedPullRequestTarget {
     Probe,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkedIssueTarget {
+    Tui,
+    Browser,
+    Probe,
+}
+
 fn open_linked_pull_request(
     app: &mut App,
     token: &str,
@@ -1452,6 +1477,49 @@ fn open_linked_pull_request(
     Ok(())
 }
 
+fn open_linked_issue(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+    target: LinkedIssueTarget,
+) -> Result<()> {
+    let issue = match app.current_or_selected_issue() {
+        Some(issue) => issue,
+        None => {
+            app.set_status("No issue selected".to_string());
+            return Ok(());
+        }
+    };
+    if !issue.is_pr {
+        app.set_status("Selected item is not a pull request".to_string());
+        return Ok(());
+    }
+
+    let pull_number = issue.number;
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_linked_issue_lookup(
+        owner,
+        repo,
+        pull_number,
+        token.to_string(),
+        event_tx,
+        target,
+    );
+    if target == LinkedIssueTarget::Tui {
+        app.set_status("Looking up linked issue for TUI...".to_string());
+        return Ok(());
+    }
+    app.set_status("Looking up linked issue for browser...".to_string());
+    Ok(())
+}
+
 fn open_pull_request_in_tui(
     app: &mut App,
     conn: &rusqlite::Connection,
@@ -1479,6 +1547,37 @@ fn open_pull_request_in_tui(
         app.request_comment_sync();
         app.request_pull_request_files_sync();
         app.request_pull_request_review_comments_sync();
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn open_issue_in_tui(
+    app: &mut App,
+    conn: &rusqlite::Connection,
+    issue_number: i64,
+) -> Result<bool> {
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::Issues);
+
+    let try_filters = [IssueFilter::Open, IssueFilter::Closed];
+    for filter in try_filters {
+        app.set_issue_filter(filter);
+        if !app.select_issue_by_number(issue_number) {
+            continue;
+        }
+
+        let (issue_id, issue_number) = match app.selected_issue_row() {
+            Some(issue) => (issue.id, issue.number),
+            None => return Ok(false),
+        };
+        app.set_current_issue(issue_id, issue_number);
+        app.reset_issue_detail_scroll();
+        load_comments_for_issue(app, conn, issue_id)?;
+        app.set_view(View::IssueDetail);
+        app.set_comment_syncing(false);
+        app.request_comment_sync();
         return Ok(true);
     }
 
@@ -1542,6 +1641,71 @@ fn start_linked_pull_request_lookup(
             Err(error) => {
                 let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
                     issue_number,
+                    message: error.to_string(),
+                    target,
+                });
+            }
+        }
+    });
+}
+
+fn start_linked_issue_lookup(
+    owner: String,
+    repo: String,
+    pull_number: i64,
+    token: String,
+    event_tx: Sender<AppEvent>,
+    target: LinkedIssueTarget,
+) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
+                    pull_number,
+                    message: error.to_string(),
+                    target,
+                });
+                return;
+            }
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
+                    pull_number,
+                    message: error.to_string(),
+                    target,
+                });
+                return;
+            }
+        };
+
+        let result = runtime.block_on(async {
+            client
+                .find_linked_issue_for_pull_request(&owner, &repo, pull_number)
+                .await
+        });
+
+        match result {
+            Ok(linked) => {
+                let (issue_number, url) = match linked {
+                    Some((issue_number, url)) => (Some(issue_number), Some(url)),
+                    None => (None, None),
+                };
+                let _ = event_tx.send(AppEvent::LinkedIssueResolved {
+                    pull_number,
+                    issue_number,
+                    url,
+                    target,
+                });
+            }
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
+                    pull_number,
                     message: error.to_string(),
                     target,
                 });
@@ -1994,6 +2158,89 @@ fn handle_events(
                     issue_number, target_label, message
                 ));
             }
+            AppEvent::LinkedIssueResolved {
+                pull_number,
+                issue_number,
+                url,
+                target,
+            } => {
+                app.set_linked_issue_for_pull_request(pull_number, issue_number);
+                let issue_number = match issue_number {
+                    Some(issue_number) => issue_number,
+                    None => {
+                        if target == LinkedIssueTarget::Probe {
+                            continue;
+                        }
+                        app.set_status(format!("No linked issue found for PR #{}", pull_number));
+                        continue;
+                    }
+                };
+
+                if target == LinkedIssueTarget::Probe {
+                    continue;
+                }
+
+                if target == LinkedIssueTarget::Tui {
+                    refresh_current_repo_issues(app, conn)?;
+                    if open_issue_in_tui(app, conn, issue_number)? {
+                        app.set_status(format!("Opened linked issue #{} in TUI", issue_number));
+                        continue;
+                    }
+
+                    app.set_status(format!(
+                        "Linked issue #{} not cached in TUI yet; press r then Shift+P",
+                        issue_number
+                    ));
+                    continue;
+                }
+
+                let browser_url = match url {
+                    Some(url) => Some(url),
+                    None => {
+                        if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo())
+                        {
+                            Some(format!(
+                                "https://github.com/{}/{}/issues/{}",
+                                owner, repo, issue_number
+                            ))
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(browser_url) = browser_url {
+                    if let Err(error) = open_url(browser_url.as_str()) {
+                        app.set_status(format!("Open linked issue failed: {}", error));
+                        continue;
+                    }
+                    app.set_status(format!("Opened linked issue #{} in browser", issue_number));
+                    continue;
+                }
+
+                app.set_status(format!(
+                    "Linked issue #{} found but URL unavailable",
+                    issue_number
+                ));
+            }
+            AppEvent::LinkedIssueLookupFailed {
+                pull_number,
+                message,
+                target,
+            } => {
+                if target == LinkedIssueTarget::Probe {
+                    continue;
+                }
+                let target_label = match target {
+                    LinkedIssueTarget::Tui => "TUI",
+                    LinkedIssueTarget::Browser => "browser",
+                    LinkedIssueTarget::Probe => "probe",
+                };
+                app.set_status(format!(
+                    "Linked issue lookup failed for PR #{} ({}): {}",
+                    pull_number, target_label, message
+                ));
+            }
             AppEvent::IssueCommentUpdated {
                 issue_number,
                 comment_id,
@@ -2138,6 +2385,17 @@ enum AppEvent {
         issue_number: i64,
         message: String,
         target: LinkedPullRequestTarget,
+    },
+    LinkedIssueResolved {
+        pull_number: i64,
+        issue_number: Option<i64>,
+        url: Option<String>,
+        target: LinkedIssueTarget,
+    },
+    LinkedIssueLookupFailed {
+        pull_number: i64,
+        message: String,
+        target: LinkedIssueTarget,
     },
     IssueUpdated {
         issue_number: i64,
