@@ -446,16 +446,43 @@ fn draw_issues(
                         format!("[{}] ", issue.state),
                         Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
                     ),
-                    Span::raw(issue.title.clone()),
+                    Span::styled(
+                        ellipsize(issue.title.as_str(), 74),
+                        Style::default().fg(theme.text_primary),
+                    ),
                     pending_issue_span(app.pending_issue_badge(issue.number), theme),
                 ]);
-                let line2 = Line::from(format!(
-                    "@{}  comments:{}  labels:{}",
-                    ellipsize(assignees, 20),
-                    issue.comments_count,
-                    ellipsize(labels, 24)
-                ))
-                .style(Style::default().fg(theme.text_muted));
+                let line2 = Line::from(vec![
+                    Span::styled(
+                        "A:",
+                        Style::default()
+                            .fg(theme.accent_subtle)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        ellipsize(assignees, 20),
+                        Style::default().fg(theme.text_muted),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        "C:",
+                        Style::default()
+                            .fg(theme.accent_success)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        issue.comments_count.to_string(),
+                        Style::default().fg(theme.text_muted),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        "L:",
+                        Style::default()
+                            .fg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(ellipsize(labels, 24), Style::default().fg(theme.text_muted)),
+                ]);
                 ListItem::new(vec![line1, line2])
             })
             .collect()
@@ -528,14 +555,52 @@ fn draw_issues(
                     Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
                 ),
             ]));
-            lines.push(Line::from(format!("assignees: {}", assignees)));
-            lines.push(Line::from(format!("comments: {}", issue.comments_count)));
-            lines.push(Line::from(format!(
-                "labels: {}",
-                ellipsize(labels.as_str(), 80)
-            )));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "assignees ",
+                    Style::default()
+                        .fg(theme.accent_subtle)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    ellipsize(assignees.as_str(), 80),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "comments  ",
+                    Style::default()
+                        .fg(theme.accent_success)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    issue.comments_count.to_string(),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "labels    ",
+                    Style::default()
+                        .fg(theme.accent_primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    ellipsize(labels.as_str(), 80),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]));
             if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
-                lines.push(Line::from(format!("updated: {}", updated)));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "updated   ",
+                        Style::default()
+                            .fg(theme.accent_subtle)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(updated, Style::default().fg(theme.text_muted)),
+                ]));
             }
             lines.push(Line::from(""));
 
@@ -1978,6 +2043,7 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     let status = app.status();
     let context = status_context(app);
     let help = help_text(app);
+    let sync = sync_state_label(app);
     let mut lines = Vec::new();
     let mut status_line = vec![Span::styled(
         "[Repos] ",
@@ -1985,28 +2051,27 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
             .fg(theme.accent_primary)
             .add_modifier(Modifier::BOLD),
     )];
+    status_line.push(Span::raw(" "));
+    status_line.push(Span::styled(
+        format!("[{}]", sync),
+        Style::default()
+            .fg(sync_state_color(sync, theme))
+            .add_modifier(Modifier::BOLD),
+    ));
+    status_line.push(Span::raw("  "));
     if !status.is_empty() {
-        status_line.push(Span::styled(
-            "status ",
-            Style::default()
-                .fg(theme.accent_primary)
-                .add_modifier(Modifier::BOLD),
-        ));
         status_line.push(Span::styled(
             status,
             Style::default().fg(theme.text_primary),
         ));
     }
     if status.is_empty() {
-        status_line.push(Span::styled(
-            "status ready",
-            Style::default().fg(theme.text_muted),
-        ));
+        status_line.push(Span::styled("ready", Style::default().fg(theme.text_muted)));
     }
     lines.push(Line::from(status_line));
     lines.push(Line::from(vec![
         Span::styled(
-            "context ",
+            "ctx ",
             Style::default()
                 .fg(theme.accent_success)
                 .add_modifier(Modifier::BOLD),
@@ -2265,19 +2330,7 @@ fn status_context(app: &App) -> String {
         (Some(owner), Some(repo)) => format!("{}/{}", owner, repo),
         _ => "no repo selected".to_string(),
     };
-    let sync = if app.syncing() {
-        "syncing"
-    } else if app.pull_request_files_syncing() {
-        "loading pr files"
-    } else if app.pull_request_review_comments_syncing() {
-        "loading review comments"
-    } else if app.comment_syncing() {
-        "syncing comments"
-    } else if app.scanning() {
-        "scanning"
-    } else {
-        "idle"
-    };
+    let sync = sync_state_label(app);
     if app.view() == View::Issues {
         let query = app.issue_query().trim();
         let query = if query.is_empty() {
@@ -2298,6 +2351,35 @@ fn status_context(app: &App) -> String {
         );
     }
     format!("repo: {}  |  status: {}", repo, sync)
+}
+
+fn sync_state_label(app: &App) -> &'static str {
+    if app.syncing() {
+        return "syncing";
+    }
+    if app.pull_request_files_syncing() {
+        return "loading pr files";
+    }
+    if app.pull_request_review_comments_syncing() {
+        return "loading review comments";
+    }
+    if app.comment_syncing() {
+        return "syncing comments";
+    }
+    if app.scanning() {
+        return "scanning";
+    }
+    "idle"
+}
+
+fn sync_state_color(sync: &str, theme: &ThemePalette) -> Color {
+    if sync == "idle" {
+        return theme.text_muted;
+    }
+    if sync == "scanning" {
+        return theme.accent_subtle;
+    }
+    theme.accent_success
 }
 
 fn list_state(selected: usize) -> ListState {
