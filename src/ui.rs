@@ -1598,6 +1598,8 @@ fn draw_label_picker(
         .split(popup_inner);
 
     let filtered = app.filtered_label_indices();
+    let selected_count = app.selected_labels().len();
+    let total_count = app.label_options().len();
     let query_display = if app.label_query().trim().is_empty() {
         "none".to_string()
     } else {
@@ -1613,6 +1615,14 @@ fn draw_label_picker(
         Line::from(vec![
             Span::styled("filter: ", Style::default().fg(theme.text_muted)),
             Span::raw(query_display),
+            Span::raw("  "),
+            Span::styled("selected: ", Style::default().fg(theme.text_muted)),
+            Span::styled(
+                format!("{}/{}", selected_count, total_count),
+                Style::default()
+                    .fg(theme.accent_success)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(Span::styled(
             "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
@@ -1635,10 +1645,25 @@ fn draw_label_picker(
                 } else {
                     "[ ]"
                 };
+                let selected = app.label_option_selected(label.as_str());
                 ListItem::new(Line::from(vec![
-                    Span::styled(checked, Style::default().fg(theme.accent_primary)),
+                    Span::styled(
+                        checked,
+                        Style::default().fg(if selected {
+                            theme.accent_success
+                        } else {
+                            theme.accent_primary
+                        }),
+                    ),
                     Span::raw(" "),
-                    Span::raw(label.clone()),
+                    Span::styled(
+                        label.clone(),
+                        Style::default().fg(if selected {
+                            theme.text_primary
+                        } else {
+                            theme.text_muted
+                        }),
+                    ),
                 ]))
             })
             .collect::<Vec<ListItem>>()
@@ -1758,6 +1783,8 @@ fn draw_assignee_picker(
         .split(popup_inner);
 
     let filtered = app.filtered_assignee_indices();
+    let selected_count = app.selected_assignees().len();
+    let total_count = app.assignee_options().len();
     let query_display = if app.assignee_query().trim().is_empty() {
         "none".to_string()
     } else {
@@ -1773,6 +1800,14 @@ fn draw_assignee_picker(
         Line::from(vec![
             Span::styled("filter: ", Style::default().fg(theme.text_muted)),
             Span::raw(query_display),
+            Span::raw("  "),
+            Span::styled("selected: ", Style::default().fg(theme.text_muted)),
+            Span::styled(
+                format!("{}/{}", selected_count, total_count),
+                Style::default()
+                    .fg(theme.accent_success)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(Span::styled(
             "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
@@ -1799,10 +1834,25 @@ fn draw_assignee_picker(
                 } else {
                     "[ ]"
                 };
+                let selected = app.assignee_option_selected(assignee.as_str());
                 ListItem::new(Line::from(vec![
-                    Span::styled(checked, Style::default().fg(theme.accent_primary)),
+                    Span::styled(
+                        checked,
+                        Style::default().fg(if selected {
+                            theme.accent_success
+                        } else {
+                            theme.accent_primary
+                        }),
+                    ),
                     Span::raw(" "),
-                    Span::raw(assignee.clone()),
+                    Span::styled(
+                        assignee.clone(),
+                        Style::default().fg(if selected {
+                            theme.text_primary
+                        } else {
+                            theme.text_muted
+                        }),
+                    ),
                 ]))
             })
             .collect::<Vec<ListItem>>()
