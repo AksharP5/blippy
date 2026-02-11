@@ -5591,8 +5591,8 @@ mod tests {
                 path: "/tmp/one".to_string(),
                 remote_name: "origin".to_string(),
                 owner: "acme".to_string(),
-                repo: "glyph".to_string(),
-                url: "https://github.com/acme/glyph.git".to_string(),
+                repo: "blippy".to_string(),
+                url: "https://github.com/acme/blippy.git".to_string(),
                 last_seen: None,
                 last_scanned: None,
             },
@@ -5600,8 +5600,8 @@ mod tests {
                 path: "/tmp/two".to_string(),
                 remote_name: "upstream".to_string(),
                 owner: "acme".to_string(),
-                repo: "glyph".to_string(),
-                url: "https://github.com/acme/glyph.git".to_string(),
+                repo: "blippy".to_string(),
+                url: "https://github.com/acme/blippy.git".to_string(),
                 last_seen: None,
                 last_scanned: None,
             },
@@ -5618,7 +5618,7 @@ mod tests {
 
         assert_eq!(app.filtered_repo_rows().len(), 3);
         assert_eq!(app.filtered_repo_rows()[0].owner, "acme");
-        assert_eq!(app.filtered_repo_rows()[0].repo, "glyph");
+        assert_eq!(app.filtered_repo_rows()[0].repo, "blippy");
         assert_eq!(app.filtered_repo_rows()[1].remote_name, "upstream");
     }
 
@@ -5630,8 +5630,8 @@ mod tests {
                 path: "/tmp/one".to_string(),
                 remote_name: "origin".to_string(),
                 owner: "acme".to_string(),
-                repo: "glyph".to_string(),
-                url: "https://github.com/acme/glyph.git".to_string(),
+                repo: "blippy".to_string(),
+                url: "https://github.com/acme/blippy.git".to_string(),
                 last_seen: None,
                 last_scanned: None,
             },
@@ -5666,8 +5666,8 @@ mod tests {
                 path: "/tmp/one".to_string(),
                 remote_name: "origin".to_string(),
                 owner: "acme".to_string(),
-                repo: "glyph".to_string(),
-                url: "https://github.com/acme/glyph.git".to_string(),
+                repo: "blippy".to_string(),
+                url: "https://github.com/acme/blippy.git".to_string(),
                 last_seen: None,
                 last_scanned: None,
             },

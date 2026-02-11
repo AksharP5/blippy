@@ -52,10 +52,10 @@ mod tests {
     fn build_local_repo_rows_includes_remote_metadata() {
         let remotes = vec![RemoteInfo {
             name: "origin".to_string(),
-            url: "https://github.com/acme/glyph.git".to_string(),
+            url: "https://github.com/acme/blippy.git".to_string(),
             slug: RepoSlug {
                 owner: "acme".to_string(),
-                repo: "glyph".to_string(),
+                repo: "blippy".to_string(),
             },
         }];
         let path = Path::new("/tmp/repo");
@@ -79,11 +79,11 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "https://github.com/acme/glyph.git",
+                "https://github.com/acme/blippy.git",
             ],
         );
 
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let inserted = index_repo_path(&conn, &repo_path).expect("index");
@@ -102,7 +102,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("glyph-index-{}-{}", label, nanos));
+        let dir = std::env::temp_dir().join(format!("blippy-index-{}-{}", label, nanos));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

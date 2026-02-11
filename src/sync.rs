@@ -263,7 +263,7 @@ mod tests {
     fn map_repo_to_row_copies_owner_and_name() {
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -273,7 +273,7 @@ mod tests {
         let row = map_repo_to_row(&repo);
         assert_eq!(row.id, 1);
         assert_eq!(row.owner, "acme");
-        assert_eq!(row.name, "glyph");
+        assert_eq!(row.name, "blippy");
     }
 
     #[test]
@@ -349,12 +349,12 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_inserts_issues_and_comments() {
         let dir = unique_temp_dir("sync");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -406,7 +406,7 @@ mod tests {
             not_modified_when_etag_matches: false,
         };
 
-        let stats = sync_repo(&client, &conn, "acme", "glyph")
+        let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
         assert_eq!(stats.issues, 2);
@@ -506,12 +506,12 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_persists_partial_when_later_page_fails() {
         let dir = unique_temp_dir("sync-partial");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -579,7 +579,7 @@ mod tests {
             not_modified_when_etag_matches: false,
         };
 
-        let stats = sync_repo(&client, &conn, "acme", "glyph")
+        let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
         assert_eq!(stats.issues, 2);
@@ -594,12 +594,12 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_reports_progress_per_page() {
         let dir = unique_temp_dir("sync-progress");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -652,7 +652,7 @@ mod tests {
         };
 
         let mut progress = Vec::new();
-        let stats = sync_repo_with_progress(&client, &conn, "acme", "glyph", |page, stats| {
+        let stats = sync_repo_with_progress(&client, &conn, "acme", "blippy", |page, stats| {
             progress.push((page, stats.issues));
         })
         .await
@@ -668,12 +668,12 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_updates_repo_sync_cursor_after_success() {
         let dir = unique_temp_dir("sync-cursor");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -725,11 +725,11 @@ mod tests {
             not_modified_when_etag_matches: false,
         };
 
-        sync_repo(&client, &conn, "acme", "glyph")
+        sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
 
-        let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
+        let stored_repo = get_repo_by_slug(&conn, "acme", "blippy")
             .expect("lookup")
             .expect("repo");
         assert_eq!(
@@ -745,13 +745,13 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_skips_fetch_when_etag_not_modified() {
         let dir = unique_temp_dir("sync-not-modified");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let existing = crate::store::RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: Some("2024-01-05T00:00:00Z".to_string()),
             etag: Some("etag-stable".to_string()),
         };
@@ -759,7 +759,7 @@ mod tests {
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -777,13 +777,13 @@ mod tests {
             not_modified_when_etag_matches: true,
         };
 
-        let stats = sync_repo(&client, &conn, "acme", "glyph")
+        let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
         assert!(stats.not_modified);
         assert_eq!(stats.issues, 0);
 
-        let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
+        let stored_repo = get_repo_by_slug(&conn, "acme", "blippy")
             .expect("lookup")
             .expect("repo");
         assert_eq!(
@@ -799,13 +799,13 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_uses_cached_repo_without_get_repo_call() {
         let dir = unique_temp_dir("sync-cached-repo");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let existing = crate::store::RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: Some("2024-01-05T00:00:00Z".to_string()),
             etag: Some("etag-stable".to_string()),
         };
@@ -814,7 +814,7 @@ mod tests {
         let client = FakeGitHub {
             repo: ApiRepo {
                 id: 1,
-                name: "glyph".to_string(),
+                name: "blippy".to_string(),
                 owner: ApiUser {
                     login: "acme".to_string(),
                     user_type: None,
@@ -830,7 +830,7 @@ mod tests {
             not_modified_when_etag_matches: true,
         };
 
-        let stats = sync_repo(&client, &conn, "acme", "glyph")
+        let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
         assert!(stats.not_modified);
@@ -842,13 +842,13 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_does_not_advance_cursor_on_partial_failure() {
         let dir = unique_temp_dir("sync-cursor-partial");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let existing = crate::store::RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: Some("2024-01-01T00:00:00Z".to_string()),
             etag: Some("etag-old".to_string()),
         };
@@ -856,7 +856,7 @@ mod tests {
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -890,13 +890,13 @@ mod tests {
             not_modified_when_etag_matches: false,
         };
 
-        let stats = sync_repo(&client, &conn, "acme", "glyph")
+        let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
         assert_eq!(stats.issues, 1);
         assert!(!stats.not_modified);
 
-        let stored_repo = get_repo_by_slug(&conn, "acme", "glyph")
+        let stored_repo = get_repo_by_slug(&conn, "acme", "blippy")
             .expect("lookup")
             .expect("repo");
         assert_eq!(
@@ -912,12 +912,12 @@ mod tests {
     #[tokio::test]
     async fn sync_repo_keeps_partial_when_only_pull_requests_seen_before_failure() {
         let dir = unique_temp_dir("sync-pr-only-partial");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = ApiRepo {
             id: 1,
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             owner: ApiUser {
                 login: "acme".to_string(),
                 user_type: None,
@@ -951,7 +951,7 @@ mod tests {
             not_modified_when_etag_matches: false,
         };
 
-        let stats = sync_repo(&client, &conn, "acme", "glyph")
+        let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
             .expect("sync");
         assert_eq!(stats.issues, 1);
@@ -965,7 +965,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("glyph-sync-{}-{}", label, nanos));
+        let dir = std::env::temp_dir().join(format!("blippy-sync-{}-{}", label, nanos));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

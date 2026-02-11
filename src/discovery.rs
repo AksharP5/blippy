@@ -199,7 +199,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("glyph-scan-{}-{}", label, nanos));
+        let dir = std::env::temp_dir().join(format!("blippy-scan-{}-{}", label, nanos));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

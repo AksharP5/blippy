@@ -51,7 +51,7 @@ use crate::sync::{SyncStats, sync_repo_with_progress};
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
 
-const AUTH_DEBUG_ENV: &str = "GLYPH_AUTH_DEBUG";
+const AUTH_DEBUG_ENV: &str = "blippy_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const COMMENT_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
@@ -4169,7 +4169,7 @@ mod tests {
     #[test]
     fn issue_url_uses_pull_route_for_pull_requests() {
         let mut app = crate::app::App::new(Config::default());
-        app.set_current_repo_with_path("acme", "glyph", None);
+        app.set_current_repo_with_path("acme", "blippy", None);
         app.set_view(View::Issues);
         app.set_issues(vec![IssueRow {
             id: 10,
@@ -4189,13 +4189,13 @@ mod tests {
 
         let url = issue_url(&app).expect("url");
 
-        assert_eq!(url, "https://github.com/acme/glyph/pull/42");
+        assert_eq!(url, "https://github.com/acme/blippy/pull/42");
     }
 
     #[test]
     fn issue_url_uses_issue_route_for_issues() {
         let mut app = crate::app::App::new(Config::default());
-        app.set_current_repo_with_path("acme", "glyph", None);
+        app.set_current_repo_with_path("acme", "blippy", None);
         app.set_view(View::Issues);
         app.set_issues(vec![IssueRow {
             id: 11,
@@ -4213,6 +4213,6 @@ mod tests {
 
         let url = issue_url(&app).expect("url");
 
-        assert_eq!(url, "https://github.com/acme/glyph/issues/7");
+        assert_eq!(url, "https://github.com/acme/blippy/issues/7");
     }
 }

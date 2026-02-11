@@ -108,11 +108,11 @@ struct KeybindsFile {
 }
 
 fn config_path() -> PathBuf {
-    config_dir().join("glyph").join("config.toml")
+    config_dir().join("blippy").join("config.toml")
 }
 
 fn keybinds_path() -> PathBuf {
-    config_dir().join("glyph").join("keybinds.toml")
+    config_dir().join("blippy").join("keybinds.toml")
 }
 
 fn config_dir() -> PathBuf {

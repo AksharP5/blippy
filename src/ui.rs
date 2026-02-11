@@ -58,7 +58,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &ThemePalett
 
     let line = Line::from(vec![
         Span::styled(
-            " Glyph ",
+            " blippy ",
             Style::default()
                 .fg(theme.bg_app)
                 .bg(theme.accent_primary)
@@ -206,7 +206,7 @@ fn draw_repo_picker(
     let items = if app.filtered_repo_rows().is_empty() {
         if app.repos().is_empty() {
             vec![ListItem::new(
-                "No repos found. Run `glyph sync` or press Ctrl+R to rescan.",
+                "No repos found. Run `blippy sync` or press Ctrl+R to rescan.",
             )]
         } else {
             vec![ListItem::new(
@@ -2855,7 +2855,7 @@ fn draw_modal_background(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme
         View::IssueComments => draw_issue_comments(frame, app, area, theme),
         View::PullRequestFiles => draw_pull_request_files(frame, app, area, theme),
         _ => {
-            frame.render_widget(panel_block("Glyph", theme), area);
+            frame.render_widget(panel_block("blippy", theme), area);
         }
     }
     frame.render_widget(

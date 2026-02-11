@@ -160,33 +160,33 @@ mod tests {
 
     #[test]
     fn parse_remote_url_handles_https() {
-        let slug = parse_remote_url("https://github.com/acme/glyph.git").expect("slug");
+        let slug = parse_remote_url("https://github.com/acme/blippy.git").expect("slug");
         assert_eq!(slug.owner, "acme");
-        assert_eq!(slug.repo, "glyph");
+        assert_eq!(slug.repo, "blippy");
     }
 
     #[test]
     fn parse_remote_url_handles_ssh() {
-        let slug = parse_remote_url("git@github.com:acme/glyph.git").expect("slug");
+        let slug = parse_remote_url("git@github.com:acme/blippy.git").expect("slug");
         assert_eq!(slug.owner, "acme");
-        assert_eq!(slug.repo, "glyph");
+        assert_eq!(slug.repo, "blippy");
     }
 
     #[test]
     fn parse_remote_url_handles_ssh_url() {
-        let slug = parse_remote_url("ssh://git@github.com/acme/glyph.git").expect("slug");
+        let slug = parse_remote_url("ssh://git@github.com/acme/blippy.git").expect("slug");
         assert_eq!(slug.owner, "acme");
-        assert_eq!(slug.repo, "glyph");
+        assert_eq!(slug.repo, "blippy");
     }
 
     #[test]
     fn parse_remote_url_rejects_non_github() {
-        assert!(parse_remote_url("https://gitlab.com/acme/glyph").is_none());
+        assert!(parse_remote_url("https://gitlab.com/acme/blippy").is_none());
     }
 
     #[test]
     fn parse_remotes_output_collects_unique_remotes() {
-        let output = "origin\thttps://github.com/acme/glyph.git (fetch)\norigin\thttps://github.com/acme/glyph.git (push)\nupstream\tgit@github.com:org/glyph.git (fetch)\n";
+        let output = "origin\thttps://github.com/acme/blippy.git (fetch)\norigin\thttps://github.com/acme/blippy.git (push)\nupstream\tgit@github.com:org/blippy.git (fetch)\n";
         let remotes = parse_remotes_output(output);
 
         assert_eq!(remotes.len(), 2);
@@ -198,22 +198,22 @@ mod tests {
 
     #[test]
     fn parse_remotes_output_filters_non_github() {
-        let output = "origin\thttps://gitlab.com/acme/glyph.git (fetch)\n";
+        let output = "origin\thttps://gitlab.com/acme/blippy.git (fetch)\n";
         let remotes = parse_remotes_output(output);
         assert!(remotes.is_empty());
     }
 
     #[test]
     fn parse_remotes_output_matches_expected_slug() {
-        let output = "origin\tssh://git@github.com/acme/glyph.git (fetch)\n";
+        let output = "origin\tssh://git@github.com/acme/blippy.git (fetch)\n";
         let remotes = parse_remotes_output(output);
 
         let expected = RemoteInfo {
             name: "origin".to_string(),
-            url: "ssh://git@github.com/acme/glyph.git".to_string(),
+            url: "ssh://git@github.com/acme/blippy.git".to_string(),
             slug: RepoSlug {
                 owner: "acme".to_string(),
-                repo: "glyph".to_string(),
+                repo: "blippy".to_string(),
             },
         };
         assert_eq!(remotes, vec![expected]);
@@ -242,7 +242,7 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "https://github.com/acme/glyph.git",
+                "https://github.com/acme/blippy.git",
             ],
         );
 
@@ -259,7 +259,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("glyph-git-{}-{}", label, nanos));
+        let dir = std::env::temp_dir().join(format!("blippy-git-{}-{}", label, nanos));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

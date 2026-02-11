@@ -36,7 +36,11 @@ mod tests {
 
     #[test]
     fn parse_args_returns_auth_reset() {
-        let args = vec!["glyph".to_string(), "auth".to_string(), "reset".to_string()];
+        let args = vec![
+            "blippy".to_string(),
+            "auth".to_string(),
+            "reset".to_string(),
+        ];
 
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, Some(CliCommand::AuthReset));
@@ -44,7 +48,7 @@ mod tests {
 
     #[test]
     fn parse_args_returns_none_for_empty() {
-        let args = vec!["glyph".to_string()];
+        let args = vec!["blippy".to_string()];
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, None);
     }
@@ -52,7 +56,7 @@ mod tests {
     #[test]
     fn parse_args_returns_cache_reset() {
         let args = vec![
-            "glyph".to_string(),
+            "blippy".to_string(),
             "cache".to_string(),
             "reset".to_string(),
         ];
@@ -63,7 +67,7 @@ mod tests {
 
     #[test]
     fn parse_args_returns_sync() {
-        let args = vec!["glyph".to_string(), "sync".to_string()];
+        let args = vec!["blippy".to_string(), "sync".to_string()];
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, Some(CliCommand::Sync));
     }

@@ -5,8 +5,8 @@ use std::time::Duration;
 use anyhow::Result;
 use rusqlite::Connection;
 
-const DB_FILE_NAME: &str = "glyph.db";
-const APP_DIR_NAME: &str = "glyph";
+const DB_FILE_NAME: &str = "blippy.db";
+const APP_DIR_NAME: &str = "blippy";
 const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn delete_db_returns_false_when_missing() {
         let dir = unique_temp_dir("missing");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let deleted = delete_db_at(&db_path).expect("delete succeeds");
 
         assert!(!deleted);
@@ -675,7 +675,7 @@ mod tests {
     #[test]
     fn delete_db_removes_existing_file() {
         let dir = unique_temp_dir("present");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         fs::write(&db_path, "cache").expect("write db");
 
         let deleted = delete_db_at(&db_path).expect("delete succeeds");
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn open_db_creates_file() {
         let dir = unique_temp_dir("create");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
 
         let conn = open_db_at(&db_path).expect("open db");
 
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn open_db_creates_tables() {
         let dir = unique_temp_dir("tables");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
 
         let conn = open_db_at(&db_path).expect("open db");
 
@@ -715,13 +715,13 @@ mod tests {
     #[test]
     fn upsert_issue_inserts_and_updates() {
         let dir = unique_temp_dir("issue-upsert");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: None,
             etag: None,
         };
@@ -761,13 +761,13 @@ mod tests {
     #[test]
     fn upsert_comment_inserts_and_updates() {
         let dir = unique_temp_dir("comment-upsert");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: None,
             etag: None,
         };
@@ -815,13 +815,13 @@ mod tests {
     #[test]
     fn search_issues_returns_issue_when_comment_matches() {
         let dir = unique_temp_dir("fts-search");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: None,
             etag: None,
         };
@@ -863,13 +863,13 @@ mod tests {
     #[test]
     fn comments_are_ordered_oldest_first() {
         let dir = unique_temp_dir("comment-order");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: None,
             etag: None,
         };
@@ -921,13 +921,13 @@ mod tests {
     #[test]
     fn issues_are_ordered_newest_number_first() {
         let dir = unique_temp_dir("issue-order");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = RepoRow {
             id: 1,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: None,
             etag: None,
         };
@@ -975,15 +975,15 @@ mod tests {
     #[test]
     fn upsert_local_repo_inserts_and_updates() {
         let dir = unique_temp_dir("local-repos");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = LocalRepoRow {
             path: "/tmp/repo".to_string(),
             remote_name: "origin".to_string(),
             owner: "acme".to_string(),
-            repo: "glyph".to_string(),
-            url: "https://github.com/acme/glyph.git".to_string(),
+            repo: "blippy".to_string(),
+            url: "https://github.com/acme/blippy.git".to_string(),
             last_seen: Some("2024-01-05T00:00:00Z".to_string()),
             last_scanned: Some("2024-01-05T00:00:00Z".to_string()),
         };
@@ -1006,19 +1006,19 @@ mod tests {
     #[test]
     fn get_repo_by_slug_returns_repo() {
         let dir = unique_temp_dir("repo-slug");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let repo = RepoRow {
             id: 99,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: None,
             etag: None,
         };
         upsert_repo(&conn, &repo).expect("insert repo");
 
-        let found = get_repo_by_slug(&conn, "acme", "glyph").expect("lookup");
+        let found = get_repo_by_slug(&conn, "acme", "blippy").expect("lookup");
         assert!(found.is_some());
         assert_eq!(found.unwrap().id, 99);
 
@@ -1029,13 +1029,13 @@ mod tests {
     #[test]
     fn upsert_repo_preserves_existing_sync_state_when_new_values_missing() {
         let dir = unique_temp_dir("repo-sync-state");
-        let db_path = dir.join("glyph.db");
+        let db_path = dir.join("blippy.db");
         let conn = open_db_at(&db_path).expect("open db");
 
         let with_state = RepoRow {
             id: 7,
             owner: "acme".to_string(),
-            name: "glyph".to_string(),
+            name: "blippy".to_string(),
             updated_at: Some("2024-01-05T00:00:00Z".to_string()),
             etag: Some("etag-1".to_string()),
         };
@@ -1048,7 +1048,7 @@ mod tests {
         };
         upsert_repo(&conn, &without_state).expect("upsert repo without sync state");
 
-        let repo = get_repo_by_slug(&conn, "acme", "glyph")
+        let repo = get_repo_by_slug(&conn, "acme", "blippy")
             .expect("lookup")
             .expect("repo");
         assert_eq!(repo.etag.as_deref(), Some("etag-1"));
@@ -1063,7 +1063,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("glyph-test-{}-{}", label, nanos));
+        let dir = std::env::temp_dir().join(format!("blippy-test-{}-{}", label, nanos));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

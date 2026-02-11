@@ -122,7 +122,7 @@ pub struct GitHubClient {
 impl GitHubClient {
     pub fn new(token: &str) -> Result<Self> {
         let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("glyph"));
+        headers.insert(USER_AGENT, HeaderValue::from_static("blippy"));
         headers.insert(
             ACCEPT,
             HeaderValue::from_static("application/vnd.github+json"),

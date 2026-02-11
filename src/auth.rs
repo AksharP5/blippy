@@ -11,7 +11,7 @@ pub trait AuthSources {
 }
 
 const DEFAULT_HOST: &str = "github.com";
-const DEFAULT_SERVICE: &str = "glyph";
+const DEFAULT_SERVICE: &str = "blippy";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {

@@ -1,8 +1,8 @@
-# Glyph keybind overrides
+# blippy keybind overrides
 #
 # Copy this file to either:
-# - ~/.config/glyph/keybinds.toml (recommended), or
-# - [keybinds] section inside ~/.config/glyph/config.toml
+# - ~/.config/blippy/keybinds.toml (recommended), or
+# - [keybinds] section inside ~/.config/blippy/config.toml
 #
 # Values support:
 # - single chars: "q", "/", "1"

@@ -1,4 +1,4 @@
-# Glyph
+# blippy
 
 Maintainer-first TUI for triaging GitHub Issues and PRs.
 
@@ -17,7 +17,7 @@ Press `q` to quit.
 ## Authentication (v0.1)
 On startup, auth is resolved in this order:
 1. `gh auth token --hostname github.com`
-2. OS keychain (`service=glyph`, `account=github.com`)
+2. OS keychain (`service=blippy`, `account=github.com`)
 3. Prompt for PAT (input hidden), then store in keychain
 
 Tokens are never written to config or db.
@@ -48,16 +48,16 @@ gh auth token --hostname github.com
 
 To see which auth source was used (development only):
 ```bash
-GLYPH_AUTH_DEBUG=1 cargo run
+blippy_AUTH_DEBUG=1 cargo run
 ```
 
 To force the PAT prompt:
 - Temporarily log out of GitHub CLI: `gh auth logout`
-- Remove the keychain entry for `glyph` / `github.com` using your OS keychain UI
+- Remove the keychain entry for `blippy` / `github.com` using your OS keychain UI
 
 To reset stored auth from the CLI:
 ```bash
-glyph auth reset
+blippy auth reset
 ```
 
 ## Tests
@@ -66,11 +66,11 @@ cargo test
 ```
 
 ## Cache
-- Cache lives in your OS user data directory as `glyph.db`
-- Reset cache: `glyph cache reset`
+- Cache lives in your OS user data directory as `blippy.db`
+- Reset cache: `blippy cache reset`
 
 ## Sync
-- Run `glyph sync` to scan local repos and cache GitHub remotes
+- Run `blippy sync` to scan local repos and cache GitHub remotes
 - Issues are fetched when you open a repo in the TUI
 
 ## Navigation
@@ -127,7 +127,7 @@ body = "Closing this issue as resolved."
 ```
 
 ## Themes
-Glyph supports built-in UI themes via `~/.config/glyph/config.toml`:
+blippy supports built-in UI themes via `~/.config/blippy/config.toml`:
 
 ```toml
 theme = "midnight"
@@ -140,8 +140,8 @@ Available built-in themes:
 
 ## Keybind Configuration
 - Every keyboard shortcut can be overridden.
-- Copy `keybinds.example.toml` to `~/.config/glyph/keybinds.toml` and edit values.
-- You can also place the same `[keybinds]` table inside `~/.config/glyph/config.toml`.
+- Copy `keybinds.example.toml` to `~/.config/blippy/keybinds.toml` and edit values.
+- You can also place the same `[keybinds]` table inside `~/.config/blippy/config.toml`.
 
 Example:
 ```toml
