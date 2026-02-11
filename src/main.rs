@@ -412,21 +412,34 @@ fn handle_actions(
             checkout_pull_request(app)?;
         }
         AppAction::OpenLinkedPullRequestInBrowser => {
-            open_linked_pull_request(
-                app,
-                token,
-                event_tx.clone(),
-                LinkedPullRequestTarget::Browser,
-            )?;
+            if !try_open_cached_linked_pull_request(app, conn, LinkedPullRequestTarget::Browser)? {
+                open_linked_pull_request(
+                    app,
+                    token,
+                    event_tx.clone(),
+                    LinkedPullRequestTarget::Browser,
+                )?;
+            }
         }
         AppAction::OpenLinkedPullRequestInTui => {
-            open_linked_pull_request(app, token, event_tx.clone(), LinkedPullRequestTarget::Tui)?;
+            if !try_open_cached_linked_pull_request(app, conn, LinkedPullRequestTarget::Tui)? {
+                open_linked_pull_request(
+                    app,
+                    token,
+                    event_tx.clone(),
+                    LinkedPullRequestTarget::Tui,
+                )?;
+            }
         }
         AppAction::OpenLinkedIssueInBrowser => {
-            open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Browser)?;
+            if !try_open_cached_linked_issue(app, conn, LinkedIssueTarget::Browser)? {
+                open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Browser)?;
+            }
         }
         AppAction::OpenLinkedIssueInTui => {
-            open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Tui)?;
+            if !try_open_cached_linked_issue(app, conn, LinkedIssueTarget::Tui)? {
+                open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Tui)?;
+            }
         }
         AppAction::CopyStatus => {
             copy_status_to_clipboard(app)?;
@@ -533,6 +546,14 @@ fn handle_actions(
             let assignees = selected_issue_assignees(app).unwrap_or_default();
             let options = assignee_options_for_repo(app);
             app.open_assignee_picker(return_view, options, assignees.as_str());
+            if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
+                start_fetch_assignees(
+                    owner.to_string(),
+                    repo.to_string(),
+                    token.to_string(),
+                    event_tx.clone(),
+                );
+            }
         }
         AppAction::SubmitIssueComment => {
             let comment = app.editor().text().to_string();
@@ -1485,6 +1506,113 @@ enum LinkedIssueTarget {
     Probe,
 }
 
+fn try_open_cached_linked_pull_request(
+    app: &mut App,
+    conn: &rusqlite::Connection,
+    target: LinkedPullRequestTarget,
+) -> Result<bool> {
+    let issue = match app.current_or_selected_issue() {
+        Some(issue) => issue,
+        None => return Ok(false),
+    };
+    if issue.is_pr {
+        return Ok(false);
+    }
+
+    let pull_number = match app.linked_pull_request_for_issue(issue.number) {
+        Some(pull_number) => pull_number,
+        None => return Ok(false),
+    };
+
+    if target == LinkedPullRequestTarget::Tui {
+        app.capture_linked_navigation_origin();
+        refresh_current_repo_issues(app, conn)?;
+        if open_pull_request_in_tui(app, conn, pull_number)? {
+            app.set_status(format!(
+                "Opened linked pull request #{} in TUI",
+                pull_number
+            ));
+            return Ok(true);
+        }
+        app.clear_linked_navigation_origin();
+        app.set_status(format!(
+            "Linked PR #{} not cached in TUI yet; press r then Shift+P",
+            pull_number
+        ));
+        return Ok(true);
+    }
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner, repo),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(true);
+        }
+    };
+    let url = format!("https://github.com/{}/{}/pull/{}", owner, repo, pull_number);
+    if let Err(error) = open_url(url.as_str()) {
+        app.set_status(format!("Open linked PR failed: {}", error));
+        return Ok(true);
+    }
+    app.set_status(format!(
+        "Opened linked pull request #{} in browser",
+        pull_number
+    ));
+    Ok(true)
+}
+
+fn try_open_cached_linked_issue(
+    app: &mut App,
+    conn: &rusqlite::Connection,
+    target: LinkedIssueTarget,
+) -> Result<bool> {
+    let issue = match app.current_or_selected_issue() {
+        Some(issue) => issue,
+        None => return Ok(false),
+    };
+    if !issue.is_pr {
+        return Ok(false);
+    }
+
+    let issue_number = match app.linked_issue_for_pull_request(issue.number) {
+        Some(issue_number) => issue_number,
+        None => return Ok(false),
+    };
+
+    if target == LinkedIssueTarget::Tui {
+        app.capture_linked_navigation_origin();
+        refresh_current_repo_issues(app, conn)?;
+        if open_issue_in_tui(app, conn, issue_number)? {
+            app.set_status(format!("Opened linked issue #{} in TUI", issue_number));
+            return Ok(true);
+        }
+        app.clear_linked_navigation_origin();
+        app.set_status(format!(
+            "Linked issue #{} not cached in TUI yet; press r then Shift+P",
+            issue_number
+        ));
+        return Ok(true);
+    }
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner, repo),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(true);
+        }
+    };
+    let url = format!(
+        "https://github.com/{}/{}/issues/{}",
+        owner, repo, issue_number
+    );
+    if let Err(error) = open_url(url.as_str()) {
+        app.set_status(format!("Open linked issue failed: {}", error));
+        return Ok(true);
+    }
+    app.set_status(format!("Opened linked issue #{} in browser", issue_number));
+    Ok(true)
+}
+
 fn open_linked_pull_request(
     app: &mut App,
     token: &str,
@@ -2143,6 +2271,7 @@ fn handle_events(
                 }
 
                 if target == LinkedPullRequestTarget::Tui {
+                    app.capture_linked_navigation_origin();
                     refresh_current_repo_issues(app, conn)?;
                     if open_pull_request_in_tui(app, conn, pull_number)? {
                         app.set_status(format!(
@@ -2152,6 +2281,7 @@ fn handle_events(
                         continue;
                     }
 
+                    app.clear_linked_navigation_origin();
                     app.set_status(format!(
                         "Linked PR #{} not cached in TUI yet; press r then Shift+P",
                         pull_number
@@ -2233,12 +2363,14 @@ fn handle_events(
                 }
 
                 if target == LinkedIssueTarget::Tui {
+                    app.capture_linked_navigation_origin();
                     refresh_current_repo_issues(app, conn)?;
                     if open_issue_in_tui(app, conn, issue_number)? {
                         app.set_status(format!("Opened linked issue #{} in TUI", issue_number));
                         continue;
                     }
 
+                    app.clear_linked_navigation_origin();
                     app.set_status(format!(
                         "Linked issue #{} not cached in TUI yet; press r then Shift+P",
                         issue_number
@@ -2325,6 +2457,18 @@ fn handle_events(
                     && app.view() == View::LabelPicker
                 {
                     app.merge_label_options(labels);
+                }
+            }
+            AppEvent::RepoAssigneesSuggested {
+                owner,
+                repo,
+                assignees,
+            } => {
+                if app.current_owner() == Some(owner.as_str())
+                    && app.current_repo() == Some(repo.as_str())
+                    && app.view() == View::AssigneePicker
+                {
+                    app.merge_assignee_options(assignees);
                 }
             }
         }
@@ -2476,6 +2620,11 @@ enum AppEvent {
         owner: String,
         repo: String,
         labels: Vec<String>,
+    },
+    RepoAssigneesSuggested {
+        owner: String,
+        repo: String,
+        assignees: Vec<String>,
     },
 }
 
@@ -3621,6 +3770,31 @@ fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Send
                 owner,
                 repo,
                 labels,
+            });
+        }
+    });
+}
+
+fn start_fetch_assignees(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
+    thread::spawn(move || {
+        let client = match GitHubClient::new(&token) {
+            Ok(client) => client,
+            Err(_) => return,
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(_) => return,
+        };
+
+        let assignees = runtime.block_on(async { client.list_assignees(&owner, &repo).await });
+        if let Ok(assignees) = assignees {
+            let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
+                owner,
+                repo,
+                assignees,
             });
         }
     });

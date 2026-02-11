@@ -918,4 +918,31 @@ impl GitHubClient {
         }
         Ok(labels)
     }
+
+    pub async fn list_assignees(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
+        let mut page = 1u32;
+        let mut assignees = Vec::new();
+        loop {
+            let url = format!("{}/repos/{}/{}/assignees", API_BASE, owner, repo);
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let batch = response.json::<Vec<ApiUser>>().await?;
+            if batch.is_empty() {
+                break;
+            }
+            for user in batch {
+                assignees.push(user.login);
+            }
+            page += 1;
+        }
+        assignees.sort_by_key(|value| value.to_ascii_lowercase());
+        assignees.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+        Ok(assignees)
+    }
 }

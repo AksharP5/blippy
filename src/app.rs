@@ -380,6 +380,7 @@ pub struct App {
     linked_issues: HashMap<i64, Option<i64>>,
     linked_pull_request_lookups: HashSet<i64>,
     linked_issue_lookups: HashSet<i64>,
+    linked_navigation_origin: Option<(i64, WorkItemMode)>,
     pull_request_files_issue_id: Option<i64>,
     pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
@@ -474,6 +475,7 @@ impl App {
             linked_issues: HashMap::new(),
             linked_pull_request_lookups: HashSet::new(),
             linked_issue_lookups: HashSet::new(),
+            linked_navigation_origin: None,
             pull_request_files_issue_id: None,
             pull_request_id: None,
             pull_request_files: Vec::new(),
@@ -640,6 +642,14 @@ impl App {
 
     pub fn set_linked_pull_request(&mut self, issue_number: i64, pull_number: Option<i64>) {
         self.end_linked_pull_request_lookup(issue_number);
+        if pull_number.is_none()
+            && self
+                .linked_pull_requests
+                .get(&issue_number)
+                .is_some_and(|existing| existing.is_some())
+        {
+            return;
+        }
         self.linked_pull_requests.insert(issue_number, pull_number);
         if let Some(pull_number) = pull_number {
             self.linked_issues.insert(pull_number, Some(issue_number));
@@ -653,12 +663,37 @@ impl App {
         issue_number: Option<i64>,
     ) {
         self.end_linked_issue_lookup(pull_number);
+        if issue_number.is_none()
+            && self
+                .linked_issues
+                .get(&pull_number)
+                .is_some_and(|existing| existing.is_some())
+        {
+            return;
+        }
         self.linked_issues.insert(pull_number, issue_number);
         if let Some(issue_number) = issue_number {
             self.linked_pull_requests
                 .insert(issue_number, Some(pull_number));
             self.end_linked_pull_request_lookup(issue_number);
         }
+    }
+
+    pub fn capture_linked_navigation_origin(&mut self) {
+        let issue = match self.current_or_selected_issue() {
+            Some(issue) => issue,
+            None => return,
+        };
+        let mode = if issue.is_pr {
+            WorkItemMode::PullRequests
+        } else {
+            WorkItemMode::Issues
+        };
+        self.linked_navigation_origin = Some((issue.number, mode));
+    }
+
+    pub fn clear_linked_navigation_origin(&mut self) {
+        self.linked_navigation_origin = None;
     }
 
     pub fn selected_issue_has_known_linked_pr(&self) -> bool {
@@ -1411,22 +1446,22 @@ impl App {
                 self.action = Some(AppAction::SubmitAssignees);
             }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
-                self.set_view(View::Issues);
+                self.back_from_issue_detail();
             }
             KeyCode::Char('b') if self.view == View::IssueComments => {
                 self.set_view(View::IssueDetail);
             }
             KeyCode::Char('b') if self.view == View::PullRequestFiles => {
-                self.set_view(View::IssueDetail);
+                self.back_from_pull_request_files();
             }
             KeyCode::Esc if self.view == View::IssueDetail => {
-                self.set_view(View::Issues);
+                self.back_from_issue_detail();
             }
             KeyCode::Esc if self.view == View::IssueComments => {
                 self.set_view(View::IssueDetail);
             }
             KeyCode::Esc if self.view == View::PullRequestFiles => {
-                self.set_view(View::IssueDetail);
+                self.back_from_pull_request_files();
             }
             KeyCode::Esc if self.view == View::CommentPresetPicker => {
                 self.set_view(View::Issues);
@@ -1598,11 +1633,15 @@ impl App {
         match target {
             Some(MouseTarget::Back) => {
                 if self.view == View::IssueDetail {
-                    self.set_view(View::Issues);
+                    self.back_from_issue_detail();
                     return;
                 }
-                if self.view == View::IssueComments || self.view == View::PullRequestFiles {
+                if self.view == View::IssueComments {
                     self.set_view(View::IssueDetail);
+                    return;
+                }
+                if self.view == View::PullRequestFiles {
+                    self.back_from_pull_request_files();
                     return;
                 }
                 if matches!(self.view, View::LabelPicker | View::AssigneePicker) {
@@ -1925,6 +1964,45 @@ impl App {
         self.status = "Split files and diff view".to_string();
     }
 
+    fn back_from_pull_request_files(&mut self) {
+        if self.pull_request_diff_expanded {
+            self.pull_request_diff_expanded = false;
+            self.status = "Split files and diff view".to_string();
+            return;
+        }
+        self.set_view(View::IssueDetail);
+    }
+
+    fn back_from_issue_detail(&mut self) {
+        if self.restore_linked_navigation_origin() {
+            return;
+        }
+        self.set_view(View::Issues);
+    }
+
+    fn restore_linked_navigation_origin(&mut self) -> bool {
+        let (issue_number, mode) = match self.linked_navigation_origin {
+            Some(origin) => origin,
+            None => return false,
+        };
+        self.linked_navigation_origin = None;
+
+        self.set_view(View::Issues);
+        self.set_work_item_mode(mode);
+        let try_filters = [IssueFilter::Open, IssueFilter::Closed];
+        for filter in try_filters {
+            self.set_issue_filter(filter);
+            if !self.select_issue_by_number(issue_number) {
+                continue;
+            }
+            self.status = format!("Returned to #{}", issue_number);
+            return true;
+        }
+
+        self.status = format!("Could not return to #{}", issue_number);
+        false
+    }
+
     fn scroll_pull_request_diff_horizontal(&mut self, delta: i16) {
         if self.view != View::PullRequestFiles
             || self.pull_request_review_focus != PullRequestReviewFocus::Diff
@@ -2063,6 +2141,7 @@ impl App {
         self.linked_issues.clear();
         self.linked_pull_request_lookups.clear();
         self.linked_issue_lookups.clear();
+        self.linked_navigation_origin = None;
         self.pull_request_files_issue_id = None;
         self.pull_request_id = None;
         self.pull_request_files.clear();
@@ -2303,6 +2382,27 @@ impl App {
         self.label_options = merged;
         if let Some(index) = self.filtered_label_indices().first() {
             self.selected_label_option = *index;
+        }
+    }
+
+    pub fn merge_assignee_options(&mut self, assignees: Vec<String>) {
+        let mut merged = self.assignee_options.clone();
+        for assignee in assignees {
+            if assignee.trim().is_empty() {
+                continue;
+            }
+            if merged
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(assignee.as_str()))
+            {
+                continue;
+            }
+            merged.push(assignee);
+        }
+        merged.sort_by_key(|value| value.to_ascii_lowercase());
+        self.assignee_options = merged;
+        if let Some(index) = self.filtered_assignee_indices().first() {
+            self.selected_assignee_option = *index;
         }
     }
 
@@ -5641,5 +5741,65 @@ mod tests {
         ]);
 
         assert_eq!(app.label_options(), &["bug", "Docs", "enhancement"]);
+    }
+
+    #[test]
+    fn merge_assignee_options_dedupes_case_insensitive() {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            vec!["alex".to_string(), "Sam".to_string()],
+            "",
+        );
+
+        app.merge_assignee_options(vec![
+            "sam".to_string(),
+            "jordan".to_string(),
+            "ALEX".to_string(),
+        ]);
+
+        assert_eq!(app.assignee_options(), &["alex", "jordan", "Sam"]);
+    }
+
+    #[test]
+    fn back_from_expanded_diff_returns_to_split_review() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.pull_request_diff_expanded());
+
+        app.on_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        assert_eq!(app.view(), View::PullRequestFiles);
+        assert!(!app.pull_request_diff_expanded());
+    }
+
+    #[test]
+    fn linked_issue_none_does_not_clear_cached_link() {
+        let mut app = App::new(Config::default());
+        app.set_linked_issue_for_pull_request(42, Some(7));
+        app.set_linked_issue_for_pull_request(42, None);
+
+        assert_eq!(app.linked_issue_for_pull_request(42), Some(7));
+    }
+
+    #[test]
+    fn linked_pull_request_none_does_not_clear_cached_link() {
+        let mut app = App::new(Config::default());
+        app.set_linked_pull_request(7, Some(42));
+        app.set_linked_pull_request(7, None);
+
+        assert_eq!(app.linked_pull_request_for_issue(7), Some(42));
     }
 }
