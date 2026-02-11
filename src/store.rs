@@ -1,11 +1,13 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Result;
 use rusqlite::Connection;
 
 const DB_FILE_NAME: &str = "glyph.db";
 const APP_DIR_NAME: &str = "glyph";
+const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoRow {
@@ -525,8 +527,17 @@ pub(crate) fn open_db_at(path: &Path) -> Result<Connection> {
     }
 
     let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
     apply_migrations(&conn)?;
     Ok(conn)
+}
+
+fn configure_connection(conn: &Connection) -> Result<()> {
+    conn.busy_timeout(DB_BUSY_TIMEOUT)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(())
 }
 
 fn apply_migrations(_conn: &Connection) -> Result<()> {
