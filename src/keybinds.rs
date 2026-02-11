@@ -87,7 +87,7 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
     },
     BindingSpec {
         action: "collapse_hunk",
-        default: "enter",
+        default: "c",
         description: "Collapse/expand current diff hunk",
     },
     BindingSpec {

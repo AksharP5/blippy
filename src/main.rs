@@ -233,11 +233,58 @@ fn drive_background_tasks(
     maybe_start_comment_poll(app, token, event_tx.clone(), last_comment_poll)?;
     maybe_start_pull_request_files_sync(app, token, event_tx.clone())?;
     maybe_start_pull_request_review_comments_sync(app, token, event_tx.clone())?;
+    maybe_probe_visible_linked_items(app, token, event_tx.clone());
     if app.view() == View::RepoPicker && app.repos().is_empty() {
         app.set_repos(load_repos(conn)?);
     }
     maybe_start_rescan(app, event_tx)?;
     Ok(())
+}
+
+fn maybe_probe_visible_linked_items(app: &mut App, token: &str, event_tx: Sender<AppEvent>) {
+    if app.view() != View::Issues {
+        return;
+    }
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => return,
+    };
+
+    let visible = app
+        .issues_for_view()
+        .iter()
+        .take(20)
+        .map(|issue| (issue.number, issue.is_pr))
+        .collect::<Vec<(i64, bool)>>();
+
+    for (number, is_pr) in visible {
+        if is_pr {
+            if !app.begin_linked_issue_lookup(number) {
+                continue;
+            }
+            start_linked_issue_lookup(
+                owner.clone(),
+                repo.clone(),
+                number,
+                token.to_string(),
+                event_tx.clone(),
+                LinkedIssueTarget::Probe,
+            );
+            continue;
+        }
+
+        if !app.begin_linked_pull_request_lookup(number) {
+            continue;
+        }
+        start_linked_pull_request_lookup(
+            owner.clone(),
+            repo.clone(),
+            number,
+            token.to_string(),
+            event_tx.clone(),
+            LinkedPullRequestTarget::Probe,
+        );
+    }
 }
 
 fn initialize_app(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
@@ -321,7 +368,7 @@ fn handle_actions(
             if is_pr {
                 app.request_pull_request_files_sync();
                 app.request_pull_request_review_comments_sync();
-                if !app.linked_issue_known(issue_number) {
+                if app.begin_linked_issue_lookup(issue_number) {
                     if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                         start_linked_issue_lookup(
                             owner.to_string(),
@@ -331,9 +378,11 @@ fn handle_actions(
                             event_tx.clone(),
                             LinkedIssueTarget::Probe,
                         );
+                    } else {
+                        app.end_linked_issue_lookup(issue_number);
                     }
                 }
-            } else if !app.linked_pull_request_known(issue_number) {
+            } else if app.begin_linked_pull_request_lookup(issue_number) {
                 if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                     start_linked_pull_request_lookup(
                         owner.to_string(),
@@ -343,6 +392,8 @@ fn handle_actions(
                         event_tx.clone(),
                         LinkedPullRequestTarget::Probe,
                     );
+                } else {
+                    app.end_linked_pull_request_lookup(issue_number);
                 }
             }
         }
@@ -2145,6 +2196,7 @@ fn handle_events(
                 message,
                 target,
             } => {
+                app.end_linked_pull_request_lookup(issue_number);
                 if target == LinkedPullRequestTarget::Probe {
                     continue;
                 }
@@ -2228,6 +2280,7 @@ fn handle_events(
                 message,
                 target,
             } => {
+                app.end_linked_issue_lookup(pull_number);
                 if target == LinkedIssueTarget::Probe {
                     continue;
                 }

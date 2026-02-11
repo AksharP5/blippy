@@ -537,20 +537,29 @@ fn draw_issues(
                     ),
                     pending_issue_span(app.pending_issue_badge(issue.number), theme),
                 ];
-                if !issue.is_pr {
-                    if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
+                if issue.is_pr {
+                    if let Some(linked_issue) = app.linked_issue_for_pull_request(issue.number) {
                         line1_spans.push(Span::raw(" "));
                         line1_spans.push(Span::styled(
-                            format!("[PR#{}]", linked_pr),
+                            format!("[Issue#{}]", linked_issue),
                             Style::default()
                                 .fg(theme.bg_app)
-                                .bg(theme.accent_success)
+                                .bg(theme.accent_subtle)
                                 .add_modifier(Modifier::BOLD),
                         ));
                     }
+                } else if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
+                    line1_spans.push(Span::raw(" "));
+                    line1_spans.push(Span::styled(
+                        format!("[PR#{}]", linked_pr),
+                        Style::default()
+                            .fg(theme.bg_app)
+                            .bg(theme.accent_success)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 }
                 let line1 = Line::from(line1_spans);
-                let line2 = Line::from(vec![
+                let mut line2_spans = vec![
                     Span::styled(
                         "A:",
                         Style::default()
@@ -579,8 +588,9 @@ fn draw_issues(
                             .fg(theme.accent_primary)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(ellipsize(labels, 24), Style::default().fg(theme.text_muted)),
-                ]);
+                ];
+                line2_spans.extend(label_chip_spans(labels, 2, theme));
+                let line2 = Line::from(line2_spans);
                 ListItem::new(vec![line1, line2])
             })
             .collect()
@@ -756,18 +766,14 @@ fn draw_issues(
                     Style::default().fg(theme.text_muted),
                 ),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "labels    ",
-                    Style::default()
-                        .fg(theme.accent_primary)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    ellipsize(labels.as_str(), 80),
-                    Style::default().fg(theme.text_muted),
-                ),
-            ]));
+            let mut label_row = vec![Span::styled(
+                "labels    ",
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
+            )];
+            label_row.extend(label_chip_spans(labels.as_str(), 4, theme));
+            lines.push(Line::from(label_row));
             if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
                 lines.push(Line::from(vec![
                     Span::styled(
@@ -1094,12 +1100,16 @@ fn draw_issue_detail(
         }
     }
     let metadata = Line::from(format!(
-        "assignees: {} | comments: {} | labels: {}",
-        assignees,
-        comment_count,
-        ellipsize(labels.as_str(), 44)
+        "assignees: {} | comments: {}",
+        assignees, comment_count
     ));
     body_lines.push(metadata.style(Style::default().fg(theme.text_muted)));
+    let mut labels_row = vec![Span::styled(
+        "labels: ",
+        Style::default().fg(theme.text_muted),
+    )];
+    labels_row.extend(label_chip_spans(labels.as_str(), 5, theme));
+    body_lines.push(Line::from(labels_row));
     if let Some(updated) = format_datetime(updated_at.as_deref()) {
         body_lines.push(Line::from(format!("updated: {}", updated)));
     }
@@ -1495,10 +1505,18 @@ fn draw_pull_request_files(
         vertical: 1,
         horizontal: 2,
     });
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-        .split(content);
+    let diff_expanded = app.pull_request_diff_expanded();
+    let panes = if diff_expanded {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(100)])
+            .split(content)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(content)
+    };
 
     let title = match app.current_issue_row() {
         Some(issue) => format!("PR review #{}", issue.number),
@@ -1560,6 +1578,21 @@ fn draw_pull_request_files(
             ),
             Span::raw("  "),
             Span::styled(
+                if diff_expanded {
+                    "[Expanded]"
+                } else {
+                    "[Split]"
+                },
+                if diff_expanded {
+                    Style::default()
+                        .fg(theme.accent_success)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.text_muted)
+                },
+            ),
+            Span::raw("  "),
+            Span::styled(
                 format!(
                     "pan:{}/{}",
                     horizontal_scroll,
@@ -1570,7 +1603,7 @@ fn draw_pull_request_files(
         ]),
         Line::from(Span::styled(
             format!(
-                "Ctrl+h/l pane • h/l side • [/ ] pan • 0 reset pan • w viewed • Enter collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}",
+                "Ctrl+h/l pane • Enter full diff/split • c collapse hunk • h/l side • [/ ] pan • 0 reset pan • w viewed • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}",
                 focused, side, visual, visual_range
             ),
             Style::default().fg(theme.text_muted),
@@ -1666,47 +1699,50 @@ fn draw_pull_request_files(
             .collect::<Vec<ListItem>>()
     };
     let files_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Files;
-    let files_block_title = focused_title("Changed files", files_focused);
-    let files_list = List::new(file_items)
-        .block(panel_block_with_border(
-            files_block_title.as_str(),
-            focus_border(files_focused, theme),
-            theme,
-        ))
-        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
-        .highlight_symbol("▸ ")
-        .highlight_style(
-            Style::default()
-                .bg(theme.bg_selected)
-                .fg(theme.text_primary)
-                .add_modifier(Modifier::BOLD),
+    if !diff_expanded {
+        let files_block_title = focused_title("Changed files", files_focused);
+        let files_list = List::new(file_items)
+            .block(panel_block_with_border(
+                files_block_title.as_str(),
+                focus_border(files_focused, theme),
+                theme,
+            ))
+            .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
+            .highlight_symbol("▸ ")
+            .highlight_style(
+                Style::default()
+                    .bg(theme.bg_selected)
+                    .fg(theme.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            );
+        frame.render_stateful_widget(
+            files_list,
+            panes[0],
+            &mut list_state(selected_for_list(
+                app.selected_pull_request_file(),
+                app.pull_request_files().len(),
+            )),
         );
-    frame.render_stateful_widget(
-        files_list,
-        panes[0],
-        &mut list_state(selected_for_list(
-            app.selected_pull_request_file(),
-            app.pull_request_files().len(),
-        )),
-    );
-    register_mouse_region(app, MouseTarget::PullRequestFilesPane, panes[0]);
-    let files_inner = panes[0].inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
-    let max_file_rows = files_inner.height as usize;
-    for index in 0..app.pull_request_files().len().min(max_file_rows) {
-        let y = files_inner.y.saturating_add(index as u16);
-        app.register_mouse_region(
-            MouseTarget::PullRequestFileRow(index),
-            files_inner.x,
-            y,
-            files_inner.width,
-            1,
-        );
+        register_mouse_region(app, MouseTarget::PullRequestFilesPane, panes[0]);
+        let files_inner = panes[0].inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        let max_file_rows = files_inner.height as usize;
+        for index in 0..app.pull_request_files().len().min(max_file_rows) {
+            let y = files_inner.y.saturating_add(index as u16);
+            app.register_mouse_region(
+                MouseTarget::PullRequestFileRow(index),
+                files_inner.x,
+                y,
+                files_inner.width,
+                1,
+            );
+        }
     }
 
     let diff_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Diff;
+    let diff_area = if diff_expanded { panes[0] } else { panes[1] };
     let selected_file = app
         .selected_pull_request_file_row()
         .map(|file| (file.filename.clone(), file.patch.clone()));
@@ -1728,7 +1764,7 @@ fn draw_pull_request_files(
             )));
         } else {
             row_offsets = vec![None; rows.len()];
-            let panel_width = panes[1].width.saturating_sub(2) as usize;
+            let panel_width = diff_area.width.saturating_sub(2) as usize;
             let cells_width = panel_width.saturating_sub(2);
             let left_width = cells_width.saturating_sub(5) / 2;
             let right_width = cells_width.saturating_sub(left_width + 3);
@@ -1849,8 +1885,8 @@ fn draw_pull_request_files(
         }
     }
 
-    let content_width = panes[1].width.saturating_sub(2);
-    let viewport_height = panes[1].height.saturating_sub(2) as usize;
+    let content_width = diff_area.width.saturating_sub(2);
+    let viewport_height = diff_area.height.saturating_sub(2) as usize;
     let total_lines = wrapped_line_count(&lines, content_width);
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_pull_request_diff_max_scroll(max_scroll);
@@ -1874,8 +1910,9 @@ fn draw_pull_request_files(
         .as_ref()
         .map(|(file_name, _)| {
             format!(
-                "Diff: {}  [pan {}/{} | [/] move]",
+                "Diff: {}  [{}] [pan {}/{} | [/] move]",
                 file_name,
+                if diff_expanded { "expanded" } else { "split" },
                 app.pull_request_diff_horizontal_scroll(),
                 app.pull_request_diff_horizontal_max(),
             )
@@ -1891,9 +1928,9 @@ fn draw_pull_request_files(
         .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
-    frame.render_widget(paragraph, panes[1]);
-    register_mouse_region(app, MouseTarget::PullRequestDiffPane, panes[1]);
-    let diff_inner = panes[1].inner(Margin {
+    frame.render_widget(paragraph, diff_area);
+    register_mouse_region(app, MouseTarget::PullRequestDiffPane, diff_area);
+    let diff_inner = diff_area.inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
@@ -2520,30 +2557,46 @@ fn draw_help_overlay(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &Theme
     });
     frame.render_widget(shell, popup);
 
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "Quick actions",
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            "View",
             Style::default()
                 .fg(theme.accent_primary)
                 .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
+        ),
+        Span::raw("  "),
+        Span::styled(
             primary_help_text(app),
             Style::default().fg(theme.text_primary),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "All shortcuts",
-            Style::default()
-                .fg(theme.accent_subtle)
-                .add_modifier(Modifier::BOLD),
-        )),
-    ];
+        ),
+    ])];
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Common shortcuts",
+        Style::default()
+            .fg(theme.accent_subtle)
+            .add_modifier(Modifier::BOLD),
+    )));
 
+    for (key, action) in help_rows(app) {
+        lines.push(Line::from(vec![
+            key_cap(key, theme),
+            Span::raw(" "),
+            Span::styled(action, Style::default().fg(theme.text_primary)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Extended shortcuts",
+        Style::default()
+            .fg(theme.accent_subtle)
+            .add_modifier(Modifier::BOLD),
+    )));
     let max_width = inner.width.saturating_sub(2) as usize;
     for line in wrap_help_tokens(help_text(app).as_str(), max_width) {
         lines.push(Line::from(Span::styled(
-            line,
+            format!("• {}", line),
             Style::default().fg(theme.text_muted),
         )));
     }
@@ -2559,6 +2612,96 @@ fn draw_help_overlay(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &Theme
         Paragraph::new(Text::from(lines)).style(Style::default().bg(theme.bg_popup)),
         inner,
     );
+}
+
+fn key_cap(key: &str, theme: &ThemePalette) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", key),
+        Style::default()
+            .fg(theme.bg_app)
+            .bg(theme.border_popup)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
+    match app.view() {
+        View::RepoPicker => vec![
+            ("j / k", "Move repositories"),
+            ("/", "Search repositories"),
+            ("Enter", "Open selected repository"),
+            ("Ctrl+R", "Rescan repositories"),
+            ("Ctrl+G", "Open repository picker"),
+            ("q", "Quit"),
+        ],
+        View::Issues => vec![
+            ("j / k", "Move issues"),
+            ("Enter", "Open selected item"),
+            ("Tab", "Switch open/closed"),
+            ("1 / 2", "Jump to open/closed tab"),
+            ("p", "Toggle issues/PR mode"),
+            ("/", "Search with qualifiers"),
+        ],
+        View::IssueDetail => vec![
+            ("Ctrl+h/l", "Switch panes"),
+            ("j / k", "Scroll focused pane"),
+            ("Enter", "Open focused pane"),
+            ("c", "Open comments"),
+            ("b or Esc", "Back"),
+            ("o", "Open in browser"),
+        ],
+        View::IssueComments => vec![
+            ("j / k", "Jump comments"),
+            ("e", "Edit selected comment"),
+            ("x", "Delete selected comment"),
+            ("m", "Add comment"),
+            ("b or Esc", "Back"),
+            ("o", "Open in browser"),
+        ],
+        View::PullRequestFiles => vec![
+            ("Ctrl+h/l", "Switch files/diff pane"),
+            ("j / k", "Move file or diff line"),
+            ("Enter", "Toggle full diff view"),
+            ("c", "Collapse/expand selected hunk"),
+            ("[ / ]", "Pan horizontal diff"),
+            ("0", "Reset horizontal pan"),
+        ],
+        View::LabelPicker | View::AssigneePicker => vec![
+            ("Type", "Filter options"),
+            ("j / k", "Move options"),
+            ("Space", "Toggle option"),
+            ("Enter", "Apply selection"),
+            ("Esc", "Cancel"),
+        ],
+        View::CommentPresetPicker => vec![
+            ("j / k", "Move presets"),
+            ("Enter", "Select preset"),
+            ("Esc", "Cancel"),
+            ("q", "Quit"),
+            ("?", "Toggle help"),
+        ],
+        View::CommentPresetName => vec![
+            ("Type", "Preset name"),
+            ("Enter", "Continue"),
+            ("Esc", "Cancel"),
+            ("?", "Toggle help"),
+            ("q", "Quit"),
+        ],
+        View::CommentEditor => vec![
+            ("Type", "Edit body"),
+            ("Enter", "Submit"),
+            ("Shift+Enter", "Insert newline"),
+            ("Esc", "Cancel"),
+            ("?", "Toggle help"),
+        ],
+        View::RemoteChooser => vec![
+            ("j / k", "Move remotes"),
+            ("Enter", "Select remote"),
+            ("Ctrl+G", "Back to repos"),
+            ("q", "Quit"),
+            ("?", "Toggle help"),
+        ],
+    }
 }
 
 fn wrap_help_tokens(help: &str, max: usize) -> Vec<String> {
@@ -2763,7 +2906,7 @@ fn primary_help_text(app: &App) -> String {
         }
         View::IssueComments => "j/k comments • e edit • x delete • b/Esc back • ? help".to_string(),
         View::PullRequestFiles => {
-            "Ctrl+h/l panes • j/k move • Enter collapse hunk • [/ ] pan • Shift+V visual • ? help"
+            "Ctrl+h/l panes • j/k move • Enter full diff • c collapse hunk • [/ ] pan • ? help"
                 .to_string()
         }
         View::LabelPicker | View::AssigneePicker => {
@@ -2873,7 +3016,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l pane • j/k move file/line • [/ ] pan diff • 0 reset pan • w viewed • Enter collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
+            "Ctrl+h/l pane • j/k move file/line • Enter full diff/split • c collapse hunk • [/ ] pan diff • 0 reset pan • w viewed • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -3391,6 +3534,47 @@ fn pending_issue_span(pending: Option<&str>, theme: &ThemePalette) -> Span<'stat
         ),
         None => Span::raw(String::new()),
     }
+}
+
+fn label_chip_spans(
+    labels_csv: &str,
+    max_labels: usize,
+    theme: &ThemePalette,
+) -> Vec<Span<'static>> {
+    let labels = labels_csv
+        .split(',')
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .collect::<Vec<&str>>();
+    if labels.is_empty() {
+        return vec![Span::styled("none", Style::default().fg(theme.text_muted))];
+    }
+
+    let mut spans = Vec::new();
+    for (index, label) in labels.iter().take(max_labels).enumerate() {
+        let color = match index % 3 {
+            0 => theme.accent_primary,
+            1 => theme.accent_subtle,
+            _ => theme.accent_success,
+        };
+        spans.push(Span::styled(
+            format!(" {} ", ellipsize(label, 14)),
+            Style::default().fg(theme.bg_app).bg(color),
+        ));
+        spans.push(Span::raw(" "));
+    }
+
+    let remaining = labels.len().saturating_sub(max_labels);
+    if remaining > 0 {
+        spans.push(Span::styled(
+            format!("+{}", remaining),
+            Style::default()
+                .fg(theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    spans
 }
 
 fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {

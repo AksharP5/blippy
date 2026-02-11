@@ -378,6 +378,8 @@ pub struct App {
     current_issue_number: Option<i64>,
     linked_pull_requests: HashMap<i64, Option<i64>>,
     linked_issues: HashMap<i64, Option<i64>>,
+    linked_pull_request_lookups: HashSet<i64>,
+    linked_issue_lookups: HashSet<i64>,
     pull_request_files_issue_id: Option<i64>,
     pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
@@ -391,6 +393,7 @@ pub struct App {
     pull_request_diff_max_scroll: u16,
     pull_request_diff_horizontal_scroll: u16,
     pull_request_diff_horizontal_max: u16,
+    pull_request_diff_expanded: bool,
     pull_request_review_side: ReviewSide,
     pull_request_visual_mode: bool,
     pull_request_visual_anchor: Option<usize>,
@@ -469,6 +472,8 @@ impl App {
             current_issue_number: None,
             linked_pull_requests: HashMap::new(),
             linked_issues: HashMap::new(),
+            linked_pull_request_lookups: HashSet::new(),
+            linked_issue_lookups: HashSet::new(),
             pull_request_files_issue_id: None,
             pull_request_id: None,
             pull_request_files: Vec::new(),
@@ -482,6 +487,7 @@ impl App {
             pull_request_diff_max_scroll: 0,
             pull_request_diff_horizontal_scroll: 0,
             pull_request_diff_horizontal_max: 0,
+            pull_request_diff_expanded: false,
             pull_request_review_side: ReviewSide::Right,
             pull_request_visual_mode: false,
             pull_request_visual_anchor: None,
@@ -610,10 +616,34 @@ impl App {
         self.linked_issues.contains_key(&pull_number)
     }
 
+    pub fn begin_linked_pull_request_lookup(&mut self, issue_number: i64) -> bool {
+        if self.linked_pull_request_known(issue_number) {
+            return false;
+        }
+        self.linked_pull_request_lookups.insert(issue_number)
+    }
+
+    pub fn begin_linked_issue_lookup(&mut self, pull_number: i64) -> bool {
+        if self.linked_issue_known(pull_number) {
+            return false;
+        }
+        self.linked_issue_lookups.insert(pull_number)
+    }
+
+    pub fn end_linked_pull_request_lookup(&mut self, issue_number: i64) {
+        self.linked_pull_request_lookups.remove(&issue_number);
+    }
+
+    pub fn end_linked_issue_lookup(&mut self, pull_number: i64) {
+        self.linked_issue_lookups.remove(&pull_number);
+    }
+
     pub fn set_linked_pull_request(&mut self, issue_number: i64, pull_number: Option<i64>) {
+        self.end_linked_pull_request_lookup(issue_number);
         self.linked_pull_requests.insert(issue_number, pull_number);
         if let Some(pull_number) = pull_number {
             self.linked_issues.insert(pull_number, Some(issue_number));
+            self.end_linked_issue_lookup(pull_number);
         }
     }
 
@@ -622,10 +652,12 @@ impl App {
         pull_number: i64,
         issue_number: Option<i64>,
     ) {
+        self.end_linked_issue_lookup(pull_number);
         self.linked_issues.insert(pull_number, issue_number);
         if let Some(issue_number) = issue_number {
             self.linked_pull_requests
                 .insert(issue_number, Some(pull_number));
+            self.end_linked_pull_request_lookup(issue_number);
         }
     }
 
@@ -1008,6 +1040,10 @@ impl App {
         self.pull_request_diff_horizontal_max
     }
 
+    pub fn pull_request_diff_expanded(&self) -> bool {
+        self.pull_request_diff_expanded
+    }
+
     pub fn selected_pull_request_file_row(&self) -> Option<&PullRequestFile> {
         self.pull_request_files.get(self.selected_pull_request_file)
     }
@@ -1263,6 +1299,12 @@ impl App {
                 }
             }
             KeyCode::Char('G') => self.jump_bottom(),
+            KeyCode::Char('c')
+                if self.view == View::PullRequestFiles
+                    && self.pull_request_review_focus == PullRequestReviewFocus::Diff =>
+            {
+                self.toggle_selected_pull_request_hunk_collapsed();
+            }
             KeyCode::Char('c') if self.view == View::IssueDetail => {
                 self.reset_issue_comments_scroll();
                 self.set_view(View::IssueComments);
@@ -1648,6 +1690,8 @@ impl App {
                 self.selected_pull_request_diff_line = 0;
                 self.pull_request_diff_scroll = 0;
                 self.pull_request_diff_horizontal_scroll = 0;
+                self.pull_request_diff_horizontal_max = 0;
+                self.pull_request_diff_expanded = false;
                 self.pull_request_visual_mode = false;
                 self.pull_request_visual_anchor = None;
                 self.sync_selected_pull_request_review_comment();
@@ -1704,6 +1748,9 @@ impl App {
     pub fn set_view(&mut self, view: View) {
         self.view = view;
         self.help_overlay_visible = false;
+        if self.view != View::PullRequestFiles {
+            self.pull_request_diff_expanded = false;
+        }
         match self.view {
             View::Issues => self.focus = Focus::IssuesList,
             View::IssueDetail => self.focus = Focus::IssueBody,
@@ -1795,6 +1842,8 @@ impl App {
         self.pull_request_diff_scroll = 0;
         self.pull_request_diff_horizontal_scroll = 0;
         self.pull_request_diff_max_scroll = 0;
+        self.pull_request_diff_horizontal_max = 0;
+        self.pull_request_diff_expanded = false;
         self.pull_request_review_focus = PullRequestReviewFocus::Files;
         self.pull_request_visual_mode = false;
         self.pull_request_visual_anchor = None;
@@ -1820,6 +1869,7 @@ impl App {
     pub fn set_pull_request_review_focus(&mut self, focus: PullRequestReviewFocus) {
         self.pull_request_review_focus = focus;
         if focus == PullRequestReviewFocus::Files {
+            self.pull_request_diff_expanded = false;
             self.pull_request_visual_mode = false;
             self.pull_request_visual_anchor = None;
         }
@@ -1859,6 +1909,20 @@ impl App {
         if self.pull_request_diff_horizontal_scroll > max_scroll {
             self.pull_request_diff_horizontal_scroll = max_scroll;
         }
+    }
+
+    fn toggle_pull_request_diff_expanded(&mut self) {
+        if self.view != View::PullRequestFiles
+            || self.pull_request_review_focus != PullRequestReviewFocus::Diff
+        {
+            return;
+        }
+        self.pull_request_diff_expanded = !self.pull_request_diff_expanded;
+        if self.pull_request_diff_expanded {
+            self.status = "Expanded diff view".to_string();
+            return;
+        }
+        self.status = "Split files and diff view".to_string();
     }
 
     fn scroll_pull_request_diff_horizontal(&mut self, delta: i16) {
@@ -1997,6 +2061,8 @@ impl App {
         self.current_issue_number = None;
         self.linked_pull_requests.clear();
         self.linked_issues.clear();
+        self.linked_pull_request_lookups.clear();
+        self.linked_issue_lookups.clear();
         self.pull_request_files_issue_id = None;
         self.pull_request_id = None;
         self.pull_request_files.clear();
@@ -2008,6 +2074,8 @@ impl App {
         self.pull_request_diff_scroll = 0;
         self.pull_request_diff_horizontal_scroll = 0;
         self.pull_request_diff_max_scroll = 0;
+        self.pull_request_diff_horizontal_max = 0;
+        self.pull_request_diff_expanded = false;
         self.pull_request_review_focus = PullRequestReviewFocus::Files;
         self.pull_request_review_side = ReviewSide::Right;
         self.pull_request_visual_mode = false;
@@ -2038,6 +2106,8 @@ impl App {
             self.pull_request_diff_scroll = 0;
             self.pull_request_diff_horizontal_scroll = 0;
             self.pull_request_diff_max_scroll = 0;
+            self.pull_request_diff_horizontal_max = 0;
+            self.pull_request_diff_expanded = false;
             self.pull_request_review_focus = PullRequestReviewFocus::Files;
             self.pull_request_review_side = ReviewSide::Right;
             self.pull_request_visual_mode = false;
@@ -2408,6 +2478,8 @@ impl App {
                         self.selected_pull_request_diff_line = 0;
                         self.pull_request_diff_scroll = 0;
                         self.pull_request_diff_horizontal_scroll = 0;
+                        self.pull_request_diff_horizontal_max = 0;
+                        self.pull_request_diff_expanded = false;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -2521,6 +2593,8 @@ impl App {
                         self.selected_pull_request_diff_line = 0;
                         self.pull_request_diff_scroll = 0;
                         self.pull_request_diff_horizontal_scroll = 0;
+                        self.pull_request_diff_horizontal_max = 0;
+                        self.pull_request_diff_expanded = false;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -2630,7 +2704,7 @@ impl App {
                     self.sync_selected_pull_request_review_comment();
                     return;
                 }
-                self.toggle_selected_pull_request_hunk_collapsed();
+                self.toggle_pull_request_diff_expanded();
             }
             View::CommentPresetPicker => {
                 self.action = Some(AppAction::PickPreset);
@@ -2671,6 +2745,8 @@ impl App {
                     self.selected_pull_request_diff_line = 0;
                     self.pull_request_diff_scroll = 0;
                     self.pull_request_diff_horizontal_scroll = 0;
+                    self.pull_request_diff_horizontal_max = 0;
+                    self.pull_request_diff_expanded = false;
                     self.pull_request_visual_mode = false;
                     self.pull_request_visual_anchor = None;
                     self.sync_selected_pull_request_review_comment();
@@ -2679,6 +2755,8 @@ impl App {
                 self.selected_pull_request_diff_line = 0;
                 self.pull_request_diff_scroll = 0;
                 self.pull_request_diff_horizontal_scroll = 0;
+                self.pull_request_diff_horizontal_max = 0;
+                self.pull_request_diff_expanded = false;
                 self.sync_selected_pull_request_review_comment();
             }
             View::CommentPresetPicker => self.preset_choice = 0,
@@ -2738,6 +2816,8 @@ impl App {
                         self.selected_pull_request_diff_line = 0;
                         self.pull_request_diff_scroll = 0;
                         self.pull_request_diff_horizontal_scroll = 0;
+                        self.pull_request_diff_horizontal_max = 0;
+                        self.pull_request_diff_expanded = false;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -4752,7 +4832,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
+    fn c_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
         let mut app = App::new(Config::default());
         app.set_view(View::PullRequestFiles);
         app.set_pull_request_files(
@@ -4774,7 +4854,7 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         assert_eq!(app.selected_pull_request_diff_line(), 2);
 
-        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
 
         assert_eq!(app.selected_pull_request_diff_line(), 0);
         assert!(app.pull_request_hunk_is_collapsed("src/main.rs", 0));
@@ -4784,9 +4864,33 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
         app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
-        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
 
         assert!(!app.pull_request_hunk_is_collapsed("src/main.rs", 0));
+    }
+
+    #[test]
+    fn enter_toggles_pull_request_diff_expanded_mode() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        assert!(!app.pull_request_diff_expanded());
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.pull_request_diff_expanded());
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!app.pull_request_diff_expanded());
     }
 
     #[test]
