@@ -677,6 +677,15 @@ fn draw_issues(
                     Style::default().fg(issue_state_color(issue.state.as_str(), theme)),
                 ),
             ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "title     ",
+                    Style::default()
+                        .fg(theme.accent_subtle)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(issue.title.clone(), Style::default().fg(theme.text_primary)),
+            ]));
             let mut pr_tui_button_hit = None;
             let mut pr_web_button_hit = None;
             let mut issue_tui_button_hit = None;
@@ -747,20 +756,6 @@ fn draw_issues(
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
                     ));
-                    if let Some(linked_issue_row) = app.issue_by_number(linked_issue) {
-                        lines.push(Line::from(vec![
-                            Span::styled(
-                                "linked title ",
-                                Style::default()
-                                    .fg(theme.accent_subtle)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                ellipsize(linked_issue_row.title.as_str(), 80),
-                                Style::default().fg(theme.text_muted),
-                            ),
-                        ]));
-                    }
                 }
             }
             lines.push(Line::from(vec![
