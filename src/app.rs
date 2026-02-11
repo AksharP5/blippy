@@ -349,6 +349,7 @@ pub struct App {
     filtered_repo_indices: Vec<usize>,
     issue_query: String,
     issue_search_mode: bool,
+    help_overlay_visible: bool,
     filtered_issue_indices: Vec<usize>,
     issue_detail_scroll: u16,
     issue_detail_max_scroll: u16,
@@ -389,6 +390,7 @@ pub struct App {
     pull_request_diff_scroll: u16,
     pull_request_diff_max_scroll: u16,
     pull_request_diff_horizontal_scroll: u16,
+    pull_request_diff_horizontal_max: u16,
     pull_request_review_side: ReviewSide,
     pull_request_visual_mode: bool,
     pull_request_visual_anchor: Option<usize>,
@@ -438,6 +440,7 @@ impl App {
             filtered_repo_indices: Vec::new(),
             issue_query: String::new(),
             issue_search_mode: false,
+            help_overlay_visible: false,
             filtered_issue_indices: Vec::new(),
             issue_detail_scroll: 0,
             issue_detail_max_scroll: 0,
@@ -478,6 +481,7 @@ impl App {
             pull_request_diff_scroll: 0,
             pull_request_diff_max_scroll: 0,
             pull_request_diff_horizontal_scroll: 0,
+            pull_request_diff_horizontal_max: 0,
             pull_request_review_side: ReviewSide::Right,
             pull_request_visual_mode: false,
             pull_request_visual_anchor: None,
@@ -686,6 +690,10 @@ impl App {
 
     pub fn issue_search_mode(&self) -> bool {
         self.issue_search_mode
+    }
+
+    pub fn help_overlay_visible(&self) -> bool {
+        self.help_overlay_visible
     }
 
     pub fn issue_counts(&self) -> (usize, usize) {
@@ -996,6 +1004,10 @@ impl App {
         self.pull_request_diff_horizontal_scroll
     }
 
+    pub fn pull_request_diff_horizontal_max(&self) -> u16 {
+        self.pull_request_diff_horizontal_max
+    }
+
     pub fn selected_pull_request_file_row(&self) -> Option<&PullRequestFile> {
         self.pull_request_files.get(self.selected_pull_request_file)
     }
@@ -1146,6 +1158,15 @@ impl App {
             self.pending_d = false;
         }
 
+        if key.code == KeyCode::Char('?') {
+            self.help_overlay_visible = !self.help_overlay_visible;
+            return;
+        }
+        if self.help_overlay_visible && key.code == KeyCode::Esc {
+            self.help_overlay_visible = false;
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1159,7 +1180,10 @@ impl App {
                 self.issue_search_mode = true;
                 self.status = "Search issues".to_string();
             }
-            KeyCode::Char('f') if key.modifiers.is_empty() && self.view == View::Issues => {
+            KeyCode::Tab if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.set_issue_filter(self.issue_filter.next());
+            }
+            KeyCode::BackTab if self.view == View::Issues => {
                 self.set_issue_filter(self.issue_filter.next());
             }
             KeyCode::Char('p') if key.modifiers.is_empty() && self.view == View::Issues => {
@@ -1253,9 +1277,6 @@ impl App {
             }
             KeyCode::Char('w') if self.view == View::PullRequestFiles => {
                 self.action = Some(AppAction::TogglePullRequestFileViewed);
-            }
-            KeyCode::Char('z') if self.view == View::PullRequestFiles => {
-                self.toggle_selected_pull_request_hunk_collapsed();
             }
             KeyCode::Char('m') if self.view == View::PullRequestFiles => {
                 self.action = Some(AppAction::AddPullRequestReviewComment);
@@ -1682,6 +1703,7 @@ impl App {
 
     pub fn set_view(&mut self, view: View) {
         self.view = view;
+        self.help_overlay_visible = false;
         match self.view {
             View::Issues => self.focus = Focus::IssuesList,
             View::IssueDetail => self.focus = Focus::IssueBody,
@@ -1832,6 +1854,13 @@ impl App {
         self.pull_request_diff_horizontal_scroll = 0;
     }
 
+    pub fn set_pull_request_diff_horizontal_max(&mut self, max_scroll: u16) {
+        self.pull_request_diff_horizontal_max = max_scroll;
+        if self.pull_request_diff_horizontal_scroll > max_scroll {
+            self.pull_request_diff_horizontal_scroll = max_scroll;
+        }
+    }
+
     fn scroll_pull_request_diff_horizontal(&mut self, delta: i16) {
         if self.view != View::PullRequestFiles
             || self.pull_request_review_focus != PullRequestReviewFocus::Diff
@@ -1848,7 +1877,7 @@ impl App {
         self.pull_request_diff_horizontal_scroll = self
             .pull_request_diff_horizontal_scroll
             .saturating_add(amount)
-            .min(2000);
+            .min(self.pull_request_diff_horizontal_max);
     }
 
     pub fn reset_issue_detail_scroll(&mut self) {
@@ -2599,7 +2628,9 @@ impl App {
                 if self.pull_request_review_focus == PullRequestReviewFocus::Files {
                     self.pull_request_review_focus = PullRequestReviewFocus::Diff;
                     self.sync_selected_pull_request_review_comment();
+                    return;
                 }
+                self.toggle_selected_pull_request_hunk_collapsed();
             }
             View::CommentPresetPicker => {
                 self.action = Some(AppAction::PickPreset);
@@ -3856,7 +3887,7 @@ mod tests {
     }
 
     #[test]
-    fn f_cycles_issue_filter() {
+    fn tab_cycles_issue_filter() {
         let mut app = App::new(Config::default());
         app.set_view(View::Issues);
         app.set_issues(vec![
@@ -3891,12 +3922,12 @@ mod tests {
         assert_eq!(app.issue_filter(), IssueFilter::Open);
         assert_eq!(app.issues_for_view().len(), 1);
 
-        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.issue_filter(), IssueFilter::Closed);
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
 
-        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.issue_filter(), IssueFilter::Open);
         assert_eq!(app.issues_for_view().len(), 1);
         assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
@@ -4494,6 +4525,7 @@ mod tests {
             }],
         );
         app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        app.set_pull_request_diff_horizontal_max(20);
         app.register_mouse_region(MouseTarget::PullRequestDiffPane, 0, 0, 120, 40);
 
         app.on_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
@@ -4720,7 +4752,7 @@ mod tests {
     }
 
     #[test]
-    fn z_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
+    fn enter_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
         let mut app = App::new(Config::default());
         app.set_view(View::PullRequestFiles);
         app.set_pull_request_files(
@@ -4742,7 +4774,7 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         assert_eq!(app.selected_pull_request_diff_line(), 2);
 
-        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert_eq!(app.selected_pull_request_diff_line(), 0);
         assert!(app.pull_request_hunk_is_collapsed("src/main.rs", 0));
@@ -4752,9 +4784,21 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
         app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
-        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(!app.pull_request_hunk_is_collapsed("src/main.rs", 0));
+    }
+
+    #[test]
+    fn question_mark_toggles_help_overlay() {
+        let mut app = App::new(Config::default());
+        assert!(!app.help_overlay_visible());
+
+        app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT));
+        assert!(app.help_overlay_visible());
+
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.help_overlay_visible());
     }
 
     #[test]

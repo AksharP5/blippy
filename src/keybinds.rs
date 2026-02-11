@@ -32,7 +32,7 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
     },
     BindingSpec {
         action: "cycle_issue_filter",
-        default: "f",
+        default: "tab",
         description: "Cycle open/closed filter",
     },
     BindingSpec {
@@ -87,7 +87,7 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
     },
     BindingSpec {
         action: "collapse_hunk",
-        default: "z",
+        default: "enter",
         description: "Collapse/expand current diff hunk",
     },
     BindingSpec {

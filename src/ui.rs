@@ -125,6 +125,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
     // Draw footer status bar
     draw_status(frame, app, footer_area, theme);
+    if app.help_overlay_visible() {
+        draw_help_overlay(frame, app, area, theme);
+    }
 }
 
 fn draw_repo_picker(
@@ -540,7 +543,8 @@ fn draw_issues(
                         line1_spans.push(Span::styled(
                             format!("[PR#{}]", linked_pr),
                             Style::default()
-                                .fg(theme.accent_success)
+                                .fg(theme.bg_app)
+                                .bg(theme.accent_success)
                                 .add_modifier(Modifier::BOLD),
                         ));
                     }
@@ -664,8 +668,8 @@ fn draw_issues(
             if !issue.is_pr {
                 let prefix = "linked PR ";
                 if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
-                    let open_label = format!("[ Open PR #{} ]", linked_pr);
-                    let web_label = "[ Web ]";
+                    let open_label = format!("[ PR #{} ]", linked_pr);
+                    let web_label = "[ web ]";
                     lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
                         Span::styled(
@@ -693,34 +697,12 @@ fn draw_issues(
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
                     ));
-                } else if app.linked_pull_request_known(issue.number) {
-                    lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
-                    ]));
-                } else {
-                    let probe_label = "[ Find linked PR ]";
-                    lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled(
-                            probe_label,
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_subtle)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                    pr_tui_button_hit = Some((
-                        line_index,
-                        prefix.chars().count() as u16,
-                        probe_label.chars().count() as u16,
-                    ));
                 }
             } else {
                 let prefix = "linked issue ";
                 if let Some(linked_issue) = app.linked_issue_for_pull_request(issue.number) {
-                    let open_label = format!("[ Open Issue #{} ]", linked_issue);
-                    let web_label = "[ Web ]";
+                    let open_label = format!("[ Issue #{} ]", linked_issue);
+                    let web_label = "[ web ]";
                     lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
                         Span::styled(
@@ -747,28 +729,6 @@ fn draw_issues(
                         line_index,
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
-                    ));
-                } else if app.linked_issue_known(issue.number) {
-                    lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
-                    ]));
-                } else {
-                    let probe_label = "[ Find linked issue ]";
-                    lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled(
-                            probe_label,
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_subtle)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                    issue_tui_button_hit = Some((
-                        line_index,
-                        prefix.chars().count() as u16,
-                        probe_label.chars().count() as u16,
                     ));
                 }
             }
@@ -1067,8 +1027,8 @@ fn draw_issue_detail(
             if is_pr {
                 let prefix = "linked issue ";
                 if let Some(linked_issue) = app.linked_issue_for_pull_request(number) {
-                    let open_label = format!("[ Open Issue #{} ]", linked_issue);
-                    let web_label = "[ Web ]";
+                    let open_label = format!("[ Issue #{} ]", linked_issue);
+                    let web_label = "[ web ]";
                     body_lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
                         Span::styled(
@@ -1096,34 +1056,12 @@ fn draw_issue_detail(
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
                     ));
-                } else if app.linked_issue_known(number) {
-                    body_lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
-                    ]));
-                } else {
-                    let probe_label = "[ Find linked issue ]";
-                    body_lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled(
-                            probe_label,
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_subtle)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                    linked_issue_tui_hit = Some((
-                        link_line,
-                        prefix.chars().count() as u16,
-                        probe_label.chars().count() as u16,
-                    ));
                 }
             } else {
                 let prefix = "linked PR ";
                 if let Some(linked_pr) = app.linked_pull_request_for_issue(number) {
-                    let open_label = format!("[ Open PR #{} ]", linked_pr);
-                    let web_label = "[ Web ]";
+                    let open_label = format!("[ PR #{} ]", linked_pr);
+                    let web_label = "[ web ]";
                     body_lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
                         Span::styled(
@@ -1150,28 +1088,6 @@ fn draw_issue_detail(
                         link_line,
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
-                    ));
-                } else if app.linked_pull_request_known(number) {
-                    body_lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled("none found", Style::default().fg(theme.accent_danger)),
-                    ]));
-                } else {
-                    let probe_label = "[ Find linked PR ]";
-                    body_lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(theme.text_muted)),
-                        Span::styled(
-                            probe_label,
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_subtle)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                    linked_pr_tui_hit = Some((
-                        link_line,
-                        prefix.chars().count() as u16,
-                        probe_label.chars().count() as u16,
                     ));
                 }
             }
@@ -1644,13 +1560,17 @@ fn draw_pull_request_files(
             ),
             Span::raw("  "),
             Span::styled(
-                format!("x:{}", horizontal_scroll),
+                format!(
+                    "pan:{}/{}",
+                    horizontal_scroll,
+                    app.pull_request_diff_horizontal_max()
+                ),
                 Style::default().fg(theme.text_muted),
             ),
         ]),
         Line::from(Span::styled(
             format!(
-                "Ctrl+h/l pane • h/l side • [/ ] pan • 0 reset pan • w viewed • z collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}",
+                "Ctrl+h/l pane • h/l side • [/ ] pan • 0 reset pan • w viewed • Enter collapse hunk • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}",
                 focused, side, visual, visual_range
             ),
             Style::default().fg(theme.text_muted),
@@ -1792,6 +1712,7 @@ fn draw_pull_request_files(
         .map(|file| (file.filename.clone(), file.patch.clone()));
     let mut lines = Vec::new();
     let mut row_offsets = Vec::new();
+    let mut horizontal_max = 0usize;
 
     if app.pull_request_files_syncing() {
         lines.push(Line::from("Loading pull request changes..."));
@@ -1812,6 +1733,7 @@ fn draw_pull_request_files(
             let left_width = cells_width.saturating_sub(5) / 2;
             let right_width = cells_width.saturating_sub(left_width + 3);
             let horizontal_offset = app.pull_request_diff_horizontal_scroll() as usize;
+            horizontal_max = split_diff_horizontal_limit(rows.as_slice(), left_width, right_width);
             let visual_range = app.pull_request_visual_range();
             for (index, row) in rows.iter().enumerate() {
                 if app.pull_request_diff_row_hidden(file_name.as_str(), rows.as_slice(), index) {
@@ -1932,6 +1854,7 @@ fn draw_pull_request_files(
     let total_lines = wrapped_line_count(&lines, content_width);
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_pull_request_diff_max_scroll(max_scroll);
+    app.set_pull_request_diff_horizontal_max(horizontal_max.min(u16::MAX as usize) as u16);
 
     let selected_row_offset = row_offsets
         .get(app.selected_pull_request_diff_line())
@@ -1951,9 +1874,10 @@ fn draw_pull_request_files(
         .as_ref()
         .map(|(file_name, _)| {
             format!(
-                "Diff: {}  [pan {} | [/] move]",
+                "Diff: {}  [pan {}/{} | [/] move]",
                 file_name,
                 app.pull_request_diff_horizontal_scroll(),
+                app.pull_request_diff_horizontal_max(),
             )
         })
         .unwrap_or_else(|| "Diff".to_string());
@@ -2516,7 +2440,7 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     let sync = sync_state_label(app);
     let status = app.status();
     let context = status_context(app);
-    let help_raw = help_text(app);
+    let help_raw = primary_help_text(app);
     let width = area.width as usize;
     let sync_label = format!("[{}]", sync);
     let mode_badge = format!(" {} ", mode);
@@ -2584,6 +2508,84 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
         mode_badge_width.saturating_add(1) as u16,
         1,
     );
+}
+
+fn draw_help_overlay(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &ThemePalette) {
+    let popup = centered_rect(84, 72, area);
+    frame.render_widget(Clear, popup);
+    let shell = popup_block("Keyboard Help", theme);
+    let inner = shell.inner(popup).inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    frame.render_widget(shell, popup);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Quick actions",
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            primary_help_text(app),
+            Style::default().fg(theme.text_primary),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "All shortcuts",
+            Style::default()
+                .fg(theme.accent_subtle)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+
+    let max_width = inner.width.saturating_sub(2) as usize;
+    for line in wrap_help_tokens(help_text(app).as_str(), max_width) {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(theme.text_muted),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press ? or Esc to close",
+        Style::default()
+            .fg(theme.accent_success)
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme.bg_popup)),
+        inner,
+    );
+}
+
+fn wrap_help_tokens(help: &str, max: usize) -> Vec<String> {
+    if max == 0 {
+        return vec![String::new()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for token in help.split(" • ") {
+        let next = if current.is_empty() {
+            token.to_string()
+        } else {
+            format!("{} • {}", current, token)
+        };
+        if next.chars().count() <= max {
+            current = next;
+            continue;
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+        current = token.to_string();
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
 }
 
 fn mode_meta(app: &App, theme: &ThemePalette) -> (&'static str, Color) {
@@ -2744,6 +2746,37 @@ fn register_inline_button(
     app.register_mouse_region(target, x, y, width.min(max_width), 1);
 }
 
+fn primary_help_text(app: &App) -> String {
+    match app.view() {
+        View::RepoPicker => {
+            "j/k move • / search • Enter select • Ctrl+R rescan • ? help".to_string()
+        }
+        View::RemoteChooser => "j/k move • Enter select • b/Esc back • ? help".to_string(),
+        View::Issues => {
+            if app.issue_search_mode() {
+                return "Search mode • Enter keep • Esc clear • ? help".to_string();
+            }
+            "j/k move • Enter open • Tab open/closed • p issues/prs • / search • ? help".to_string()
+        }
+        View::IssueDetail => {
+            "Ctrl+h/l panes • Enter open pane • c comments • b/Esc back • ? help".to_string()
+        }
+        View::IssueComments => "j/k comments • e edit • x delete • b/Esc back • ? help".to_string(),
+        View::PullRequestFiles => {
+            "Ctrl+h/l panes • j/k move • Enter collapse hunk • [/ ] pan • Shift+V visual • ? help"
+                .to_string()
+        }
+        View::LabelPicker | View::AssigneePicker => {
+            "Type filter • j/k move • Space toggle • Enter apply • Esc cancel • ? help".to_string()
+        }
+        View::CommentPresetPicker => "j/k move • Enter select • Esc cancel • ? help".to_string(),
+        View::CommentPresetName => "Type name • Enter next • Esc cancel • ? help".to_string(),
+        View::CommentEditor => {
+            "Type text • Enter submit • Shift+Enter newline • Esc cancel • ? help".to_string()
+        }
+    }
+}
+
 fn help_text(app: &App) -> String {
     match app.view() {
         View::RepoPicker => {
@@ -2772,7 +2805,7 @@ fn help_text(app: &App) -> String {
                 "/ search",
                 "p issues/prs",
                 "1/2 tabs",
-                "f open/closed",
+                "Tab open/closed",
                 "a assignee",
                 "l labels",
                 "Shift+A assignees",
@@ -2840,7 +2873,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l pane • j/k move file/line • [/ ] pan diff • 0 reset pan • w viewed • z collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
+            "Ctrl+h/l pane • j/k move file/line • [/ ] pan diff • 0 reset pan • w viewed • Enter collapse hunk • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
                 .to_string()
         }
         View::LabelPicker => {
@@ -3073,6 +3106,34 @@ fn styled_patch_line(line: &str, width: usize, theme: &ThemePalette) -> Line<'st
     ))
 }
 
+fn split_diff_horizontal_limit(
+    rows: &[crate::pr_diff::DiffRow],
+    left_width: usize,
+    right_width: usize,
+) -> usize {
+    let left_content_width = left_width.saturating_sub(5);
+    let right_content_width = right_width.saturating_sub(5);
+    let hunk_width = left_width + right_width + 4;
+
+    let mut max_offset = 0usize;
+    for row in rows {
+        if matches!(row.kind, DiffKind::Hunk | DiffKind::Meta) {
+            let raw_width = row.raw.chars().count();
+            max_offset = max_offset.max(raw_width.saturating_sub(hunk_width));
+            continue;
+        }
+        let left = row.left.chars().count().saturating_sub(left_content_width);
+        let right = row
+            .right
+            .chars()
+            .count()
+            .saturating_sub(right_content_width);
+        max_offset = max_offset.max(left.max(right));
+    }
+
+    max_offset
+}
+
 fn render_split_diff_row(
     row: &crate::pr_diff::DiffRow,
     selected: bool,
@@ -3166,9 +3227,9 @@ fn render_split_diff_row(
             .bg(theme.bg_selected)
             .add_modifier(Modifier::BOLD);
         if selected_side == ReviewSide::Left {
-            left_style = left_style.add_modifier(Modifier::UNDERLINED);
+            left_style = left_style.add_modifier(Modifier::BOLD);
         } else {
-            right_style = right_style.add_modifier(Modifier::UNDERLINED);
+            right_style = right_style.add_modifier(Modifier::BOLD);
         }
     }
     if let Some(bg) = bg_color {
@@ -3191,6 +3252,14 @@ fn render_split_diff_row(
     } else {
         " "
     };
+    let divider = if selected {
+        match selected_side {
+            ReviewSide::Left => "<| ",
+            ReviewSide::Right => " |>",
+        }
+    } else {
+        " | "
+    };
 
     let mut line = Line::from(vec![
         Span::styled(
@@ -3207,7 +3276,7 @@ fn render_split_diff_row(
         ),
         Span::styled(left_cell, left_style),
         Span::styled(
-            " | ",
+            divider,
             match bg_color {
                 Some(bg) => Style::default().fg(theme.border_panel).bg(bg),
                 None => Style::default().fg(theme.border_panel),
