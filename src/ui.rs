@@ -5,6 +5,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::app::{
     App, EditorMode, Focus, IssueFilter, MouseTarget, PullRequestReviewFocus, ReviewSide, View,
@@ -1526,19 +1528,6 @@ fn draw_pull_request_files(
         PullRequestReviewFocus::Files => "files",
         PullRequestReviewFocus::Diff => "diff",
     };
-    let side = match app.pull_request_review_side() {
-        ReviewSide::Left => "old",
-        ReviewSide::Right => "new",
-    };
-    let visual = if app.pull_request_visual_mode() {
-        "visual"
-    } else {
-        "normal"
-    };
-    let visual_range = app
-        .pull_request_visual_range()
-        .map(|(start, end)| format!("{}-{}", start + 1, end + 1))
-        .unwrap_or_else(|| "-".to_string());
     let horizontal_scroll = app.pull_request_diff_horizontal_scroll();
     let header = Text::from(vec![
         Line::from(Span::styled(
@@ -1602,10 +1591,7 @@ fn draw_pull_request_files(
             ),
         ]),
         Line::from(Span::styled(
-            format!(
-                "Ctrl+h/l pane • Enter full diff/split • c collapse hunk • h/l side • [/ ] pan • 0 reset pan • w viewed • Shift+V visual • m comment • e edit • x delete • Shift+R resolve thread • focus:{} side:{} mode:{} range:{}",
-                focused, side, visual, visual_range
-            ),
+            pull_request_header_hint(app),
             Style::default().fg(theme.text_muted),
         )),
     ]);
@@ -1904,6 +1890,14 @@ fn draw_pull_request_files(
     if viewport > 0 && selected_row_offset >= scroll.saturating_add(viewport) {
         scroll = selected_row_offset.saturating_sub(viewport.saturating_sub(1));
     }
+    let last_visible_index = row_offsets
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, offset)| offset.map(|_| index));
+    if last_visible_index.is_some_and(|index| app.selected_pull_request_diff_line() >= index) {
+        scroll = max_scroll;
+    }
     app.set_pull_request_diff_scroll(scroll);
 
     let diff_title = selected_file
@@ -2168,7 +2162,7 @@ fn draw_assignee_picker(
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(3),
         ])
@@ -2203,6 +2197,10 @@ fn draw_assignee_picker(
         ]),
         Line::from(Span::styled(
             "Type to filter • Space toggle • Enter apply • Ctrl+u clear • Esc cancel",
+            Style::default().fg(theme.text_muted),
+        )),
+        Line::from(Span::styled(
+            "Source: synced issues + GitHub assignable users",
             Style::default().fg(theme.text_muted),
         )),
     ]))
@@ -2593,12 +2591,13 @@ fn draw_help_overlay(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &Theme
             .fg(theme.accent_subtle)
             .add_modifier(Modifier::BOLD),
     )));
-    let max_width = inner.width.saturating_sub(2) as usize;
-    for line in wrap_help_tokens(help_text(app).as_str(), max_width) {
-        lines.push(Line::from(Span::styled(
-            format!("• {}", line),
-            Style::default().fg(theme.text_muted),
-        )));
+    for (key, action) in extended_help_rows(app) {
+        let mut row = vec![key_cap(key.as_str(), theme)];
+        if !action.is_empty() {
+            row.push(Span::raw(" "));
+            row.push(Span::styled(action, Style::default().fg(theme.text_muted)));
+        }
+        lines.push(Line::from(row));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
@@ -2658,14 +2657,41 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("b or Esc", "Back"),
             ("o", "Open in browser"),
         ],
-        View::PullRequestFiles => vec![
-            ("Ctrl+h/l", "Switch files/diff pane"),
-            ("j / k", "Move file or diff line"),
-            ("Enter", "Toggle full diff view"),
-            ("c", "Collapse/expand selected hunk"),
-            ("[ / ]", "Pan horizontal diff"),
-            ("0", "Reset horizontal pan"),
-        ],
+        View::PullRequestFiles => {
+            if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
+                return vec![
+                    ("Ctrl+h/l", "Switch files/diff pane"),
+                    ("j / k", "Move changed files"),
+                    ("Enter", "Open full-width diff pane"),
+                    ("w", "Toggle file viewed state"),
+                    ("b or Esc", "Back"),
+                    ("o", "Open in browser"),
+                ];
+            }
+            if app.pull_request_diff_expanded() {
+                return vec![
+                    ("Ctrl+h/l", "Switch files/diff pane"),
+                    ("j / k", "Move diff lines"),
+                    ("Enter", "Return to split files+diff"),
+                    ("b or Esc", "Return to split files+diff"),
+                    ("c", "Collapse/expand selected hunk"),
+                    ("[ / ]", "Pan horizontal diff"),
+                    ("0", "Reset horizontal pan"),
+                    ("m/e/x", "Add/edit/delete comment"),
+                    ("Shift+R", "Resolve/reopen thread"),
+                ];
+            }
+            vec![
+                ("Ctrl+h/l", "Switch files/diff pane"),
+                ("j / k", "Move diff lines"),
+                ("Enter", "Expand diff to full width"),
+                ("c", "Collapse/expand selected hunk"),
+                ("[ / ]", "Pan horizontal diff"),
+                ("0", "Reset horizontal pan"),
+                ("m/e/x", "Add/edit/delete comment"),
+                ("Shift+R", "Resolve/reopen thread"),
+            ]
+        }
         View::LabelPicker | View::AssigneePicker => vec![
             ("Type", "Filter options"),
             ("j / k", "Move options"),
@@ -2704,31 +2730,18 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
     }
 }
 
-fn wrap_help_tokens(help: &str, max: usize) -> Vec<String> {
-    if max == 0 {
-        return vec![String::new()];
-    }
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for token in help.split(" • ") {
-        let next = if current.is_empty() {
-            token.to_string()
-        } else {
-            format!("{} • {}", current, token)
-        };
-        if next.chars().count() <= max {
-            current = next;
-            continue;
-        }
-        if !current.is_empty() {
-            lines.push(current);
-        }
-        current = token.to_string();
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
+fn extended_help_rows(app: &App) -> Vec<(String, String)> {
+    help_text(app)
+        .split(" • ")
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            if let Some((key, action)) = token.split_once(' ') {
+                return (key.to_string(), action.to_string());
+            }
+            (token.to_string(), String::new())
+        })
+        .collect::<Vec<(String, String)>>()
 }
 
 fn mode_meta(app: &App, theme: &ThemePalette) -> (&'static str, Color) {
@@ -2889,6 +2902,22 @@ fn register_inline_button(
     app.register_mouse_region(target, x, y, width.min(max_width), 1);
 }
 
+fn pull_request_header_hint(app: &App) -> String {
+    if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
+        return "Ctrl+h/l pane • j/k files • Enter full diff • w viewed • b/Esc back".to_string();
+    }
+
+    let toggle_hint = if app.pull_request_diff_expanded() {
+        "Enter or b/Esc split diff"
+    } else {
+        "Enter full diff"
+    };
+    format!(
+        "Ctrl+h/l pane • j/k diff • {} • c collapse hunk • h/l side • [/ ] pan • 0 reset • m add • n/p thread • e edit • x delete • Shift+R resolve • Shift+V visual",
+        toggle_hint
+    )
+}
+
 fn primary_help_text(app: &App) -> String {
     match app.view() {
         View::RepoPicker => {
@@ -2902,12 +2931,31 @@ fn primary_help_text(app: &App) -> String {
             "j/k move • Enter open • Tab open/closed • p issues/prs • / search • ? help".to_string()
         }
         View::IssueDetail => {
+            if app.focus() == Focus::IssueRecentComments {
+                if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                    return "j/k recent comments • Enter open review • Ctrl+h/l panes • b/Esc back • ? help"
+                        .to_string();
+                }
+                return "j/k recent comments • Enter open comments • Ctrl+h/l panes • b/Esc back • ? help"
+                    .to_string();
+            }
             "Ctrl+h/l panes • Enter open pane • c comments • b/Esc back • ? help".to_string()
         }
         View::IssueComments => "j/k comments • e edit • x delete • b/Esc back • ? help".to_string(),
         View::PullRequestFiles => {
-            "Ctrl+h/l panes • j/k move • Enter full diff • c collapse hunk • [/ ] pan • ? help"
-                .to_string()
+            if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
+                return "j/k files • Enter full diff • Ctrl+h/l panes • w viewed • b/Esc back • ? help"
+                    .to_string();
+            }
+            let toggle_hint = if app.pull_request_diff_expanded() {
+                "b/Esc split diff"
+            } else {
+                "Enter full diff"
+            };
+            format!(
+                "j/k diff • {} • c collapse hunk • m add • n/p thread • Shift+R resolve • ? help",
+                toggle_hint
+            )
         }
         View::LabelPicker | View::AssigneePicker => {
             "Type filter • j/k move • Space toggle • Enter apply • Esc cancel • ? help".to_string()
@@ -2931,8 +2979,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::RemoteChooser => {
-            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • q quit"
-                .to_string()
+            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • q quit".to_string()
         }
         View::Issues => {
             if app.issue_search_mode() {
@@ -3016,8 +3063,19 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::PullRequestFiles => {
-            "Ctrl+h/l pane • j/k move file/line • Enter full diff/split • c collapse hunk • [/ ] pan diff • 0 reset pan • w viewed • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Esc/back click • q quit"
-                .to_string()
+            if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
+                return "Ctrl+h/l pane • j/k move file • Enter full diff • w viewed • r refresh • v checkout • Esc/back"
+                    .to_string();
+            }
+            let toggle_hint = if app.pull_request_diff_expanded() {
+                "Enter/b/Esc split diff"
+            } else {
+                "Enter full diff"
+            };
+            format!(
+                "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • q quit",
+                toggle_hint
+            )
         }
         View::LabelPicker => {
             "Type to filter • j/k move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
@@ -3030,9 +3088,7 @@ fn help_text(app: &App) -> String {
         View::CommentPresetPicker => {
             "j/k move • gg/G top/bottom • Enter select • Esc cancel • q quit".to_string()
         }
-        View::CommentPresetName => {
-            "Type name • Enter next • Esc cancel".to_string()
-        }
+        View::CommentPresetName => "Type name • Enter next • Esc cancel".to_string(),
         View::CommentEditor => {
             if app.editor_mode() == EditorMode::AddPreset {
                 return "Type preset body • Enter save • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
@@ -3126,16 +3182,13 @@ fn fit_help_tokens(value: &str, max: usize) -> String {
     for part in parts {
         let separator = if compact.is_empty() { "" } else { " • " };
         let next = format!("{}{}", separator, part);
-        if compact.chars().count() + next.chars().count() > max.saturating_sub(4) {
+        if compact.chars().count() + next.chars().count() > max {
             break;
         }
         compact.push_str(next.as_str());
     }
     if compact.is_empty() {
         return fit_inline(value, max);
-    }
-    if compact.chars().count() + 4 <= max {
-        compact.push_str(" ...");
     }
     fit_inline(compact.as_str(), max)
 }
@@ -3450,14 +3503,18 @@ fn render_inline_review_comment(
         ReviewSide::Right => "new",
     };
     let prefix = if selected { ">" } else { " " };
-    let resolved_label = if resolved { "done" } else { "open" };
+    let resolved_label = if resolved { "resolved" } else { "open" };
+    let body_preview = if resolved && !selected {
+        format!(
+            "(collapsed) {}",
+            ellipsize(body, width.saturating_sub(38).max(16))
+        )
+    } else {
+        ellipsize(body, width.saturating_sub(24))
+    };
     let text = format!(
         "{} [{} {} @{}] {}",
-        prefix,
-        side_label,
-        resolved_label,
-        author,
-        ellipsize(body, width.saturating_sub(24))
+        prefix, side_label, resolved_label, author, body_preview
     );
 
     let muted_left = " ".repeat(left_width);
@@ -3552,11 +3609,7 @@ fn label_chip_spans(
 
     let mut spans = Vec::new();
     for (index, label) in labels.iter().take(max_labels).enumerate() {
-        let color = match index % 3 {
-            0 => theme.accent_primary,
-            1 => theme.accent_subtle,
-            _ => theme.accent_success,
-        };
+        let color = label_chip_color(label, index, theme);
         spans.push(Span::styled(
             format!(" {} ", ellipsize(label, 14)),
             Style::default().fg(theme.bg_app).bg(color),
@@ -3575,6 +3628,18 @@ fn label_chip_spans(
     }
 
     spans
+}
+
+fn label_chip_color(label: &str, index: usize, theme: &ThemePalette) -> Color {
+    let mut hasher = DefaultHasher::new();
+    label.to_ascii_lowercase().hash(&mut hasher);
+    let hash = hasher.finish() as usize;
+    match (hash + index) % 4 {
+        0 => theme.accent_primary,
+        1 => theme.accent_subtle,
+        2 => theme.accent_success,
+        _ => theme.border_focus,
+    }
 }
 
 fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
