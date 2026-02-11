@@ -2929,7 +2929,6 @@ impl App {
                     self.pull_request_diff_scroll = 0;
                     self.pull_request_diff_horizontal_scroll = 0;
                     self.pull_request_diff_horizontal_max = 0;
-                    self.pull_request_diff_expanded = false;
                     self.pull_request_visual_mode = false;
                     self.pull_request_visual_anchor = None;
                     self.sync_selected_pull_request_review_comment();
@@ -2939,7 +2938,6 @@ impl App {
                 self.pull_request_diff_scroll = 0;
                 self.pull_request_diff_horizontal_scroll = 0;
                 self.pull_request_diff_horizontal_max = 0;
-                self.pull_request_diff_expanded = false;
                 self.sync_selected_pull_request_review_comment();
             }
             View::CommentPresetPicker => self.preset_choice = 0,
@@ -3000,7 +2998,6 @@ impl App {
                         self.pull_request_diff_scroll = 0;
                         self.pull_request_diff_horizontal_scroll = 0;
                         self.pull_request_diff_horizontal_max = 0;
-                        self.pull_request_diff_expanded = false;
                         self.pull_request_visual_mode = false;
                         self.pull_request_visual_anchor = None;
                     }
@@ -5126,6 +5123,33 @@ mod tests {
 
         app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(!app.pull_request_diff_expanded());
+    }
+
+    #[test]
+    fn gg_keeps_pull_request_diff_expanded_mode() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            vec![PullRequestFile {
+                filename: "src/main.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 3,
+                deletions: 0,
+                patch: Some("@@ -1,1 +1,4 @@\n old\n+one\n+two\n+three".to_string()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.pull_request_diff_expanded());
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+
+        assert!(app.pull_request_diff_expanded());
+        assert_eq!(app.selected_pull_request_diff_line(), 0);
     }
 
     #[test]
