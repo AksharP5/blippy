@@ -610,6 +610,12 @@ impl App {
         self.current_issue_row()
     }
 
+    pub fn issue_by_number(&self, issue_number: i64) -> Option<&IssueRow> {
+        self.issues
+            .iter()
+            .find(|issue| issue.number == issue_number)
+    }
+
     pub fn linked_pull_request_for_issue(&self, issue_number: i64) -> Option<i64> {
         self.linked_pull_requests
             .get(&issue_number)

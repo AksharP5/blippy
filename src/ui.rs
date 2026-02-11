@@ -540,32 +540,9 @@ fn draw_issues(
                     pending_issue_span(app.pending_issue_badge(issue.number), theme),
                 ];
                 let line1 = Line::from(line1_spans);
-                let mut line2_spans = vec![
-                    Span::styled(
-                        "A:",
-                        Style::default()
-                            .fg(theme.accent_subtle)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        ellipsize(assignees, 20),
-                        Style::default().fg(theme.text_muted),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        "C:",
-                        Style::default()
-                            .fg(theme.accent_success)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        issue.comments_count.to_string(),
-                        Style::default().fg(theme.text_muted),
-                    ),
-                ];
+                let mut line2_spans = Vec::new();
                 if issue.is_pr {
                     if let Some(linked_issue) = app.linked_issue_for_pull_request(issue.number) {
-                        line2_spans.push(Span::raw("  "));
                         line2_spans.push(Span::styled(
                             "I:",
                             Style::default()
@@ -579,9 +556,9 @@ fn draw_issues(
                                 .bg(theme.accent_subtle)
                                 .add_modifier(Modifier::BOLD),
                         ));
+                        line2_spans.push(Span::raw("  "));
                     }
                 } else if let Some(linked_pr) = app.linked_pull_request_for_issue(issue.number) {
-                    line2_spans.push(Span::raw("  "));
                     line2_spans.push(Span::styled(
                         "PR:",
                         Style::default()
@@ -595,7 +572,29 @@ fn draw_issues(
                             .bg(theme.accent_success)
                             .add_modifier(Modifier::BOLD),
                     ));
+                    line2_spans.push(Span::raw("  "));
                 }
+                line2_spans.push(Span::styled(
+                    "A:",
+                    Style::default()
+                        .fg(theme.accent_subtle)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                line2_spans.push(Span::styled(
+                    ellipsize(assignees, 20),
+                    Style::default().fg(theme.text_muted),
+                ));
+                line2_spans.push(Span::raw("  "));
+                line2_spans.push(Span::styled(
+                    "C:",
+                    Style::default()
+                        .fg(theme.accent_success)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                line2_spans.push(Span::styled(
+                    issue.comments_count.to_string(),
+                    Style::default().fg(theme.text_muted),
+                ));
                 line2_spans.push(Span::raw("  "));
                 line2_spans.push(Span::styled(
                     "L:",
@@ -721,6 +720,20 @@ fn draw_issues(
                         prefix_width.saturating_add(open_width).saturating_add(1),
                         web_width,
                     ));
+                    if let Some(linked_pr_row) = app.issue_by_number(linked_pr) {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "linked title ",
+                                Style::default()
+                                    .fg(theme.accent_subtle)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                ellipsize(linked_pr_row.title.as_str(), 80),
+                                Style::default().fg(theme.text_muted),
+                            ),
+                        ]));
+                    }
                 }
             } else {
                 let prefix = "linked issue ";
@@ -3625,7 +3638,7 @@ fn label_chip_spans(
     for (index, label) in labels.iter().take(max_labels).enumerate() {
         let (background, foreground) = label_chip_colors(app, label, index, theme);
         spans.push(Span::styled(
-            format!(" {} ", ellipsize(label, 14)),
+            format!(" {} ", label),
             Style::default().fg(foreground).bg(background),
         ));
         spans.push(Span::raw(" "));
