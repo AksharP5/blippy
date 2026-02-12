@@ -6,21 +6,21 @@ use anyhow::Result;
 use crate::git::{RemoteInfo, list_github_remotes_at};
 use crate::store::{LocalRepoRow, upsert_local_repo};
 
-pub fn index_repo_path(_conn: &rusqlite::Connection, _path: &Path) -> Result<usize> {
-    let remotes = list_github_remotes_at(_path)?;
-    let rows = build_local_repo_rows(_path, remotes);
+pub fn index_repo_path(conn: &rusqlite::Connection, path: &Path) -> Result<usize> {
+    let remotes = list_github_remotes_at(path)?;
+    let rows = build_local_repo_rows(path, remotes);
     for row in &rows {
-        upsert_local_repo(_conn, row)?;
+        upsert_local_repo(conn, row)?;
     }
     Ok(rows.len())
 }
 
-fn build_local_repo_rows(_path: &Path, _remotes: Vec<RemoteInfo>) -> Vec<LocalRepoRow> {
+fn build_local_repo_rows(path: &Path, remotes: Vec<RemoteInfo>) -> Vec<LocalRepoRow> {
     let now = now_epoch();
-    _remotes
+    remotes
         .into_iter()
         .map(|remote| LocalRepoRow {
-            path: _path.to_string_lossy().to_string(),
+            path: path.to_string_lossy().to_string(),
             remote_name: remote.name,
             owner: remote.slug.owner,
             repo: remote.slug.repo,

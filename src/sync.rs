@@ -43,51 +43,51 @@ impl GitHubApi for GitHubClient {
     }
 }
 
-pub fn map_repo_to_row(_repo: &ApiRepo) -> RepoRow {
+pub fn map_repo_to_row(repo: &ApiRepo) -> RepoRow {
     RepoRow {
-        id: _repo.id,
-        owner: _repo.owner.login.clone(),
-        name: _repo.name.clone(),
+        id: repo.id,
+        owner: repo.owner.login.clone(),
+        name: repo.name.clone(),
         updated_at: None,
         etag: None,
     }
 }
 
-pub fn map_issue_to_row(_repo_id: i64, _issue: &ApiIssue) -> Option<IssueRow> {
-    let labels = _issue
+pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
+    let labels = issue
         .labels
         .iter()
         .map(|label| label.name.as_str())
         .collect::<Vec<&str>>()
         .join(",");
-    let assignees = _issue
+    let assignees = issue
         .assignees
         .iter()
         .map(|user| user.login.as_str())
         .collect::<Vec<&str>>()
         .join(",");
     Some(IssueRow {
-        id: _issue.id,
-        repo_id: _repo_id,
-        number: _issue.number,
-        state: _issue.state.clone(),
-        title: _issue.title.clone(),
-        body: _issue.body.clone().unwrap_or_default(),
+        id: issue.id,
+        repo_id,
+        number: issue.number,
+        state: issue.state.clone(),
+        title: issue.title.clone(),
+        body: issue.body.clone().unwrap_or_default(),
         labels,
         assignees,
-        comments_count: _issue.comments,
-        updated_at: _issue.updated_at.clone(),
-        is_pr: _issue.pull_request.is_some(),
+        comments_count: issue.comments,
+        updated_at: issue.updated_at.clone(),
+        is_pr: issue.pull_request.is_some(),
     })
 }
 
-pub fn map_comment_to_row(_issue_id: i64, _comment: &ApiComment) -> CommentRow {
+pub fn map_comment_to_row(issue_id: i64, comment: &ApiComment) -> CommentRow {
     CommentRow {
-        id: _comment.id,
-        issue_id: _issue_id,
-        author: _comment.user.login.clone(),
-        body: _comment.body.clone().unwrap_or_default(),
-        created_at: _comment.created_at.clone(),
+        id: comment.id,
+        issue_id,
+        author: comment.user.login.clone(),
+        body: comment.body.clone().unwrap_or_default(),
+        created_at: comment.created_at.clone(),
         last_accessed_at: Some(crate::store::comment_now_epoch()),
     }
 }

@@ -9,13 +9,13 @@ pub struct DiscoveredRepo {
 }
 
 pub fn quick_scan(
-    _cwd: &Path,
-    _max_depth: usize,
-    _parent_depth: usize,
+    cwd: &Path,
+    max_depth: usize,
+    parent_depth: usize,
 ) -> Result<Vec<DiscoveredRepo>> {
     let mut roots = Vec::new();
-    for (idx, ancestor) in _cwd.ancestors().enumerate() {
-        if idx > _parent_depth {
+    for (idx, ancestor) in cwd.ancestors().enumerate() {
+        if idx > parent_depth {
             break;
         }
         roots.push(ancestor.to_path_buf());
@@ -25,7 +25,7 @@ pub fn quick_scan(
     let mut results = Vec::new();
     let mut seen = HashSet::new();
     for root in roots {
-        let repos = scan_repos_in_dir(&root, _max_depth, &excluded)?;
+        let repos = scan_repos_in_dir(&root, max_depth, &excluded)?;
         for repo in repos {
             let key = canonical_key(&repo.path);
             if seen.insert(key) {
@@ -37,9 +37,9 @@ pub fn quick_scan(
     Ok(results)
 }
 
-pub fn full_scan(_home: &Path) -> Result<Vec<DiscoveredRepo>> {
+pub fn full_scan(home: &Path) -> Result<Vec<DiscoveredRepo>> {
     let excluded = excluded_dirs();
-    scan_repos_in_dir(_home, usize::MAX, &excluded)
+    scan_repos_in_dir(home, usize::MAX, &excluded)
 }
 
 pub fn home_dir() -> Option<PathBuf> {
