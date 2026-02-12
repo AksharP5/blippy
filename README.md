@@ -4,6 +4,10 @@ GitHub in your terminal.
 
 blippy is a keyboard-first TUI for GitHub issues and pull requests.
 
+![Repository picker showing the blippy interface](images/repo-selector-blippy.png)
+
+See the full [feature demo](DEMO.md) for more screenshots.
+
 ## Requirements
 
 - Rust toolchain (`1.93+` recommended) for source builds
