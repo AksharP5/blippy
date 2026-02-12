@@ -99,6 +99,10 @@ fn handle_command(command: CliCommand) -> Result<()> {
         CliCommand::AuthReset => handle_auth_reset(),
         CliCommand::CacheReset => handle_cache_reset(),
         CliCommand::Sync => handle_sync(),
+        CliCommand::Version => {
+            println!("blippy {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
     }
 }
 
@@ -403,8 +407,6 @@ fn handle_actions(
             if let Some(url) = issue_url(app) {
                 if let Err(error) = open_url(&url) {
                     app.set_status(format!("Open failed: {}", error));
-                } else {
-                    app.set_status("Opened in browser".to_string());
                 }
             } else {
                 app.set_status("No issue selected".to_string());
@@ -1853,19 +1855,25 @@ fn start_linked_issue_lookup(
 
 fn open_url(url: &str) -> Result<()> {
     if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(url).status()?;
-        return Ok(());
+        return run_silent_command(std::process::Command::new("open").arg(url));
     }
 
     if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", url])
-            .status()?;
-        return Ok(());
+        return run_silent_command(std::process::Command::new("cmd").args(["/C", "start", url]));
     }
 
-    std::process::Command::new("xdg-open").arg(url).status()?;
-    Ok(())
+    run_silent_command(std::process::Command::new("xdg-open").arg(url))
+}
+
+fn run_silent_command(command: &mut std::process::Command) -> Result<()> {
+    let status = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+    anyhow::bail!("command exited with status {}", status)
 }
 
 fn load_issues_for_slug(

@@ -5,6 +5,7 @@ pub enum CliCommand {
     AuthReset,
     CacheReset,
     Sync,
+    Version,
 }
 
 pub fn parse_args(_args: &[String]) -> Result<Option<CliCommand>> {
@@ -14,6 +15,10 @@ pub fn parse_args(_args: &[String]) -> Result<Option<CliCommand>> {
 
     let command = _args.get(1).map(String::as_str);
     let subcommand = _args.get(2).map(String::as_str);
+
+    if command == Some("--version") || command == Some("-V") {
+        return Ok(Some(CliCommand::Version));
+    }
 
     if command == Some("auth") && subcommand == Some("reset") {
         return Ok(Some(CliCommand::AuthReset));
@@ -70,5 +75,19 @@ mod tests {
         let args = vec!["blippy".to_string(), "sync".to_string()];
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, Some(CliCommand::Sync));
+    }
+
+    #[test]
+    fn parse_args_returns_version() {
+        let args = vec!["blippy".to_string(), "--version".to_string()];
+        let parsed = parse_args(&args).expect("parse succeeds");
+        assert_eq!(parsed, Some(CliCommand::Version));
+    }
+
+    #[test]
+    fn parse_args_returns_short_version() {
+        let args = vec!["blippy".to_string(), "-V".to_string()];
+        let parsed = parse_args(&args).expect("parse succeeds");
+        assert_eq!(parsed, Some(CliCommand::Version));
     }
 }
