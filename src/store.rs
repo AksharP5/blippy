@@ -66,8 +66,8 @@ pub fn open_db() -> Result<Connection> {
     open_db_at(&db_path())
 }
 
-pub fn upsert_repo(_conn: &Connection, _repo: &RepoRow) -> Result<()> {
-    _conn.execute(
+pub fn upsert_repo(conn: &Connection, repo: &RepoRow) -> Result<()> {
+    conn.execute(
         "
         INSERT INTO repos (id, owner, name, updated_at, etag)
         VALUES (?1, ?2, ?3, ?4, ?5)
@@ -78,31 +78,31 @@ pub fn upsert_repo(_conn: &Connection, _repo: &RepoRow) -> Result<()> {
             etag = COALESCE(excluded.etag, repos.etag)
         ",
         (
-            _repo.id,
-            _repo.owner.as_str(),
-            _repo.name.as_str(),
-            _repo.updated_at.as_deref(),
-            _repo.etag.as_deref(),
+            repo.id,
+            repo.owner.as_str(),
+            repo.name.as_str(),
+            repo.updated_at.as_deref(),
+            repo.etag.as_deref(),
         ),
     )?;
     Ok(())
 }
 
 pub fn update_repo_sync_state(
-    _conn: &Connection,
-    _repo_id: i64,
-    _updated_at: Option<&str>,
-    _etag: Option<&str>,
+    conn: &Connection,
+    repo_id: i64,
+    updated_at: Option<&str>,
+    etag: Option<&str>,
 ) -> Result<()> {
-    _conn.execute(
+    conn.execute(
         "UPDATE repos SET updated_at = ?1, etag = ?2 WHERE id = ?3",
-        (_updated_at, _etag, _repo_id),
+        (updated_at, etag, repo_id),
     )?;
     Ok(())
 }
 
-pub fn upsert_issue(_conn: &Connection, _issue: &IssueRow) -> Result<()> {
-    _conn.execute(
+pub fn upsert_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
+    conn.execute(
         "
         INSERT INTO issues (
             id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
@@ -121,26 +121,26 @@ pub fn upsert_issue(_conn: &Connection, _issue: &IssueRow) -> Result<()> {
             is_pr = excluded.is_pr
         ",
         (
-            _issue.id,
-            _issue.repo_id,
-            _issue.number,
-            _issue.state.as_str(),
-            _issue.title.as_str(),
-            _issue.body.as_str(),
-            _issue.labels.as_str(),
-            _issue.assignees.as_str(),
-            _issue.comments_count,
-            _issue.updated_at.as_deref(),
-            if _issue.is_pr { 1 } else { 0 },
+            issue.id,
+            issue.repo_id,
+            issue.number,
+            issue.state.as_str(),
+            issue.title.as_str(),
+            issue.body.as_str(),
+            issue.labels.as_str(),
+            issue.assignees.as_str(),
+            issue.comments_count,
+            issue.updated_at.as_deref(),
+            if issue.is_pr { 1 } else { 0 },
         ),
     )?;
 
-    index_issue(_conn, _issue)?;
+    index_issue(conn, issue)?;
     Ok(())
 }
 
-pub fn upsert_comment(_conn: &Connection, _comment: &CommentRow) -> Result<()> {
-    _conn.execute(
+pub fn upsert_comment(conn: &Connection, comment: &CommentRow) -> Result<()> {
+    conn.execute(
         "
         INSERT INTO comments (id, issue_id, author, author_type, body, created_at, last_accessed_at)
         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)
@@ -152,42 +152,42 @@ pub fn upsert_comment(_conn: &Connection, _comment: &CommentRow) -> Result<()> {
             last_accessed_at = excluded.last_accessed_at
         ",
         (
-            _comment.id,
-            _comment.issue_id,
-            _comment.author.as_str(),
-            _comment.body.as_str(),
-            _comment.created_at.as_deref(),
-            _comment.last_accessed_at,
+            comment.id,
+            comment.issue_id,
+            comment.author.as_str(),
+            comment.body.as_str(),
+            comment.created_at.as_deref(),
+            comment.last_accessed_at,
         ),
     )?;
 
-    index_comment(_conn, _comment)?;
+    index_comment(conn, comment)?;
     Ok(())
 }
 
-pub fn update_comment_body_by_id(_conn: &Connection, _comment_id: i64, _body: &str) -> Result<()> {
-    _conn.execute(
+pub fn update_comment_body_by_id(conn: &Connection, comment_id: i64, body: &str) -> Result<()> {
+    conn.execute(
         "UPDATE comments SET body = ?1 WHERE id = ?2",
-        (_body, _comment_id),
+        (body, comment_id),
     )?;
-    _conn.execute(
+    conn.execute(
         "UPDATE fts_content SET body = ?1 WHERE comment_id = ?2",
-        (_body, _comment_id),
+        (body, comment_id),
     )?;
     Ok(())
 }
 
-pub fn delete_comment_by_id(_conn: &Connection, _comment_id: i64) -> Result<()> {
-    _conn.execute("DELETE FROM comments WHERE id = ?1", [_comment_id])?;
-    _conn.execute(
+pub fn delete_comment_by_id(conn: &Connection, comment_id: i64) -> Result<()> {
+    conn.execute("DELETE FROM comments WHERE id = ?1", [comment_id])?;
+    conn.execute(
         "DELETE FROM fts_content WHERE comment_id = ?1",
-        [_comment_id],
+        [comment_id],
     )?;
     Ok(())
 }
 
-pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
-    let mut statement = _conn.prepare(
+pub fn list_issues(conn: &Connection, repo_id: i64) -> Result<Vec<IssueRow>> {
+    let mut statement = conn.prepare(
         "
         SELECT id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
         FROM issues
@@ -196,7 +196,7 @@ pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
         ",
     )?;
 
-    let rows = statement.query_map([_repo_id], |row| {
+    let rows = statement.query_map([repo_id], |row| {
         let is_pr_value: i64 = row.get(10)?;
         Ok(IssueRow {
             id: row.get(0)?,
@@ -220,8 +220,8 @@ pub fn list_issues(_conn: &Connection, _repo_id: i64) -> Result<Vec<IssueRow>> {
     Ok(issues)
 }
 
-pub fn comments_for_issue(_conn: &Connection, _issue_id: i64) -> Result<Vec<CommentRow>> {
-    let mut statement = _conn.prepare(
+pub fn comments_for_issue(conn: &Connection, issue_id: i64) -> Result<Vec<CommentRow>> {
+    let mut statement = conn.prepare(
         "
         SELECT id, issue_id, author, body, created_at, last_accessed_at
         FROM comments
@@ -230,7 +230,7 @@ pub fn comments_for_issue(_conn: &Connection, _issue_id: i64) -> Result<Vec<Comm
         ",
     )?;
 
-    let rows = statement.query_map([_issue_id], |row| {
+    let rows = statement.query_map([issue_id], |row| {
         Ok(CommentRow {
             id: row.get(0)?,
             issue_id: row.get(1)?,
@@ -248,15 +248,15 @@ pub fn comments_for_issue(_conn: &Connection, _issue_id: i64) -> Result<Vec<Comm
     Ok(comments)
 }
 
-pub fn search_issues(_conn: &Connection, _query: &str) -> Result<Vec<IssueRow>> {
-    let mut statement = _conn.prepare(
+pub fn search_issues(conn: &Connection, query: &str) -> Result<Vec<IssueRow>> {
+    let mut statement = conn.prepare(
         "
         SELECT issue_id
         FROM fts_content
         WHERE fts_content MATCH ?1
         ",
     )?;
-    let rows = statement.query_map([_query], |row| row.get::<_, i64>(0))?;
+    let rows = statement.query_map([query], |row| row.get::<_, i64>(0))?;
 
     let mut issue_ids = Vec::new();
     for row in rows {
@@ -270,12 +270,12 @@ pub fn search_issues(_conn: &Connection, _query: &str) -> Result<Vec<IssueRow>> 
     issue_ids.sort_unstable();
     issue_ids.dedup();
 
-    let issues = fetch_issues_by_ids(_conn, &issue_ids)?;
+    let issues = fetch_issues_by_ids(conn, &issue_ids)?;
     Ok(issues)
 }
 
-pub fn upsert_local_repo(_conn: &Connection, _repo: &LocalRepoRow) -> Result<()> {
-    _conn.execute(
+pub fn upsert_local_repo(conn: &Connection, repo: &LocalRepoRow) -> Result<()> {
+    conn.execute(
         "
         INSERT INTO local_repos (
             path, remote_name, owner, repo, url, last_seen, last_scanned
@@ -289,20 +289,20 @@ pub fn upsert_local_repo(_conn: &Connection, _repo: &LocalRepoRow) -> Result<()>
             last_scanned = excluded.last_scanned
         ",
         (
-            _repo.path.as_str(),
-            _repo.remote_name.as_str(),
-            _repo.owner.as_str(),
-            _repo.repo.as_str(),
-            _repo.url.as_str(),
-            _repo.last_seen.as_deref(),
-            _repo.last_scanned.as_deref(),
+            repo.path.as_str(),
+            repo.remote_name.as_str(),
+            repo.owner.as_str(),
+            repo.repo.as_str(),
+            repo.url.as_str(),
+            repo.last_seen.as_deref(),
+            repo.last_scanned.as_deref(),
         ),
     )?;
     Ok(())
 }
 
-pub fn list_local_repos(_conn: &Connection) -> Result<Vec<LocalRepoRow>> {
-    let mut statement = _conn.prepare(
+pub fn list_local_repos(conn: &Connection) -> Result<Vec<LocalRepoRow>> {
+    let mut statement = conn.prepare(
         "
         SELECT path, remote_name, owner, repo, url, last_seen, last_scanned
         FROM local_repos
@@ -328,8 +328,8 @@ pub fn list_local_repos(_conn: &Connection) -> Result<Vec<LocalRepoRow>> {
     Ok(repos)
 }
 
-pub fn get_repo_by_slug(_conn: &Connection, _owner: &str, _repo: &str) -> Result<Option<RepoRow>> {
-    let mut statement = _conn.prepare(
+pub fn get_repo_by_slug(conn: &Connection, owner: &str, repo: &str) -> Result<Option<RepoRow>> {
+    let mut statement = conn.prepare(
         "
         SELECT id, owner, name, updated_at, etag
         FROM repos
@@ -337,7 +337,7 @@ pub fn get_repo_by_slug(_conn: &Connection, _owner: &str, _repo: &str) -> Result
         LIMIT 1
         ",
     )?;
-    let mut rows = statement.query([_owner, _repo])?;
+    let mut rows = statement.query([owner, repo])?;
     let row = rows.next()?;
     let row = match row {
         Some(row) => row,
@@ -352,36 +352,36 @@ pub fn get_repo_by_slug(_conn: &Connection, _owner: &str, _repo: &str) -> Result
     }))
 }
 
-pub fn update_issue_comments_count(_conn: &Connection, _issue_id: i64, _count: i64) -> Result<()> {
-    _conn.execute(
+pub fn update_issue_comments_count(conn: &Connection, issue_id: i64, count: i64) -> Result<()> {
+    conn.execute(
         "UPDATE issues SET comments_count = ?1 WHERE id = ?2",
-        (_count, _issue_id),
+        (count, issue_id),
     )?;
     Ok(())
 }
 
-pub fn touch_comments_for_issue(_conn: &Connection, _issue_id: i64, _timestamp: i64) -> Result<()> {
-    _conn.execute(
+pub fn touch_comments_for_issue(conn: &Connection, issue_id: i64, timestamp: i64) -> Result<()> {
+    conn.execute(
         "UPDATE comments SET last_accessed_at = ?1 WHERE issue_id = ?2",
-        (_timestamp, _issue_id),
+        (timestamp, issue_id),
     )?;
     Ok(())
 }
 
-pub fn prune_comments(_conn: &Connection, _ttl_seconds: i64, _max_count: i64) -> Result<()> {
-    let cutoff = comment_now_epoch() - _ttl_seconds;
-    _conn.execute(
+pub fn prune_comments(conn: &Connection, ttl_seconds: i64, max_count: i64) -> Result<()> {
+    let cutoff = comment_now_epoch() - ttl_seconds;
+    conn.execute(
         "DELETE FROM comments WHERE last_accessed_at IS NOT NULL AND last_accessed_at < ?1",
         [cutoff],
     )?;
 
-    let total: i64 = _conn.query_row("SELECT COUNT(*) FROM comments", [], |row| row.get(0))?;
-    if total <= _max_count {
+    let total: i64 = conn.query_row("SELECT COUNT(*) FROM comments", [], |row| row.get(0))?;
+    if total <= max_count {
         return Ok(());
     }
 
-    let to_delete = total - _max_count;
-    _conn.execute(
+    let to_delete = total - max_count;
+    conn.execute(
         "
         DELETE FROM comments
         WHERE id IN (
@@ -540,8 +540,8 @@ fn configure_connection(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn apply_migrations(_conn: &Connection) -> Result<()> {
-    _conn.execute_batch(
+fn apply_migrations(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
         "
         PRAGMA foreign_keys = ON;
 
@@ -600,8 +600,8 @@ fn apply_migrations(_conn: &Connection) -> Result<()> {
         );
         ",
     )?;
-    add_comment_accessed_column(_conn)?;
-    add_issue_comments_count_column(_conn)?;
+    add_comment_accessed_column(conn)?;
+    add_issue_comments_count_column(conn)?;
     Ok(())
 }
 

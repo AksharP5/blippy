@@ -8,13 +8,13 @@ pub enum CliCommand {
     Version,
 }
 
-pub fn parse_args(_args: &[String]) -> Result<Option<CliCommand>> {
-    if _args.len() <= 1 {
+pub fn parse_args(args: &[String]) -> Result<Option<CliCommand>> {
+    if args.len() <= 1 {
         return Ok(None);
     }
 
-    let command = _args.get(1).map(String::as_str);
-    let subcommand = _args.get(2).map(String::as_str);
+    let command = args.get(1).map(String::as_str);
+    let subcommand = args.get(2).map(String::as_str);
 
     if command == Some("--version") || command == Some("-V") {
         return Ok(Some(CliCommand::Version));

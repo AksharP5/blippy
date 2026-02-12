@@ -13,8 +13,8 @@ pub struct RemoteInfo {
     pub slug: RepoSlug,
 }
 
-pub fn parse_remote_url(_url: &str) -> Option<RepoSlug> {
-    let url = _url.trim();
+pub fn parse_remote_url(url: &str) -> Option<RepoSlug> {
+    let url = url.trim();
     if url.is_empty() {
         return None;
     }
@@ -40,9 +40,9 @@ pub fn parse_remote_url(_url: &str) -> Option<RepoSlug> {
     None
 }
 
-pub fn parse_remotes_output(_output: &str) -> Vec<RemoteInfo> {
+pub fn parse_remotes_output(output: &str) -> Vec<RemoteInfo> {
     let mut remotes = Vec::new();
-    for line in _output.lines() {
+    for line in output.lines() {
         let mut parts = line.split_whitespace();
         let name = match parts.next() {
             Some(value) => value,
@@ -75,10 +75,10 @@ pub fn repo_root() -> Result<Option<std::path::PathBuf>> {
     repo_root_at(std::path::Path::new("."))
 }
 
-fn repo_root_at(_path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
+fn repo_root_at(path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
     let output = std::process::Command::new("git")
         .arg("-C")
-        .arg(_path)
+        .arg(path)
         .args(["rev-parse", "--show-toplevel"])
         .output();
 
@@ -105,10 +105,10 @@ fn repo_root_at(_path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
     Ok(Some(std::path::PathBuf::from(trimmed)))
 }
 
-pub fn list_github_remotes_at(_path: &std::path::Path) -> Result<Vec<RemoteInfo>> {
+pub fn list_github_remotes_at(path: &std::path::Path) -> Result<Vec<RemoteInfo>> {
     let output = std::process::Command::new("git")
         .arg("-C")
-        .arg(_path)
+        .arg(path)
         .args(["remote", "-v"])
         .output();
 
