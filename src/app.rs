@@ -35,7 +35,6 @@ pub enum AppAction {
     OpenLinkedPullRequestInTui,
     OpenLinkedIssueInBrowser,
     OpenLinkedIssueInTui,
-    CopyStatus,
     CloseIssue,
     ReopenIssue,
     AddIssueComment,
@@ -1204,18 +1203,6 @@ impl App {
             return;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if key.code == KeyCode::Char('y') {
-                self.action = Some(AppAction::CopyStatus);
-                return;
-            }
-            if key.code == KeyCode::Char('u') {
-                self.page_up();
-                return;
-            }
-            if key.code == KeyCode::Char('d') {
-                self.page_down();
-                return;
-            }
             if self.handle_focus_key(key.code) {
                 return;
             }
@@ -3010,18 +2997,6 @@ impl App {
         }
     }
 
-    fn page_up(&mut self) {
-        for _ in 0..10 {
-            self.move_selection_up();
-        }
-    }
-
-    fn page_down(&mut self) {
-        for _ in 0..10 {
-            self.move_selection_down();
-        }
-    }
-
     fn jump_next_comment(&mut self) {
         let offsets = self.comment_offsets();
         if offsets.is_empty() || self.selected_comment + 1 >= offsets.len() {
@@ -4363,15 +4338,6 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT));
 
         assert_eq!(app.take_action(), Some(AppAction::OpenLinkedIssueInTui));
-    }
-
-    #[test]
-    fn ctrl_y_triggers_copy_status_action() {
-        let mut app = App::new(Config::default());
-
-        app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
-
-        assert_eq!(app.take_action(), Some(AppAction::CopyStatus));
     }
 
     #[test]

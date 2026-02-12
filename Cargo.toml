@@ -2,7 +2,7 @@
 name = "blippy"
 version = "0.1.1"
 edition = "2024"
-description = "Maintainer-first TUI for triaging GitHub issues and pull requests"
+description = "GitHub in your terminal"
 homepage = "https://github.com/AksharP5/blippy"
 repository = "https://github.com/AksharP5/blippy"
 

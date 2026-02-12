@@ -1,180 +1,100 @@
 # blippy
 
-Maintainer-first TUI for triaging GitHub Issues and PRs.
+GitHub in your terminal.
+
+blippy is a keyboard-first TUI for GitHub issues and pull requests.
 
 ## Requirements
-- Rust toolchain (Rust 1.93+ recommended)
-- GitHub CLI (optional, used for auth if available)
-- OS keychain available (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 
-## Quick Start
-```bash
-cargo run
-```
-
-Press `q` to quit.
+- Rust toolchain (`1.93+` recommended) for source builds
+- GitHub CLI (`gh`) is heavily recommended for the best workflow (auth fallback, PR checkout, and smoother GitHub integration)
+- OS keychain support (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 
 ## Install
 
 ### npm (global)
+
 ```bash
 npm i -g blippy
 ```
 
 ### Homebrew
+
 ```bash
 brew install AksharP5/tap/blippy
 ```
 
 ### Shell installer (macOS/Linux)
+
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/AksharP5/blippy/releases/latest/download/blippy-installer.sh | sh
 ```
 
 ### PowerShell installer (Windows)
+
 ```powershell
 irm https://github.com/AksharP5/blippy/releases/latest/download/blippy-installer.ps1 | iex
 ```
 
 ### Build from source
+
 ```bash
 cargo install --git https://github.com/AksharP5/blippy
 ```
 
-## Authentication (v0.1)
-On startup, auth is resolved in this order:
-1. `gh auth token --hostname github.com`
-2. OS keychain (`service=blippy`, `account=github.com`)
-3. Prompt for PAT (input hidden), then store in keychain
+## CLI Commands
 
-Tokens are never written to config or db.
+- `blippy`: launch the TUI
+- `blippy sync`: scan local repos and cache GitHub remotes
+- `blippy auth reset`: remove stored auth token from keychain
+- `blippy cache reset`: remove local cache database
 
-## Personal Access Token (PAT)
-If prompted for a PAT, create one in GitHub settings:
+## What You Can Do
 
-### Fine-grained token (recommended by GitHub)
-Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token
+- Browse and manage issues and pull requests
+- Open linked issues/PRs in TUI or browser
+- Review PR diffs with inline comments and thread resolution
+- Edit labels and assignees (when repository permissions allow)
+- Customize themes, keybindings, and close-comment presets
 
-Suggested permissions:
-- Repository metadata: Read
-- Issues: Read/Write
-- Pull requests: Read/Write
+See `FEATURES.md` for a full feature breakdown.
 
-### Classic token (simpler)
-Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token
+## Keyboard and Mouse
 
-Suggested scopes:
-- `repo` (required for private repos and full Issues/PR access)
-- `read:org` (needed if you access org repositories)
+- blippy prioritizes keyboard workflows for reliability
+- Mouse/trackpad support exists, but it can be finicky
+- Full key reference: `KEYBINDS.md`
 
-## Testing Auth
-```bash
-gh auth status
-gh auth token --hostname github.com
-```
+## Configuration
 
-To see which auth source was used (development only):
-```bash
-BLIPPY_AUTH_DEBUG=1 cargo run
-```
+- Config file: `~/.config/blippy/config.toml`
+- Keybind overrides: `~/.config/blippy/keybinds.toml`
+- Example keybind file: `keybinds.example.toml`
 
-To force the PAT prompt:
-- Temporarily log out of GitHub CLI: `gh auth logout`
-- Remove the keychain entry for `blippy` / `github.com` using your OS keychain UI
-
-To reset stored auth from the CLI:
-```bash
-blippy auth reset
-```
-
-## Tests
-```bash
-cargo test
-```
-
-## Cache
-- Cache lives in your OS user data directory as `blippy.db`
-- Reset cache: `blippy cache reset`
-
-## Sync
-- Run `blippy sync` to scan local repos and cache GitHub remotes
-- Issues are fetched when you open a repo in the TUI
-
-## Navigation
-- Ctrl+G: open repo picker
-- Ctrl+R: rescan repos
-- / in repo picker: search repos (owner/repo/path/remote)
-- Ctrl+h/j/k/l: switch focus between panes (issues list/preview, issue description/recent comments)
-- j/k: move or scroll focused pane
-- Ctrl+u / Ctrl+d: page up/down in focused pane
-- gg/G: jump top/bottom in focused pane
-- p: toggle issues / pull requests list mode
-- f: cycle issue filter (open/closed)
-- 1/2: switch issue tab (open/closed)
-- a: cycle assignee filter (all/unassigned/users)
-- /: search issues by number/title/body/labels/assignees (Enter keep, Esc clear)
-- m: add comment to selected issue
-- l: edit issue labels (comma-separated)
-- Shift+A: edit issue assignees
-- u: reopen selected closed issue/pull request
-- Enter: open selected issue
-- r: refresh issues/comments
-- o: open in browser
-- Shift+P: open linked pull request for selected issue in TUI
-- Shift+O: open linked pull request for selected issue in browser
-- v: checkout selected pull request locally (`gh pr checkout`)
-- dd: close selected issue/pull request with preset
-- c: open full comments from detail view
-- j/k: jump next/previous comment in full comments view
-- e: edit selected comment in full comments view
-- x: delete selected comment in full comments view
-- PR detail: right pane shows changed files + patch snippets (no checkout required)
-- Enter on PR changes pane: open full-screen PR changes viewer
-- PR review view: Ctrl+h/l switch files/diff, j/k navigate, w mark/unmark file viewed on GitHub, m add inline GitHub review comment
-- PR review view: h/l choose old/new side, z collapse/expand current hunk, Shift+V visual multiline range, e edit, x delete, Shift+R resolve/reopen thread on GitHub, n/p cycle comments on selected line
-- PR review view: `[`/`]` pan horizontally for long lines, `0` resets horizontal pan
-- Ctrl+y: copy current status message to clipboard
-- b or Esc: back from issue detail/comments
-- Mouse/trackpad: wheel scrolls lists/diffs, horizontal wheel pans PR diff, click rows to select/open, click global `[Repos]`, click `[Back]`, `[Files]`, `[Diff]`, Open/Closed tabs, and picker `[Apply]/[Cancel]`
-- comment editor: `Enter` submit, `Shift+Enter` newline (`Ctrl+j` fallback)
-
-Search supports simple GitHub-like qualifiers:
-- `is:open` or `is:closed`
-- `label:bug`
-- `assignee:alex`
-- `assignee:none` for unassigned
-- `#123` for exact issue number
-
-## Comment Defaults
-Configure close/comment presets in `config.toml`:
-```toml
-[[comment_defaults]]
-name = "close_default"
-body = "Closing this issue as resolved."
-```
-
-## Themes
-blippy supports built-in UI themes via `~/.config/blippy/config.toml`:
+Theme example:
 
 ```toml
 theme = "midnight"
 ```
 
 Available built-in themes:
+
 - `github_dark` (default)
 - `midnight`
 - `graphite`
 
-## Keybind Configuration
-- Every keyboard shortcut can be overridden.
-- Copy `keybinds.example.toml` to `~/.config/blippy/keybinds.toml` and edit values.
-- You can also place the same `[keybinds]` table inside `~/.config/blippy/config.toml`.
+Comment preset example:
 
-Example:
 ```toml
-[keybinds]
-quit = "ctrl+q"
-refresh = "ctrl+s"
-diff_scroll_left = "alt+h"
-diff_scroll_right = "alt+l"
+[[comment_defaults]]
+name = "close_default"
+body = "Closing this issue as resolved."
 ```
+
+## Documentation
+
+- Authentication and PAT setup: `AUTH.md`
+- Feature guide: `FEATURES.md`
+- Key reference: `KEYBINDS.md`
+- Contributing guide: `CONTRIBUTING.md`
+- Release history: `CHANGELOG.md` 

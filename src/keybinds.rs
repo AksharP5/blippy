@@ -196,21 +196,6 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         description: "Checkout selected pull request",
     },
     BindingSpec {
-        action: "copy_status",
-        default: "ctrl+y",
-        description: "Copy status text",
-    },
-    BindingSpec {
-        action: "page_up",
-        default: "ctrl+u",
-        description: "Page up",
-    },
-    BindingSpec {
-        action: "page_down",
-        default: "ctrl+d",
-        description: "Page down",
-    },
-    BindingSpec {
         action: "focus_left",
         default: "ctrl+h",
         description: "Move pane focus left",

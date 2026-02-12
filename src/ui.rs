@@ -2491,23 +2491,10 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
     let status = app.status();
     let context = status_context(app);
     let help_raw = primary_help_text(app);
-    let width = area.width as usize;
     let sync_label = format!("[{}]", sync);
     let mode_badge = format!("{:^10}", mode);
     let mode_badge_width = mode_badge.chars().count();
     let status_text = if status.is_empty() { "ready" } else { status };
-
-    let fixed_width = mode_badge.chars().count() + 1 + sync_label.chars().count() + 1;
-    let remaining = width.saturating_sub(fixed_width);
-    let status_max = remaining.min(36);
-    let status_fit = fit_inline(status_text, status_max);
-    let after_status = remaining.saturating_sub(status_fit.chars().count());
-    let context_max = after_status.saturating_sub(3).min(34);
-    let context_fit = fit_inline(context.as_str(), context_max);
-    let after_context = after_status
-        .saturating_sub(context_fit.chars().count())
-        .saturating_sub(3);
-    let help_fit = fit_help_tokens(help_raw.as_str(), after_context);
 
     let mut spans = vec![Span::styled(
         mode_badge,
@@ -2523,24 +2510,21 @@ fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePa
             .fg(sync_state_color(sync, theme))
             .add_modifier(Modifier::BOLD),
     ));
-    if !status_fit.is_empty() {
+    if !status_text.is_empty() {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
-            status_fit,
+            status_text,
             Style::default().fg(theme.text_primary),
         ));
     }
-    if !context_fit.is_empty() {
+    if !context.is_empty() {
         spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
-        spans.push(Span::styled(
-            context_fit,
-            Style::default().fg(theme.text_muted),
-        ));
+        spans.push(Span::styled(context, Style::default().fg(theme.text_muted)));
     }
-    if !help_fit.is_empty() {
+    if !help_raw.is_empty() {
         spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
         spans.push(Span::styled(
-            help_fit,
+            help_raw,
             Style::default().fg(theme.text_muted),
         ));
     }
@@ -2993,7 +2977,7 @@ fn help_text(app: &App) -> String {
                 return "Search repos: type query • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+R rescan • j/k move • Ctrl+u/d page • gg/G top/bottom • / search • Enter select • q quit"
+            "Ctrl+R rescan • j/k move • gg/G top/bottom • / search • Enter select • q quit"
                 .to_string()
         }
         View::RemoteChooser => {
@@ -3184,32 +3168,6 @@ fn fit_inline(value: &str, max: usize) -> String {
         return value.to_string();
     }
     ellipsize(value, max)
-}
-
-fn fit_help_tokens(value: &str, max: usize) -> String {
-    if max == 0 {
-        return String::new();
-    }
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let parts = value.split(" • ").collect::<Vec<&str>>();
-    if parts.is_empty() {
-        return fit_inline(value, max);
-    }
-    let mut compact = String::new();
-    for part in parts {
-        let separator = if compact.is_empty() { "" } else { " • " };
-        let next = format!("{}{}", separator, part);
-        if compact.chars().count() + next.chars().count() > max {
-            break;
-        }
-        compact.push_str(next.as_str());
-    }
-    if compact.is_empty() {
-        return fit_inline(value, max);
-    }
-    fit_inline(compact.as_str(), max)
 }
 
 fn list_state(selected: usize) -> ListState {

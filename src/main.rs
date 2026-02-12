@@ -16,7 +16,7 @@ mod ui;
 
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::io::{self, Stdout, Write};
+use std::io::{self, Stdout};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -442,9 +442,6 @@ fn handle_actions(
             if !try_open_cached_linked_issue(app, conn, LinkedIssueTarget::Tui)? {
                 open_linked_issue(app, token, event_tx.clone(), LinkedIssueTarget::Tui)?;
             }
-        }
-        AppAction::CopyStatus => {
-            copy_status_to_clipboard(app)?;
         }
         AppAction::AddIssueComment => {
             let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
@@ -1451,64 +1448,6 @@ fn current_git_head(working_dir: &str) -> Option<String> {
         return None;
     }
     Some(value)
-}
-
-fn copy_status_to_clipboard(app: &mut App) -> Result<()> {
-    let status = app.status().trim();
-    if status.is_empty() {
-        app.set_status("No status text to copy".to_string());
-        return Ok(());
-    }
-
-    match write_clipboard(status) {
-        Ok(()) => app.set_status("Copied status to clipboard".to_string()),
-        Err(error) => app.set_status(format!("Clipboard copy failed: {}", error)),
-    }
-    Ok(())
-}
-
-fn write_clipboard(value: &str) -> Result<()> {
-    if cfg!(target_os = "macos") {
-        let mut child = std::process::Command::new("pbcopy")
-            .stdin(std::process::Stdio::piped())
-            .spawn()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(value.as_bytes())?;
-        }
-        let status = child.wait()?;
-        if status.success() {
-            return Ok(());
-        }
-        anyhow::bail!("pbcopy exited with status {}", status);
-    }
-
-    if cfg!(target_os = "windows") {
-        let mut child = std::process::Command::new("clip")
-            .stdin(std::process::Stdio::piped())
-            .spawn()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(value.as_bytes())?;
-        }
-        let status = child.wait()?;
-        if status.success() {
-            return Ok(());
-        }
-        anyhow::bail!("clip exited with status {}", status);
-    }
-
-    let mut child = std::process::Command::new("xclip")
-        .args(["-selection", "clipboard"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(value.as_bytes())?;
-    }
-    let status = child.wait()?;
-    if status.success() {
-        return Ok(());
-    }
-
-    anyhow::bail!("clipboard command exited with status {}", status)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

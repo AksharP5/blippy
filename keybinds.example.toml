@@ -6,7 +6,7 @@
 #
 # Values support:
 # - single chars: "q", "/", "1"
-# - named keys: "enter", "esc", "space", "left", "right", "home", "up", "down"
+# - named keys: "enter", "esc", "tab", "space", "left", "right", "home", "end", "up", "down", "pageup", "pagedown", "backspace"
 # - modifiers: "ctrl+...", "alt+...", "shift+..."
 
 [keybinds]
@@ -15,7 +15,7 @@ clear_and_repo_picker = "ctrl+g"
 
 repo_search = "/"
 issue_search = "/"
-cycle_issue_filter = "f"
+cycle_issue_filter = "tab"
 toggle_work_item_mode = "p"
 cycle_assignee_filter = "a"
 issue_filter_open = "1"
@@ -28,7 +28,7 @@ open_comments = "c"
 
 add_comment = "m"
 toggle_file_viewed = "w"
-collapse_hunk = "z"
+collapse_hunk = "c"
 edit_comment = "e"
 delete_comment = "x"
 resolve_thread = "shift+r"
@@ -53,9 +53,6 @@ open_linked_pr_browser = "shift+o"
 open_linked_pr_tui = "shift+p"
 checkout_pr = "v"
 
-copy_status = "ctrl+y"
-page_up = "ctrl+u"
-page_down = "ctrl+d"
 focus_left = "ctrl+h"
 focus_right = "ctrl+l"
 rescan_repos = "ctrl+r"
