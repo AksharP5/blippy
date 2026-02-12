@@ -2630,7 +2630,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Enter", "Open selected repository"),
             ("Ctrl+R", "Rescan repositories"),
             ("Ctrl+G", "Open repository picker"),
-            ("q", "Quit"),
+            ("Ctrl+C", "Quit"),
         ],
         View::Issues => vec![
             ("j / k", "Move issues"),
@@ -2704,7 +2704,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("j / k", "Move presets"),
             ("Enter", "Select preset"),
             ("Esc", "Cancel"),
-            ("q", "Quit"),
+            ("Ctrl+C", "Quit"),
             ("?", "Toggle help"),
         ],
         View::CommentPresetName => vec![
@@ -2712,7 +2712,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Enter", "Continue"),
             ("Esc", "Cancel"),
             ("?", "Toggle help"),
-            ("q", "Quit"),
+            ("Ctrl+C", "Quit"),
         ],
         View::CommentEditor => vec![
             ("Type", "Edit body"),
@@ -2725,7 +2725,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("j / k", "Move remotes"),
             ("Enter", "Select remote"),
             ("Ctrl+G", "Back to repos"),
-            ("q", "Quit"),
+            ("Ctrl+C", "Quit"),
             ("?", "Toggle help"),
         ],
     }
@@ -2977,11 +2977,11 @@ fn help_text(app: &App) -> String {
                 return "Search repos: type query • Enter keep • Esc clear • Ctrl+u clear"
                     .to_string();
             }
-            "Ctrl+R rescan • j/k move • gg/G top/bottom • / search • Enter select • q quit"
+            "Ctrl+R rescan • j/k move • gg/G top/bottom • / search • Enter select • Ctrl+C quit"
                 .to_string()
         }
         View::RemoteChooser => {
-            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • q quit".to_string()
+            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • Ctrl+C quit".to_string()
         }
         View::Issues => {
             if app.issue_search_mode() {
@@ -3005,7 +3005,7 @@ fn help_text(app: &App) -> String {
                 "m comment",
                 "r refresh",
                 "o browser",
-                "q quit",
+                "Ctrl+C quit",
             ];
             if reviewing_pr {
                 parts.insert(10, "u reopen");
@@ -3031,17 +3031,17 @@ fn help_text(app: &App) -> String {
                 } else {
                     "Shift+P find/open linked issue • Shift+O open linked issue (web)"
                 };
-                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • q quit"
+                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
                     .replace(
                         "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
                         linked_hint,
                     );
             }
             if app.selected_issue_has_known_linked_pr() {
-                return "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • q quit"
+                return "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • Ctrl+C quit"
                     .to_string();
             }
-            "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • q quit"
+            "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • Ctrl+C quit"
                 .to_string()
         }
         View::IssueComments => {
@@ -3052,17 +3052,17 @@ fn help_text(app: &App) -> String {
                 } else {
                     "Shift+P find/open linked issue • Shift+O open linked issue (web)"
                 };
-                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • q quit"
+                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
                     .replace(
                         "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
                         linked_hint,
                     );
             }
             if app.selected_issue_has_known_linked_pr() {
-                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • q quit"
+                return "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • Ctrl+C quit"
                     .to_string();
             }
-            "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • q quit"
+            "j/k comments • e edit • x delete • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • Ctrl+C quit"
                 .to_string()
         }
         View::PullRequestFiles => {
@@ -3076,7 +3076,7 @@ fn help_text(app: &App) -> String {
                 "Enter full diff"
             };
             format!(
-                "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • q quit",
+                "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Ctrl+C quit",
                 toggle_hint
             )
         }
@@ -3089,7 +3089,7 @@ fn help_text(app: &App) -> String {
                 .to_string()
         }
         View::CommentPresetPicker => {
-            "j/k move • gg/G top/bottom • Enter select • Esc cancel • q quit".to_string()
+            "j/k move • gg/G top/bottom • Enter select • Esc cancel • Ctrl+C quit".to_string()
         }
         View::CommentPresetName => "Type name • Enter next • Esc cancel".to_string(),
         View::CommentEditor => {

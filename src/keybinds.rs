@@ -12,7 +12,7 @@ pub struct BindingSpec {
 pub const BINDING_SPECS: &[BindingSpec] = &[
     BindingSpec {
         action: "quit",
-        default: "q",
+        default: "ctrl+c",
         description: "Quit app",
     },
     BindingSpec {
@@ -435,11 +435,11 @@ mod tests {
         let remapped = keybinds
             .remap_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL))
             .expect("remapped key");
-        assert_eq!(remapped.code, KeyCode::Char('q'));
-        assert!(remapped.modifiers.is_empty());
+        assert_eq!(remapped.code, KeyCode::Char('c'));
+        assert!(remapped.modifiers.contains(KeyModifiers::CONTROL));
 
         let disabled_default =
-            keybinds.remap_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+            keybinds.remap_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(disabled_default.is_none());
     }
 }

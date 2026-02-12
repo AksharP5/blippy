@@ -10,7 +10,7 @@
 # - modifiers: "ctrl+...", "alt+...", "shift+..."
 
 [keybinds]
-quit = "q"
+quit = "ctrl+c"
 clear_and_repo_picker = "ctrl+g"
 
 repo_search = "/"

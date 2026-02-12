@@ -1225,7 +1225,9 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.should_quit = true
+            }
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.open_repo_picker();
             }
@@ -4751,7 +4753,7 @@ mod tests {
             .insert("quit".to_string(), "ctrl+q".to_string());
         let mut app = App::new(config);
 
-        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!app.should_quit());
 
         app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));

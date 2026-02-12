@@ -4,7 +4,7 @@ blippy is keyboard-first. Mouse/trackpad support exists, but it can be finicky a
 
 ## Global
 
-- `q`: Quit
+- `Ctrl+c`: Quit
 - `?`: Toggle help overlay
 - `Ctrl+g`: Open repo picker
 - `Ctrl+h` / `Ctrl+l`: Switch pane focus in split views
@@ -145,7 +145,7 @@ All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or unde
 
 | Action | Default |
 | --- | --- |
-| `quit` | `q` |
+| `quit` | `ctrl+c` |
 | `clear_and_repo_picker` | `ctrl+g` |
 | `repo_search` | `/` |
 | `issue_search` | `/` |
