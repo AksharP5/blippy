@@ -16,7 +16,7 @@ Press `?` anytime to see available keybindings.
 
 Start by selecting a repository. Press `Ctrl+g` to open the picker.
 
-![Repository picker with search](images/repo-selector-blippy.png)
+![Repository picker with search](images/repo-view-blippy.png)
 
 ---
 
@@ -84,6 +84,12 @@ Closed PRs tab:
 View PR description and metadata.
 
 ![PR description](images/pr-desc-blippy.png)
+
+### PR Checkout
+
+Checkout PRs locally using `gh pr checkout`. Press `v` from any PR view:
+
+<video src="images/checkout-pr-video-blippy.mp4" controls></video>
 
 ### File Review
 

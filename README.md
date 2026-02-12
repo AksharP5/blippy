@@ -4,7 +4,7 @@ GitHub in your terminal.
 
 blippy is a keyboard-first TUI for GitHub issues and pull requests.
 
-![Repository picker showing the blippy interface](images/repo-selector-blippy.png)
+![Repository picker showing the blippy interface](images/repo-view-blippy.png)
 
 See the full [feature demo](DEMO.md) for more screenshots.
 
@@ -49,6 +49,7 @@ cargo install --git https://github.com/AksharP5/blippy
 ## CLI Commands
 
 - `blippy`: launch the TUI
+- `blippy --version`: show version information
 - `blippy sync`: scan local repos and cache GitHub remotes
 - `blippy auth reset`: remove stored auth token from keychain
 - `blippy cache reset`: remove local cache database
@@ -97,6 +98,7 @@ body = "Closing this issue as resolved."
 
 ## Documentation
 
+- Feature demo with screenshots: [DEMO.md](DEMO.md)
 - Authentication and PAT setup: [AUTH.md](AUTH.md)
 - Feature guide: [FEATURES.md](FEATURES.md)
 - Key reference: [KEYBINDS.md](KEYBINDS.md)

@@ -2,6 +2,8 @@
 
 blippy brings core GitHub issue and PR workflows into a terminal-first interface.
 
+See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities in action.
+
 ## Repository Discovery and Sync
 
 - Scans local git repositories and indexes GitHub remotes
