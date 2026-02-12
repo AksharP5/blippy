@@ -57,19 +57,19 @@ cargo install --git https://github.com/AksharP5/blippy
 - Edit labels and assignees (when repository permissions allow)
 - Customize themes, keybindings, and close-comment presets
 
-See `FEATURES.md` for a full feature breakdown.
+See [FEATURES.md](FEATURES.md) for a full feature breakdown.
 
 ## Keyboard and Mouse
 
 - blippy prioritizes keyboard workflows for reliability
 - Mouse/trackpad support exists, but it can be finicky
-- Full key reference: `KEYBINDS.md`
+- Full key reference: [KEYBINDS.md](KEYBINDS.md)
 
 ## Configuration
 
 - Config file: `~/.config/blippy/config.toml`
 - Keybind overrides: `~/.config/blippy/keybinds.toml`
-- Example keybind file: `keybinds.example.toml`
+- Example keybind file: [keybinds.example.toml](keybinds.example.toml)
 
 Theme example:
 
@@ -93,8 +93,8 @@ body = "Closing this issue as resolved."
 
 ## Documentation
 
-- Authentication and PAT setup: `AUTH.md`
-- Feature guide: `FEATURES.md`
-- Key reference: `KEYBINDS.md`
-- Contributing guide: `CONTRIBUTING.md`
-- Release history: `CHANGELOG.md` 
+- Authentication and PAT setup: [AUTH.md](AUTH.md)
+- Feature guide: [FEATURES.md](FEATURES.md)
+- Key reference: [KEYBINDS.md](KEYBINDS.md)
+- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Release history: [CHANGELOG.md](CHANGELOG.md)

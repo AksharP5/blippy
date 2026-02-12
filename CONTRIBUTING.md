@@ -42,14 +42,14 @@ cargo fmt
 ## Releases and Changelog
 
 - Releases are automated via GitHub Actions (`release-plz` + `cargo-dist`)
-- `CHANGELOG.md` is maintained by the release workflow
+- [CHANGELOG.md](CHANGELOG.md) is maintained by the release workflow
 - Do not manually hand-edit changelog entries for normal feature work
 
 ## Docs to Update with Feature Changes
 
 When behavior changes, update:
 
-- `README.md` for user-facing overview/install flow
-- `FEATURES.md` for capability-level changes
-- `KEYBINDS.md` for keyboard behavior updates
-- `AUTH.md` if authentication behavior changes
+- [README.md](README.md) for user-facing overview/install flow
+- [FEATURES.md](FEATURES.md) for capability-level changes
+- [KEYBINDS.md](KEYBINDS.md) for keyboard behavior updates
+- [AUTH.md](AUTH.md) if authentication behavior changes
