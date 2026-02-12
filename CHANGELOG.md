@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/AksharP5/blippy/compare/v0.1.1...v0.1.2) - 2026-02-12
+
+### Added
+
+- *(keybinds)* switch default quit shortcut to Ctrl+C
+
+### Other
+
+- add links
+- *(ui)* drop status-copy/page shortcuts and simplify footer line
+
 ## [0.1.1](https://github.com/AksharP5/blippy/compare/v0.1.0...v0.1.1) - 2026-02-12
 
 ### Fixed
