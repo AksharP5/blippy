@@ -27,7 +27,7 @@ brew install AksharP5/tap/blippy
 ### Shell installer (macOS/Linux)
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/AksharP5/blippy/releases/latest/download/blippy-installer.sh | sh
+curl -fsSL https://github.com/AksharP5/blippy/releases/latest/download/blippy-installer.sh | bash
 ```
 
 ### PowerShell installer (Windows)
