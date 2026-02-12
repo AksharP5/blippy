@@ -14,6 +14,33 @@ cargo run
 
 Press `q` to quit.
 
+## Install
+
+### npm (global)
+```bash
+npm i -g blippy
+```
+
+### Homebrew
+```bash
+brew install AksharP5/tap/blippy
+```
+
+### Shell installer (macOS/Linux)
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/AksharP5/blippy/releases/latest/download/blippy-installer.sh | sh
+```
+
+### PowerShell installer (Windows)
+```powershell
+irm https://github.com/AksharP5/blippy/releases/latest/download/blippy-installer.ps1 | iex
+```
+
+### Build from source
+```bash
+cargo install --git https://github.com/AksharP5/blippy
+```
+
 ## Authentication (v0.1)
 On startup, auth is resolved in this order:
 1. `gh auth token --hostname github.com`

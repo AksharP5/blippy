@@ -2,6 +2,9 @@
 name = "blippy"
 version = "0.1.0"
 edition = "2024"
+description = "Maintainer-first TUI for triaging GitHub issues and pull requests"
+homepage = "https://github.com/AksharP5/blippy"
+repository = "https://github.com/AksharP5/blippy"
 
 [dependencies]
 anyhow = "1.0"
@@ -17,3 +20,8 @@ serde_json = "1.0"
 tokio = { version = "1.39", features = ["rt-multi-thread", "macros", "time"] }
 async-trait = "0.1"
 pulldown-cmark = "0.12"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
