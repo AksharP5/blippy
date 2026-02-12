@@ -89,7 +89,7 @@ View PR description and metadata.
 
 Checkout PRs locally using `gh pr checkout`. Press `v` from any PR view:
 
-<video src="images/checkout-pr-video-blippy.mp4" controls></video>
+[Watch PR checkout demo video](images/checkout-pr-video-blippy.mp4)
 
 ### File Review
 
