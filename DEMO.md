@@ -2,6 +2,8 @@
 
 A visual walkthrough of blippy's features.
 
+https://github.com/user-attachments/assets/14daa99b-c39a-43d9-b32d-9d5a6840819f
+
 ---
 
 ## Getting Started
@@ -89,7 +91,7 @@ View PR description and metadata.
 
 Checkout PRs locally using `gh pr checkout`. Press `v` from any PR view:
 
-![PR checkout demo](images/checkout-pr-video-blippy.gif)
+https://github.com/user-attachments/assets/220e16e8-b659-44cb-b2c5-79fdef0fa228
 
 ### File Review
 

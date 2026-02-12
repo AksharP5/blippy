@@ -4,8 +4,6 @@ GitHub in your terminal.
 
 blippy is a keyboard-first TUI for GitHub issues and pull requests.
 
-![Repository picker showing the blippy interface](images/repo-view-blippy.png)
-
 https://github.com/user-attachments/assets/14daa99b-c39a-43d9-b32d-9d5a6840819f
 
 See the full [feature demo](DEMO.md) for more screenshots.
