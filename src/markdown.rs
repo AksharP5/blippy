@@ -13,7 +13,6 @@ const CODE_BG: Color = Color::Rgb(20, 26, 34);
 #[derive(Debug, Default)]
 pub struct RenderedMarkdown {
     pub lines: Vec<Line<'static>>,
-    pub links: Vec<String>,
 }
 
 pub fn render(input: &str) -> RenderedMarkdown {
@@ -28,16 +27,13 @@ pub fn render(input: &str) -> RenderedMarkdown {
         state.handle(event);
     }
 
-    let links = state.links.clone();
     let lines = state.finish();
-    RenderedMarkdown { lines, links }
+    RenderedMarkdown { lines }
 }
 
 struct RenderState {
     lines: Vec<Vec<Span<'static>>>,
     style_stack: Vec<Style>,
-    links: Vec<String>,
-    active_link: Option<usize>,
     list_depth: usize,
     blockquote_depth: usize,
     in_code_block: bool,
@@ -48,8 +44,6 @@ impl RenderState {
         Self {
             lines: vec![Vec::new()],
             style_stack: vec![Style::default()],
-            links: Vec::new(),
-            active_link: None,
             list_depth: 0,
             blockquote_depth: 0,
             in_code_block: false,
@@ -115,9 +109,7 @@ impl RenderState {
                 self.new_line();
                 self.push_style(Style::default().fg(ACCENT_GREEN).bg(CODE_BG));
             }
-            Tag::Link { dest_url, .. } => {
-                self.links.push(dest_url.to_string());
-                self.active_link = Some(self.links.len());
+            Tag::Link { .. } => {
                 self.push_style(
                     Style::default()
                         .fg(ACCENT_CYAN)
@@ -159,12 +151,6 @@ impl RenderState {
             }
             TagEnd::Link => {
                 self.pop_style();
-                if let Some(index) = self.active_link.take() {
-                    self.push_span(Span::styled(
-                        format!("[{}]", index),
-                        Style::default().fg(ACCENT_CYAN),
-                    ));
-                }
             }
             TagEnd::Paragraph => {
                 self.new_line();
@@ -265,12 +251,5 @@ mod tests {
         assert!(text.contains("Title"));
         assert!(text.contains("- one"));
         assert!(text.contains("- two"));
-    }
-
-    #[test]
-    fn captures_link_references() {
-        let markdown = "See [docs](https://example.com)";
-        let rendered = render(markdown);
-        assert_eq!(rendered.links, vec!["https://example.com".to_string()]);
     }
 }

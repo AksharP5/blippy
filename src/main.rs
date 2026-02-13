@@ -1239,27 +1239,6 @@ fn assignee_options_for_repo(app: &App) -> Vec<String> {
     assignees
 }
 
-fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
-    let mut values = Vec::new();
-    for raw in input.split(',') {
-        let mut value = raw.trim().to_string();
-        if strip_at {
-            value = value.trim_start_matches('@').to_string();
-        }
-        if value.is_empty() {
-            continue;
-        }
-        if values
-            .iter()
-            .any(|existing: &String| existing.eq_ignore_ascii_case(value.as_str()))
-        {
-            continue;
-        }
-        values.push(value);
-    }
-    values
-}
-
 fn issue_number(app: &App) -> Option<i64> {
     match app.view() {
         View::IssueDetail
@@ -4091,10 +4070,31 @@ impl Drop for TerminalGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{issue_url, parse_csv_values};
+    use super::issue_url;
     use crate::app::View;
     use crate::config::Config;
     use crate::store::IssueRow;
+
+    fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
+        let mut values = Vec::new();
+        for raw in input.split(',') {
+            let mut value = raw.trim().to_string();
+            if strip_at {
+                value = value.trim_start_matches('@').to_string();
+            }
+            if value.is_empty() {
+                continue;
+            }
+            if values
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(value.as_str()))
+            {
+                continue;
+            }
+            values.push(value);
+        }
+        values
+    }
 
     #[test]
     fn parse_csv_values_trims_dedupes_and_strips_at() {

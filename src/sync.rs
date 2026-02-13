@@ -92,15 +92,6 @@ pub fn map_comment_to_row(issue_id: i64, comment: &ApiComment) -> CommentRow {
     }
 }
 
-pub async fn sync_repo(
-    _client: &dyn GitHubApi,
-    _conn: &rusqlite::Connection,
-    _owner: &str,
-    _repo: &str,
-) -> Result<SyncStats> {
-    sync_repo_with_progress(_client, _conn, _owner, _repo, |_page, _stats| {}).await
-}
-
 pub async fn sync_repo_with_progress<F>(
     _client: &dyn GitHubApi,
     _conn: &rusqlite::Connection,
@@ -232,15 +223,25 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        GitHubApi, map_comment_to_row, map_issue_to_row, map_repo_to_row, sync_repo,
+        GitHubApi, SyncStats, map_comment_to_row, map_issue_to_row, map_repo_to_row,
         sync_repo_with_progress,
     };
     use crate::github::{ApiComment, ApiIssue, ApiIssuesPageResult, ApiLabel, ApiRepo, ApiUser};
     use crate::store::{comments_for_issue, get_repo_by_slug, list_issues, open_db_at};
+    use anyhow::Result;
     use async_trait::async_trait;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    async fn sync_repo(
+        client: &dyn GitHubApi,
+        conn: &rusqlite::Connection,
+        owner: &str,
+        repo: &str,
+    ) -> Result<SyncStats> {
+        sync_repo_with_progress(client, conn, owner, repo, |_page, _stats| {}).await
+    }
 
     #[test]
     fn map_repo_to_row_copies_owner_and_name() {
