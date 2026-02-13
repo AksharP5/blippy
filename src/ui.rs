@@ -1822,16 +1822,15 @@ fn draw_pull_request_files(
                     continue;
                 }
 
-                lines.push(render_split_diff_row(
-                    row,
+                let ctx = DiffRowContext {
                     selected,
                     in_visual_range,
-                    app.pull_request_review_side(),
+                    selected_side: app.pull_request_review_side(),
                     left_width,
                     right_width,
                     horizontal_offset,
-                    theme,
-                ));
+                };
+                lines.push(render_split_diff_row(row, &ctx, theme));
 
                 let target_right = row
                     .new_line
@@ -1844,16 +1843,18 @@ fn draw_pull_request_files(
                     })
                     .unwrap_or_default();
                 for comment in target_right {
-                    lines.push(render_inline_review_comment(
-                        comment.id,
-                        comment.author.as_str(),
-                        comment.body.as_str(),
-                        ReviewSide::Right,
-                        comment.resolved,
-                        panel_width,
+                    let ctx = CommentContext {
+                        side: ReviewSide::Right,
+                        resolved: comment.resolved,
+                        width: panel_width,
                         left_width,
                         right_width,
-                        app.selected_pull_request_review_comment_id() == Some(comment.id),
+                        selected: app.selected_pull_request_review_comment_id() == Some(comment.id),
+                    };
+                    lines.push(render_inline_review_comment(
+                        comment.author.as_str(),
+                        comment.body.as_str(),
+                        &ctx,
                         theme,
                     ));
                 }
@@ -1869,16 +1870,18 @@ fn draw_pull_request_files(
                     })
                     .unwrap_or_default();
                 for comment in target_left {
-                    lines.push(render_inline_review_comment(
-                        comment.id,
-                        comment.author.as_str(),
-                        comment.body.as_str(),
-                        ReviewSide::Left,
-                        comment.resolved,
-                        panel_width,
+                    let ctx = CommentContext {
+                        side: ReviewSide::Left,
+                        resolved: comment.resolved,
+                        width: panel_width,
                         left_width,
                         right_width,
-                        app.selected_pull_request_review_comment_id() == Some(comment.id),
+                        selected: app.selected_pull_request_review_comment_id() == Some(comment.id),
+                    };
+                    lines.push(render_inline_review_comment(
+                        comment.author.as_str(),
+                        comment.body.as_str(),
+                        &ctx,
                         theme,
                     ));
                 }
@@ -3307,14 +3310,27 @@ fn split_diff_horizontal_limit(
     max_offset
 }
 
-fn render_split_diff_row(
-    row: &crate::pr_diff::DiffRow,
+struct DiffRowContext {
     selected: bool,
     in_visual_range: bool,
     selected_side: ReviewSide,
     left_width: usize,
     right_width: usize,
     horizontal_offset: usize,
+}
+
+struct CommentContext {
+    side: ReviewSide,
+    resolved: bool,
+    width: usize,
+    left_width: usize,
+    right_width: usize,
+    selected: bool,
+}
+
+fn render_split_diff_row(
+    row: &crate::pr_diff::DiffRow,
+    ctx: &DiffRowContext,
     theme: &ThemePalette,
 ) -> Line<'static> {
     if row.kind == DiffKind::Hunk {
@@ -3323,8 +3339,8 @@ fn render_split_diff_row(
                 " {}",
                 clip_horizontal(
                     row.raw.as_str(),
-                    horizontal_offset,
-                    left_width + right_width + 4
+                    ctx.horizontal_offset,
+                    ctx.left_width + ctx.right_width + 4
                 )
             ),
             Style::default()
@@ -3338,8 +3354,8 @@ fn render_split_diff_row(
                 " {}",
                 clip_horizontal(
                     row.raw.as_str(),
-                    horizontal_offset,
-                    left_width + right_width + 4
+                    ctx.horizontal_offset,
+                    ctx.left_width + ctx.right_width + 4
                 )
             ),
             Style::default().fg(theme.text_muted),
@@ -3359,13 +3375,13 @@ fn render_split_diff_row(
     let right_prefix = format!("{:>4} ", right_number);
     let left_text = clip_horizontal(
         row.left.as_str(),
-        horizontal_offset,
-        left_width.saturating_sub(5),
+        ctx.horizontal_offset,
+        ctx.left_width.saturating_sub(5),
     );
     let right_text = clip_horizontal(
         row.right.as_str(),
-        horizontal_offset,
-        right_width.saturating_sub(5),
+        ctx.horizontal_offset,
+        ctx.right_width.saturating_sub(5),
     );
 
     let mut left_style = Style::default().fg(theme.text_muted);
@@ -3390,16 +3406,16 @@ fn render_split_diff_row(
 
     let mut row_style = Style::default();
     let mut bg_color = None;
-    if in_visual_range {
+    if ctx.in_visual_range {
         bg_color = Some(theme.bg_visual_range);
         row_style = Style::default().bg(theme.bg_visual_range);
     }
-    if selected {
+    if ctx.selected {
         bg_color = Some(theme.bg_selected);
         row_style = Style::default()
             .bg(theme.bg_selected)
             .add_modifier(Modifier::BOLD);
-        if selected_side == ReviewSide::Left {
+        if ctx.selected_side == ReviewSide::Left {
             left_style = left_style.add_modifier(Modifier::BOLD);
         } else {
             right_style = right_style.add_modifier(Modifier::BOLD);
@@ -3412,21 +3428,21 @@ fn render_split_diff_row(
 
     let left_cell = format!("{}{}", left_prefix, left_text);
     let right_cell = format!("{}{}", right_prefix, right_text);
-    let left_cell = format!("{:width$}", left_cell, width = left_width);
-    let right_cell = format!("{:width$}", right_cell, width = right_width);
+    let left_cell = format!("{:width$}", left_cell, width = ctx.left_width);
+    let right_cell = format!("{:width$}", right_cell, width = ctx.right_width);
 
-    let indicator = if selected {
-        match selected_side {
+    let indicator = if ctx.selected {
+        match ctx.selected_side {
             ReviewSide::Left => "L",
             ReviewSide::Right => "R",
         }
-    } else if in_visual_range {
+    } else if ctx.in_visual_range {
         "V"
     } else {
         " "
     };
-    let divider = if selected {
-        match selected_side {
+    let divider = if ctx.selected {
+        match ctx.selected_side {
             ReviewSide::Left => "<| ",
             ReviewSide::Right => " |>",
         }
@@ -3457,73 +3473,60 @@ fn render_split_diff_row(
         ),
         Span::styled(right_cell, right_style),
     ]);
-    if selected || in_visual_range {
+
+    if ctx.selected || ctx.in_visual_range {
         line = line.style(row_style);
     }
     line
 }
 
 fn render_inline_review_comment(
-    _comment_id: i64,
     author: &str,
     body: &str,
-    side: ReviewSide,
-    resolved: bool,
-    width: usize,
-    left_width: usize,
-    right_width: usize,
-    selected: bool,
+    ctx: &CommentContext,
     theme: &ThemePalette,
 ) -> Line<'static> {
-    let side_label = match side {
+    let side_label = match ctx.side {
         ReviewSide::Left => "old",
         ReviewSide::Right => "new",
     };
-    let prefix = if selected { ">" } else { " " };
-    let resolved_label = if resolved { "resolved" } else { "open" };
-    let body_preview = if resolved && !selected {
+    let prefix = if ctx.selected { ">" } else { " " };
+    let resolved_label = if ctx.resolved { "resolved" } else { "open" };
+    let body_preview = if ctx.resolved && !ctx.selected {
         format!(
             "(collapsed) {}",
-            ellipsize(body, width.saturating_sub(38).max(16))
+            ellipsize(body, ctx.width.saturating_sub(38).max(16))
         )
     } else {
-        ellipsize(body, width.saturating_sub(24))
+        ellipsize(body, ctx.width.saturating_sub(24))
     };
     let text = format!(
         "{} [{} {} @{}] {}",
         prefix, side_label, resolved_label, author, body_preview
     );
 
-    let muted_left = " ".repeat(left_width);
-    let muted_right = " ".repeat(right_width);
-    let comment_width = width.saturating_sub(8);
+    let muted_left = " ".repeat(ctx.left_width);
+    let muted_right = " ".repeat(ctx.right_width);
+    let comment_width = ctx.width.saturating_sub(8);
     let text = ellipsize(text.as_str(), comment_width);
     let comment_style = Style::default()
         .fg(theme.border_popup)
         .bg(theme.bg_panel_alt);
-    let mut line = if side == ReviewSide::Left {
-        let left_text = format!("{:width$}", text, width = left_width);
+    if ctx.side == ReviewSide::Left {
+        let left_text = format!("{:width$}", text, width = ctx.left_width);
         Line::from(vec![
             Span::styled(left_text, comment_style),
             Span::styled(" | ", Style::default().fg(theme.border_panel)),
             Span::styled(muted_right, Style::default().fg(theme.text_muted)),
         ])
     } else {
-        let right_text = format!("{:width$}", text, width = right_width);
+        let right_text = format!("{:width$}", text, width = ctx.right_width);
         Line::from(vec![
             Span::styled(muted_left, Style::default().fg(theme.text_muted)),
             Span::styled(" | ", Style::default().fg(theme.border_panel)),
             Span::styled(right_text, comment_style),
         ])
-    };
-    if selected {
-        line = line.style(
-            Style::default()
-                .bg(theme.bg_selected)
-                .add_modifier(Modifier::BOLD),
-        );
     }
-    line
 }
 
 fn file_status_symbol(status: &str) -> &'static str {
