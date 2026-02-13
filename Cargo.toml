@@ -1,6 +1,6 @@
 [package]
 name = "blippy"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "GitHub in your terminal"
 homepage = "https://github.com/AksharP5/blippy"
