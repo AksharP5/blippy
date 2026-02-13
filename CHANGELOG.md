@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/AksharP5/blippy/compare/v0.1.3...v0.1.4) - 2026-02-13
+
+### Fixed
+
+- convert video tag to link for GitHub compatibility
+
+### Other
+
+- extract worker setup helpers
+- standardize import ordering
+- introduce context structs for high-arity functions
+- remove dead code
+- apply mechanical clippy fixes
+- remove underscore prefixes from used function parameters
+- replace images with GitHub-hosted demo videos
+- add demo video to README
+- update repo image
+- increase PR checkout GIF to 60fps for maximum smoothness
+- increase PR checkout GIF to 30fps for smoother animation
+- convert PR checkout video to GIF for inline display
+- update demo with new repo image and PR checkout video
+- add DEMO.md with visual walkthrough screenshots
+
 ## [0.1.3](https://github.com/AksharP5/blippy/compare/v0.1.2...v0.1.3) - 2026-02-12
 
 ### Added
