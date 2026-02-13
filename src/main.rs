@@ -51,6 +51,48 @@ use crate::sync::{SyncStats, sync_repo_with_progress};
 type TuiBackend = CrosstermBackend<Stdout>;
 type Tui = Terminal<TuiBackend>;
 
+struct WorkerServices {
+    client: GitHubClient,
+    runtime: tokio::runtime::Runtime,
+}
+
+struct WorkerContext {
+    conn: rusqlite::Connection,
+    services: WorkerServices,
+}
+
+enum WorkerSetupError {
+    Db(String),
+    Client(String),
+    Runtime(String),
+}
+
+impl WorkerSetupError {
+    fn into_message(self) -> String {
+        match self {
+            WorkerSetupError::Db(message)
+            | WorkerSetupError::Client(message)
+            | WorkerSetupError::Runtime(message) => message,
+        }
+    }
+}
+
+fn setup_worker_services(token: &str) -> Result<WorkerServices, WorkerSetupError> {
+    let client = GitHubClient::new(token).map_err(|e| WorkerSetupError::Client(e.to_string()))?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| WorkerSetupError::Runtime(e.to_string()))?;
+
+    Ok(WorkerServices { client, runtime })
+}
+
+fn setup_worker_with_db(token: &str) -> Result<WorkerContext, WorkerSetupError> {
+    let conn = crate::store::open_db().map_err(|e| WorkerSetupError::Db(e.to_string()))?;
+    let services = setup_worker_services(token)?;
+    Ok(WorkerContext { conn, services })
+}
+
 const AUTH_DEBUG_ENV: &str = "BLIPPY_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -1711,34 +1753,21 @@ fn start_linked_pull_request_lookup(
     target: LinkedPullRequestTarget,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
                     issue_number,
-                    message: error.to_string(),
-                    target,
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
-                    issue_number,
-                    message: error.to_string(),
+                    message: error.into_message(),
                     target,
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .find_linked_pull_request(&owner, &repo, issue_number)
                 .await
         });
@@ -1776,34 +1805,21 @@ fn start_linked_issue_lookup(
     target: LinkedIssueTarget,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
                     pull_number,
-                    message: error.to_string(),
-                    target,
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
-                    pull_number,
-                    message: error.to_string(),
+                    message: error.into_message(),
                     target,
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .find_linked_issue_for_pull_request(&owner, &repo, pull_number)
                 .await
         });
@@ -2834,53 +2850,34 @@ fn maybe_start_pull_request_review_comments_sync(
 
 fn start_repo_sync(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
     thread::spawn(move || {
-        let conn = match crate::store::open_db() {
-            Ok(conn) => conn,
+        let ctx = match setup_worker_with_db(&token) {
+            Ok(ctx) => ctx,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::SyncFailed {
                     owner: owner.clone(),
                     repo: repo.clone(),
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::SyncFailed {
-                    owner: owner.clone(),
-                    repo: repo.clone(),
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::SyncFailed {
-                    owner: owner.clone(),
-                    repo: repo.clone(),
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
         let progress_tx = event_tx.clone();
-        let result = runtime.block_on(async {
-            sync_repo_with_progress(&client, &conn, &owner, &repo, |page, stats| {
-                let _ = progress_tx.send(AppEvent::SyncProgress {
-                    owner: owner.clone(),
-                    repo: repo.clone(),
-                    page,
-                    stats: stats.clone(),
-                });
-            })
+        let result = ctx.services.runtime.block_on(async {
+            sync_repo_with_progress(
+                &ctx.services.client,
+                &ctx.conn,
+                &owner,
+                &repo,
+                |page, stats| {
+                    let _ = progress_tx.send(AppEvent::SyncProgress {
+                        owner: owner.clone(),
+                        repo: repo.clone(),
+                        page,
+                        stats: stats.clone(),
+                    });
+                },
+            )
             .await
         });
         let stats = match result {
@@ -2924,42 +2921,23 @@ fn start_comment_sync(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let conn = match crate::store::open_db() {
-            Ok(conn) => conn,
+        let ctx = match setup_worker_with_db(&token) {
+            Ok(ctx) => ctx,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::CommentsFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::CommentsFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::CommentsFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result =
-            runtime.block_on(async { client.list_comments(&owner, &repo, issue_number).await });
+        let result = ctx.services.runtime.block_on(async {
+            ctx.services
+                .client
+                .list_comments(&owner, &repo, issue_number)
+                .await
+        });
         let comments = match result {
             Ok(comments) => comments,
             Err(error) => {
@@ -2976,12 +2954,12 @@ fn start_comment_sync(
         for comment in comments {
             let mut row = crate::sync::map_comment_to_row(issue_id, &comment);
             row.last_accessed_at = Some(now);
-            let _ = crate::store::upsert_comment(&conn, &row);
+            let _ = crate::store::upsert_comment(&ctx.conn, &row);
             count += 1;
         }
-        let _ = update_issue_comments_count(&conn, issue_id, count as i64);
-        let _ = touch_comments_for_issue(&conn, issue_id, now);
-        let _ = prune_comments(&conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
+        let _ = update_issue_comments_count(&ctx.conn, issue_id, count as i64);
+        let _ = touch_comments_for_issue(&ctx.conn, issue_id, now);
+        let _ = prune_comments(&ctx.conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
 
         let _ = event_tx.send(AppEvent::CommentsUpdated { issue_id, count });
     });
@@ -2996,32 +2974,20 @@ fn start_pull_request_files_sync(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .list_pull_request_files(&owner, &repo, issue_number)
                 .await
         });
@@ -3037,9 +3003,11 @@ fn start_pull_request_files_sync(
             }
         };
 
-        let (pull_request_id, viewed_files) = runtime
+        let (pull_request_id, viewed_files) = services
+            .runtime
             .block_on(async {
-                client
+                services
+                    .client
                     .pull_request_file_view_state(&owner, &repo, issue_number)
                     .await
             })
@@ -3073,32 +3041,20 @@ fn start_pull_request_review_comments_sync(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .list_pull_request_review_comments(&owner, &repo, pull_number)
                 .await
         });
@@ -3181,32 +3137,20 @@ fn start_create_pull_request_review_comment(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let head_sha = runtime.block_on(async {
-            client
+        let head_sha = services.runtime.block_on(async {
+            services
+                .client
                 .pull_request_head_sha(&owner, &repo, pull_number)
                 .await
         });
@@ -3221,8 +3165,9 @@ fn start_create_pull_request_review_comment(
             }
         };
 
-        let created = runtime.block_on(async {
-            client
+        let created = services.runtime.block_on(async {
+            services
+                .client
                 .create_pull_request_review_comment(
                     &owner,
                     &repo,
@@ -3261,32 +3206,20 @@ fn start_update_pull_request_review_comment(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdateFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdateFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .update_pull_request_review_comment(&owner, &repo, comment_id, body.as_str())
                 .await
         });
@@ -3317,32 +3250,20 @@ fn start_delete_pull_request_review_comment(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleteFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleteFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .delete_pull_request_review_comment(&owner, &repo, comment_id)
                 .await
         });
@@ -3373,32 +3294,20 @@ fn start_toggle_pull_request_review_thread_resolution(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
                     issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
-                    issue_id,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .set_pull_request_review_thread_resolved(&owner, &repo, thread_id.as_str(), resolve)
                 .await
         });
@@ -3429,36 +3338,22 @@ fn start_set_pull_request_file_viewed(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
                     issue_id,
                     path,
                     viewed,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
-                    issue_id,
-                    path,
-                    viewed,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .set_pull_request_file_viewed(pull_request_id.as_str(), path.as_str(), viewed)
                 .await
         });
@@ -3491,32 +3386,20 @@ fn start_add_comment(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("comment failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment failed: {}", error),
+                    message: format!("comment failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .create_comment(&owner, &repo, issue_number, &body)
                 .await
         });
@@ -3548,32 +3431,20 @@ fn start_update_comment(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("comment update failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment update failed: {}", error),
+                    message: format!("comment update failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .update_comment(&owner, &repo, comment_id, body.as_str())
                 .await
         });
@@ -3610,32 +3481,23 @@ fn start_delete_comment(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("comment delete failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment delete failed: {}", error),
+                    message: format!("comment delete failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result =
-            runtime.block_on(async { client.delete_comment(&owner, &repo, comment_id).await });
+        let result = services.runtime.block_on(async {
+            services
+                .client
+                .delete_comment(&owner, &repo, comment_id)
+                .await
+        });
 
         match result {
             Ok(()) => {
@@ -3673,32 +3535,20 @@ fn start_update_labels(
     labels_display: String,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("label update failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("label update failed: {}", error),
+                    message: format!("label update failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .update_issue_labels(&owner, &repo, issue_number, &labels)
                 .await
         });
@@ -3729,32 +3579,20 @@ fn start_update_assignees(
     assignees_display: String,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("assignee update failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("assignee update failed: {}", error),
+                    message: format!("assignee update failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async {
-            client
+        let result = services.runtime.block_on(async {
+            services
+                .client
                 .update_issue_assignees(&owner, &repo, issue_number, &assignees)
                 .await
         });
@@ -3777,22 +3615,8 @@ fn start_update_assignees(
 
 fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
-            Err(_) => {
-                let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
-                    owner,
-                    repo,
-                    labels: Vec::new(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(_) => {
                 let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
                     owner,
@@ -3803,7 +3627,9 @@ fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Send
             }
         };
 
-        let labels = runtime.block_on(async { client.list_labels(&owner, &repo).await });
+        let labels = services
+            .runtime
+            .block_on(async { services.client.list_labels(&owner, &repo).await });
         let labels = labels
             .unwrap_or_default()
             .into_iter()
@@ -3819,22 +3645,8 @@ fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Send
 
 fn start_fetch_assignees(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
-            Err(_) => {
-                let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
-                    owner,
-                    repo,
-                    assignees: Vec::new(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(_) => {
                 let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
                     owner,
@@ -3845,7 +3657,9 @@ fn start_fetch_assignees(owner: String, repo: String, token: String, event_tx: S
             }
         };
 
-        let assignees = runtime.block_on(async { client.list_assignees(&owner, &repo).await });
+        let assignees = services
+            .runtime
+            .block_on(async { services.client.list_assignees(&owner, &repo).await });
         let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
             owner,
             repo,
@@ -3861,33 +3675,21 @@ fn start_fetch_repo_permissions(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
                     owner,
                     repo,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
-                    owner,
-                    repo,
-                    message: error.to_string(),
+                    message: error.into_message(),
                 });
                 return;
             }
         };
 
-        let result = runtime.block_on(async { client.get_repo(&owner, &repo).await });
+        let result = services
+            .runtime
+            .block_on(async { services.client.get_repo(&owner, &repo).await });
         match result {
             Ok(repo_info) => {
                 let permissions = repo_info.permissions.unwrap_or_default();
@@ -3920,32 +3722,23 @@ fn start_reopen_issue(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("reopen failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("reopen failed: {}", error),
+                    message: format!("reopen failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result =
-            runtime.block_on(async { client.reopen_issue(&owner, &repo, issue_number).await });
+        let result = services.runtime.block_on(async {
+            services
+                .client
+                .reopen_issue(&owner, &repo, issue_number)
+                .await
+        });
 
         match result {
             Ok(()) => {
@@ -3973,41 +3766,32 @@ fn start_close_issue(
     event_tx: Sender<AppEvent>,
 ) {
     thread::spawn(move || {
-        let client = match GitHubClient::new(&token) {
-            Ok(client) => client,
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
             Err(error) => {
                 let _ = event_tx.send(AppEvent::IssueUpdated {
                     issue_number,
-                    message: format!("close failed: {}", error),
-                });
-                return;
-            }
-        };
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("close failed: {}", error),
+                    message: format!("close failed: {}", error.into_message()),
                 });
                 return;
             }
         };
 
-        let result: Result<Option<String>, anyhow::Error> = runtime.block_on(async {
+        let result: Result<Option<String>, anyhow::Error> = services.runtime.block_on(async {
             let mut comment_error = None;
             if let Some(body) = body
-                && let Err(error) = client
+                && let Err(error) = services
+                    .client
                     .create_comment(&owner, &repo, issue_number, &body)
                     .await
             {
                 comment_error = Some(error.to_string());
             }
 
-            client.close_issue(&owner, &repo, issue_number).await?;
+            services
+                .client
+                .close_issue(&owner, &repo, issue_number)
+                .await?;
 
             Ok(comment_error)
         });
