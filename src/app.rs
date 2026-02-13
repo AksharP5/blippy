@@ -1143,10 +1143,10 @@ impl App {
             .collect::<Vec<&PullRequestReviewComment>>();
         comments.sort_by_key(|comment| comment.id);
 
-        if let Some(comment_id) = self.selected_pull_request_review_comment_id {
-            if let Some(comment) = comments.iter().find(|comment| comment.id == comment_id) {
-                return Some(*comment);
-            }
+        if let Some(comment_id) = self.selected_pull_request_review_comment_id
+            && let Some(comment) = comments.iter().find(|comment| comment.id == comment_id)
+        {
+            return Some(*comment);
         }
         comments.first().copied()
     }
@@ -1179,33 +1179,32 @@ impl App {
             self.handle_editor_key(key);
             return;
         }
-        if self.view == View::RepoPicker && self.repo_search_mode {
-            if self.handle_repo_search_key(key) {
-                return;
-            }
-        }
-        if self.view == View::Issues && self.issue_search_mode {
-            if self.handle_issue_search_key(key) {
-                return;
-            }
-        }
-        if matches!(self.view, View::LabelPicker | View::AssigneePicker) {
-            if self.handle_popup_filter_key(key) {
-                return;
-            }
-        }
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
-            if self.view == View::RepoPicker {
-                self.rescan_requested = true;
-                self.scanning = true;
-                self.status = "Scanning".to_string();
-            }
+        if self.view == View::RepoPicker
+            && self.repo_search_mode
+            && self.handle_repo_search_key(key)
+        {
             return;
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if self.handle_focus_key(key.code) {
-                return;
-            }
+        if self.view == View::Issues && self.issue_search_mode && self.handle_issue_search_key(key)
+        {
+            return;
+        }
+        if matches!(self.view, View::LabelPicker | View::AssigneePicker)
+            && self.handle_popup_filter_key(key)
+        {
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('r')
+            && self.view == View::RepoPicker
+        {
+            self.rescan_requested = true;
+            self.scanning = true;
+            self.status = "Scanning".to_string();
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && self.handle_focus_key(key.code) {
+            return;
         }
 
         if key.code != KeyCode::Char('g') {
@@ -1825,10 +1824,10 @@ impl App {
                 })
             })
             .unwrap_or(0);
-        if let Some(number) = current_issue_number {
-            if let Some(issue) = self.issues.iter().find(|issue| issue.number == number) {
-                self.current_issue_id = Some(issue.id);
-            }
+        if let Some(number) = current_issue_number
+            && let Some(issue) = self.issues.iter().find(|issue| issue.number == number)
+        {
+            self.current_issue_id = Some(issue.id);
         }
         self.issues_preview_scroll = 0;
         self.issues_preview_max_scroll = 0;

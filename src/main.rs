@@ -1239,27 +1239,6 @@ fn assignee_options_for_repo(app: &App) -> Vec<String> {
     assignees
 }
 
-fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
-    let mut values = Vec::new();
-    for raw in input.split(',') {
-        let mut value = raw.trim().to_string();
-        if strip_at {
-            value = value.trim_start_matches('@').to_string();
-        }
-        if value.is_empty() {
-            continue;
-        }
-        if values
-            .iter()
-            .any(|existing: &String| existing.eq_ignore_ascii_case(value.as_str()))
-        {
-            continue;
-        }
-        values.push(value);
-    }
-    values
-}
-
 fn issue_number(app: &App) -> Option<i64> {
     match app.view() {
         View::IssueDetail
@@ -2733,10 +2712,8 @@ fn maybe_start_comment_poll(
         return Ok(());
     }
 
-    if !app.take_comment_sync_request() {
-        if last_poll.elapsed() < COMMENT_POLL_INTERVAL {
-            return Ok(());
-        }
+    if !app.take_comment_sync_request() && last_poll.elapsed() < COMMENT_POLL_INTERVAL {
+        return Ok(());
     }
 
     let (owner, repo, issue_id, issue_number) = match (
@@ -4020,20 +3997,17 @@ fn start_close_issue(
             }
         };
 
-        let result = runtime.block_on(async {
+        let result: Result<Option<String>, anyhow::Error> = runtime.block_on(async {
             let mut comment_error = None;
-            if let Some(body) = body {
-                if let Err(error) = client
+            if let Some(body) = body
+                && let Err(error) = client
                     .create_comment(&owner, &repo, issue_number, &body)
                     .await
-                {
-                    comment_error = Some(error.to_string());
-                }
+            {
+                comment_error = Some(error.to_string());
             }
 
-            if let Err(error) = client.close_issue(&owner, &repo, issue_number).await {
-                return Err(error);
-            }
+            client.close_issue(&owner, &repo, issue_number).await?;
 
             Ok(comment_error)
         });
@@ -4096,10 +4070,31 @@ impl Drop for TerminalGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{issue_url, parse_csv_values};
+    use super::issue_url;
     use crate::app::View;
     use crate::config::Config;
     use crate::store::IssueRow;
+
+    fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
+        let mut values = Vec::new();
+        for raw in input.split(',') {
+            let mut value = raw.trim().to_string();
+            if strip_at {
+                value = value.trim_start_matches('@').to_string();
+            }
+            if value.is_empty() {
+                continue;
+            }
+            if values
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(value.as_str()))
+            {
+                continue;
+            }
+            values.push(value);
+        }
+        values
+    }
 
     #[test]
     fn parse_csv_values_trims_dedupes_and_strips_at() {

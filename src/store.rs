@@ -248,32 +248,6 @@ pub fn comments_for_issue(conn: &Connection, issue_id: i64) -> Result<Vec<Commen
     Ok(comments)
 }
 
-pub fn search_issues(conn: &Connection, query: &str) -> Result<Vec<IssueRow>> {
-    let mut statement = conn.prepare(
-        "
-        SELECT issue_id
-        FROM fts_content
-        WHERE fts_content MATCH ?1
-        ",
-    )?;
-    let rows = statement.query_map([query], |row| row.get::<_, i64>(0))?;
-
-    let mut issue_ids = Vec::new();
-    for row in rows {
-        issue_ids.push(row?);
-    }
-
-    if issue_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    issue_ids.sort_unstable();
-    issue_ids.dedup();
-
-    let issues = fetch_issues_by_ids(conn, &issue_ids)?;
-    Ok(issues)
-}
-
 pub fn upsert_local_repo(conn: &Connection, repo: &LocalRepoRow) -> Result<()> {
     conn.execute(
         "
@@ -436,48 +410,6 @@ fn index_comment(conn: &Connection, comment: &CommentRow) -> Result<()> {
         ),
     )?;
     Ok(())
-}
-
-fn fetch_issues_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<IssueRow>> {
-    let placeholders = ids
-        .iter()
-        .enumerate()
-        .map(|(idx, _)| format!("?{}", idx + 1))
-        .collect::<Vec<String>>()
-        .join(",");
-    let sql = format!(
-        "
-        SELECT id, repo_id, number, state, title, body, labels, assignees, comments_count, updated_at, is_pr
-        FROM issues
-        WHERE id IN ({})
-        ORDER BY number DESC
-        ",
-        placeholders
-    );
-
-    let mut statement = conn.prepare(&sql)?;
-    let rows = statement.query_map(rusqlite::params_from_iter(ids), |row| {
-        let is_pr_value: i64 = row.get(10)?;
-        Ok(IssueRow {
-            id: row.get(0)?,
-            repo_id: row.get(1)?,
-            number: row.get(2)?,
-            state: row.get(3)?,
-            title: row.get(4)?,
-            body: row.get(5)?,
-            labels: row.get(6)?,
-            assignees: row.get(7)?,
-            comments_count: row.get(8)?,
-            updated_at: row.get(9)?,
-            is_pr: is_pr_value != 0,
-        })
-    })?;
-
-    let mut issues = Vec::new();
-    for row in rows {
-        issues.push(row?);
-    }
-    Ok(issues)
 }
 
 fn data_dir() -> PathBuf {
@@ -655,8 +587,8 @@ fn add_issue_comments_count_column(conn: &Connection) -> Result<()> {
 mod tests {
     use super::{
         CommentRow, IssueRow, LocalRepoRow, RepoRow, comments_for_issue, delete_db_at,
-        get_repo_by_slug, list_issues, list_local_repos, open_db_at, search_issues, upsert_comment,
-        upsert_issue, upsert_local_repo, upsert_repo,
+        get_repo_by_slug, list_issues, list_local_repos, open_db_at, upsert_comment, upsert_issue,
+        upsert_local_repo, upsert_repo,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -807,54 +739,6 @@ mod tests {
         let comments = comments_for_issue(&conn, 20).expect("list comments");
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].body, "Updated comment");
-
-        drop(conn);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn search_issues_returns_issue_when_comment_matches() {
-        let dir = unique_temp_dir("fts-search");
-        let db_path = dir.join("blippy.db");
-        let conn = open_db_at(&db_path).expect("open db");
-
-        let repo = RepoRow {
-            id: 1,
-            owner: "acme".to_string(),
-            name: "blippy".to_string(),
-            updated_at: None,
-            etag: None,
-        };
-        upsert_repo(&conn, &repo).expect("insert repo");
-
-        let issue = IssueRow {
-            id: 40,
-            repo_id: 1,
-            number: 2,
-            state: "open".to_string(),
-            title: "Search me".to_string(),
-            body: "Issue body".to_string(),
-            labels: "".to_string(),
-            assignees: "".to_string(),
-            comments_count: 0,
-            updated_at: Some("2024-01-03T00:00:00Z".to_string()),
-            is_pr: false,
-        };
-        upsert_issue(&conn, &issue).expect("insert issue");
-
-        let comment = CommentRow {
-            id: 400,
-            issue_id: 40,
-            author: "dev".to_string(),
-            body: "needle".to_string(),
-            created_at: Some("2024-01-03T01:00:00Z".to_string()),
-            last_accessed_at: Some(1),
-        };
-        upsert_comment(&conn, &comment).expect("insert comment");
-
-        let results = search_issues(&conn, "needle").expect("search");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, 40);
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);

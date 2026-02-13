@@ -226,7 +226,7 @@ fn draw_repo_picker(
                     ),
                     Span::raw("  "),
                     Span::styled(
-                        format!("{}", repo.remote_name),
+                        repo.remote_name.to_string(),
                         Style::default().fg(theme.text_muted),
                     ),
                 ]);
@@ -3197,23 +3197,23 @@ fn issue_tabs_line(
     closed_count: usize,
     theme: &ThemePalette,
 ) -> Line<'static> {
-    let mut spans = Vec::new();
-    spans.push(filter_tab(
-        "1 Open",
-        open_count,
-        filter == IssueFilter::Open,
-        theme.accent_success,
-        theme,
-    ));
-    spans.push(Span::raw("  "));
-    spans.push(filter_tab(
-        "2 Closed",
-        closed_count,
-        filter == IssueFilter::Closed,
-        theme.accent_danger,
-        theme,
-    ));
-    Line::from(spans)
+    Line::from(vec![
+        filter_tab(
+            "1 Open",
+            open_count,
+            filter == IssueFilter::Open,
+            theme.accent_success,
+            theme,
+        ),
+        Span::raw("  "),
+        filter_tab(
+            "2 Closed",
+            closed_count,
+            filter == IssueFilter::Closed,
+            theme.accent_danger,
+            theme,
+        ),
+    ])
 }
 
 fn filter_tab(

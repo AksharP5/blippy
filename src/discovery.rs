@@ -43,16 +43,16 @@ pub fn full_scan(home: &Path) -> Result<Vec<DiscoveredRepo>> {
 }
 
 pub fn home_dir() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home));
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return Some(PathBuf::from(home));
     }
 
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home));
-        }
+    if let Ok(home) = std::env::var("USERPROFILE")
+        && !home.is_empty()
+    {
+        return Some(PathBuf::from(home));
     }
 
     None

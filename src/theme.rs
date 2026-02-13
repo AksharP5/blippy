@@ -82,13 +82,12 @@ pub const THEMES: [ThemePalette; 3] = [
 ];
 
 pub fn resolve_theme(name: Option<&str>) -> &'static ThemePalette {
-    if let Some(name) = name {
-        if let Some(theme) = THEMES
+    if let Some(name) = name
+        && let Some(theme) = THEMES
             .iter()
             .find(|theme| theme.name.eq_ignore_ascii_case(name))
-        {
-            return theme;
-        }
+    {
+        return theme;
     }
     default_theme()
 }
