@@ -1,7 +1,8 @@
+use std::collections::{HashMap, HashSet};
+
 use anyhow::{Result, anyhow};
 use reqwest::header::{ACCEPT, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH, USER_AGENT};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
 
 const API_BASE: &str = "https://api.github.com";
 const API_VERSION: &str = "2022-11-28";

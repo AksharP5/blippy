@@ -1,6 +1,7 @@
-use anyhow::{Context, Result};
 use std::io;
 use std::process::Command;
+
+use anyhow::{Context, Result};
 
 pub trait AuthSources {
     fn gh_token(&self) -> Result<Option<String>>;
