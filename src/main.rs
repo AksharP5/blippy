@@ -2733,10 +2733,8 @@ fn maybe_start_comment_poll(
         return Ok(());
     }
 
-    if !app.take_comment_sync_request() {
-        if last_poll.elapsed() < COMMENT_POLL_INTERVAL {
-            return Ok(());
-        }
+    if !app.take_comment_sync_request() && last_poll.elapsed() < COMMENT_POLL_INTERVAL {
+        return Ok(());
     }
 
     let (owner, repo, issue_id, issue_number) = match (
@@ -4020,20 +4018,17 @@ fn start_close_issue(
             }
         };
 
-        let result = runtime.block_on(async {
+        let result: Result<Option<String>, anyhow::Error> = runtime.block_on(async {
             let mut comment_error = None;
-            if let Some(body) = body {
-                if let Err(error) = client
+            if let Some(body) = body
+                && let Err(error) = client
                     .create_comment(&owner, &repo, issue_number, &body)
                     .await
-                {
-                    comment_error = Some(error.to_string());
-                }
+            {
+                comment_error = Some(error.to_string());
             }
 
-            if let Err(error) = client.close_issue(&owner, &repo, issue_number).await {
-                return Err(error);
-            }
+            client.close_issue(&owner, &repo, issue_number).await?;
 
             Ok(comment_error)
         });

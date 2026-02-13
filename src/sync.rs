@@ -180,11 +180,10 @@ where
         for issue in issues {
             if let (Some(cursor), Some(issue_updated_at)) =
                 (previous_cursor.as_deref(), issue.updated_at.as_deref())
+                && issue_updated_at < cursor
             {
-                if issue_updated_at < cursor {
-                    reached_previous_cursor = true;
-                    break;
-                }
+                reached_previous_cursor = true;
+                break;
             }
 
             let row = match map_issue_to_row(repo_row.id, &issue) {

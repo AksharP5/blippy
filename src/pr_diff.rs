@@ -48,25 +48,29 @@ pub fn parse_patch(patch: Option<&str>) -> Vec<DiffRow> {
         }
 
         if line.starts_with('+') && !line.starts_with("+++") {
-            pending_added.push((new_line, line[1..].to_string(), line.to_string()));
+            if let Some(content) = line.strip_prefix('+') {
+                pending_added.push((new_line, content.to_string(), line.to_string()));
+            }
             new_line += 1;
             continue;
         }
 
         if line.starts_with('-') && !line.starts_with("---") {
-            pending_removed.push((old_line, line[1..].to_string(), line.to_string()));
+            if let Some(content) = line.strip_prefix('-') {
+                pending_removed.push((old_line, content.to_string(), line.to_string()));
+            }
             old_line += 1;
             continue;
         }
 
-        if line.starts_with(' ') {
+        if let Some(content) = line.strip_prefix(' ') {
             flush_change_block(&mut rows, &mut pending_removed, &mut pending_added);
             rows.push(DiffRow {
                 kind: DiffKind::Context,
                 old_line: Some(old_line),
                 new_line: Some(new_line),
-                left: line[1..].to_string(),
-                right: line[1..].to_string(),
+                left: content.to_string(),
+                right: content.to_string(),
                 raw: line.to_string(),
             });
             old_line += 1;
