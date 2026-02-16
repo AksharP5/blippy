@@ -665,3 +665,80 @@ fn repo_picker_keeps_distinct_rows() {
     assert_eq!(app.filtered_repo_rows()[0].repo, "blippy");
     assert_eq!(app.filtered_repo_rows()[1].remote_name, "upstream");
 }
+
+#[test]
+fn create_issue_editor_supports_title_and_body_entry() {
+    let mut app = App::new(Config::default());
+    app.open_create_issue_editor(View::Issues);
+
+    assert_eq!(app.view(), View::CommentEditor);
+    assert_eq!(app.editor_mode(), EditorMode::CreateIssue);
+
+    for ch in "bug report".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    assert_eq!(app.editor().name(), "bug report");
+
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+    assert!(!app.editor().create_issue_title_focused());
+    for ch in "Something broke".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    assert_eq!(app.editor().text(), "Something broke");
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(app.editor().create_issue_confirm_visible());
+    assert_eq!(app.take_action(), None);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    assert!(app.editor().create_issue_title_focused());
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.take_action(), Some(AppAction::SubmitCreatedIssue));
+}
+
+#[test]
+fn create_issue_confirm_cancel_keeps_editor_open() {
+    let mut app = App::new(Config::default());
+    app.open_create_issue_editor(View::Issues);
+    for ch in "title".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(app.editor().create_issue_confirm_visible());
+
+    app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert_eq!(app.view(), View::CommentEditor);
+    assert!(!app.editor().create_issue_confirm_visible());
+    assert_eq!(app.take_action(), None);
+}
+
+#[test]
+fn create_issue_confirm_tab_switches_between_cancel_and_create() {
+    let mut app = App::new(Config::default());
+    app.open_create_issue_editor(View::Issues);
+    for ch in "title".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(app.editor().create_issue_confirm_visible());
+    assert!(app.editor().create_issue_confirm_submit_selected());
+
+    app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(!app.editor().create_issue_confirm_submit_selected());
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.view(), View::CommentEditor);
+    assert!(!app.editor().create_issue_confirm_visible());
+    assert_eq!(app.take_action(), None);
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(app.editor().create_issue_confirm_submit_selected());
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.take_action(), Some(AppAction::SubmitCreatedIssue));
+}

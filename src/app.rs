@@ -38,6 +38,8 @@ pub enum AppAction {
     OpenLinkedIssueInBrowser,
     OpenLinkedIssueInTui,
     PickLinkedItem,
+    CreateIssue,
+    SubmitCreatedIssue,
     CloseIssue,
     ReopenIssue,
     AddIssueComment,
@@ -611,6 +613,7 @@ impl App {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     CloseIssue,
+    CreateIssue,
     AddComment,
     EditComment,
     AddPullRequestReviewComment,
@@ -623,6 +626,7 @@ impl EditorMode {
         matches!(
             self,
             Self::CloseIssue
+                | Self::CreateIssue
                 | Self::AddComment
                 | Self::EditComment
                 | Self::AddPullRequestReviewComment
@@ -637,6 +641,9 @@ pub struct CommentEditorState {
     mode: EditorMode,
     name: String,
     text: String,
+    create_issue_title_focused: bool,
+    create_issue_confirm_visible: bool,
+    create_issue_confirm_submit: bool,
 }
 
 impl Default for CommentEditorState {
@@ -645,6 +652,9 @@ impl Default for CommentEditorState {
             mode: EditorMode::CloseIssue,
             name: String::new(),
             text: String::new(),
+            create_issue_title_focused: false,
+            create_issue_confirm_visible: false,
+            create_issue_confirm_submit: true,
         }
     }
 }
@@ -664,33 +674,109 @@ impl CommentEditorState {
 
     pub fn reset_for_close(&mut self) {
         self.mode = EditorMode::CloseIssue;
+        self.create_issue_title_focused = false;
+        self.create_issue_confirm_visible = false;
+        self.text.clear();
+    }
+
+    pub fn reset_for_issue_create(&mut self) {
+        self.mode = EditorMode::CreateIssue;
+        self.create_issue_title_focused = true;
+        self.create_issue_confirm_visible = false;
+        self.create_issue_confirm_submit = true;
+        self.name.clear();
         self.text.clear();
     }
 
     pub fn reset_for_comment(&mut self) {
         self.mode = EditorMode::AddComment;
+        self.create_issue_title_focused = false;
+        self.create_issue_confirm_visible = false;
         self.text.clear();
     }
 
     pub fn reset_for_comment_edit(&mut self, body: &str) {
         self.mode = EditorMode::EditComment;
+        self.create_issue_title_focused = false;
+        self.create_issue_confirm_visible = false;
         self.text = body.to_string();
     }
 
     pub fn reset_for_pull_request_review_comment(&mut self) {
         self.mode = EditorMode::AddPullRequestReviewComment;
+        self.create_issue_title_focused = false;
+        self.create_issue_confirm_visible = false;
         self.text.clear();
     }
 
     pub fn reset_for_pull_request_review_comment_edit(&mut self, body: &str) {
         self.mode = EditorMode::EditPullRequestReviewComment;
+        self.create_issue_title_focused = false;
+        self.create_issue_confirm_visible = false;
         self.text = body.to_string();
     }
 
     pub fn reset_for_preset_name(&mut self) {
         self.mode = EditorMode::AddPreset;
+        self.create_issue_title_focused = false;
+        self.create_issue_confirm_visible = false;
         self.name.clear();
         self.text.clear();
+    }
+
+    pub fn create_issue_title_focused(&self) -> bool {
+        self.create_issue_title_focused
+    }
+
+    pub fn focus_create_issue_title(&mut self) {
+        if self.mode != EditorMode::CreateIssue {
+            return;
+        }
+        self.create_issue_title_focused = true;
+    }
+
+    pub fn focus_create_issue_body(&mut self) {
+        if self.mode != EditorMode::CreateIssue {
+            return;
+        }
+        self.create_issue_title_focused = false;
+    }
+
+    pub fn create_issue_confirm_visible(&self) -> bool {
+        self.create_issue_confirm_visible
+    }
+
+    pub fn create_issue_confirm_submit_selected(&self) -> bool {
+        self.create_issue_confirm_submit
+    }
+
+    pub fn show_create_issue_confirm(&mut self) {
+        if self.mode != EditorMode::CreateIssue {
+            return;
+        }
+        self.create_issue_confirm_visible = true;
+        self.create_issue_confirm_submit = true;
+    }
+
+    pub fn hide_create_issue_confirm(&mut self) {
+        if self.mode != EditorMode::CreateIssue {
+            return;
+        }
+        self.create_issue_confirm_visible = false;
+    }
+
+    pub fn set_create_issue_confirm_submit_selected(&mut self, submit: bool) {
+        if self.mode != EditorMode::CreateIssue {
+            return;
+        }
+        self.create_issue_confirm_submit = submit;
+    }
+
+    pub fn toggle_create_issue_confirm_submit_selected(&mut self) {
+        if self.mode != EditorMode::CreateIssue {
+            return;
+        }
+        self.create_issue_confirm_submit = !self.create_issue_confirm_submit;
     }
 
     pub fn append_name(&mut self, ch: char) {

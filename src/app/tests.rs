@@ -1,6 +1,7 @@
 pub(super) use super::{
-    App, AppAction, Focus, IssueFilter, LinkedPickerTarget, MouseTarget, PullRequestFile,
-    PullRequestReviewFocus, PullRequestReviewTarget, ReviewSide, View, WorkItemMode,
+    App, AppAction, EditorMode, Focus, IssueFilter, LinkedPickerTarget, MouseTarget,
+    PullRequestFile, PullRequestReviewFocus, PullRequestReviewTarget, ReviewSide, View,
+    WorkItemMode,
 };
 pub(super) use crate::config::Config;
 pub(super) use crate::store::{CommentRow, IssueRow, LocalRepoRow};

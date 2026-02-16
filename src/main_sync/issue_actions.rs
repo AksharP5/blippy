@@ -41,6 +41,53 @@ pub(crate) fn start_add_comment(
     );
 }
 
+pub(crate) fn start_create_issue(
+    owner: String,
+    repo: String,
+    token: String,
+    title: String,
+    body: Option<String>,
+    event_tx: Sender<AppEvent>,
+) {
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueCreateFailed { message },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .create_issue(&owner, &repo, title.as_str(), body.as_deref())
+                    .await
+            });
+
+            match result {
+                Ok(issue) => {
+                    with_store_conn(|conn| {
+                        let repo_row = crate::store::get_repo_by_slug(conn, &owner, &repo)
+                            .ok()
+                            .flatten();
+                        if let Some(repo_row) = repo_row {
+                            let row = crate::sync::map_issue_to_row(repo_row.id, &issue);
+                            if let Some(row) = row {
+                                let _ = crate::store::upsert_issue(conn, &row);
+                            }
+                        }
+                    });
+                    let _ = event_tx.send(AppEvent::IssueCreated {
+                        issue_number: issue.number,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueCreateFailed {
+                        message: error.to_string(),
+                    });
+                }
+            }
+        },
+    );
+}
+
 pub(crate) fn start_update_comment(
     owner: String,
     repo: String,

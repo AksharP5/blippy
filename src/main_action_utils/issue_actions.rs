@@ -24,6 +24,49 @@ pub(crate) fn close_issue_with_comment(
     Ok(())
 }
 
+pub(crate) fn create_issue(app: &mut App) -> Result<()> {
+    if app.current_owner().is_none() || app.current_repo().is_none() {
+        app.set_status("No repo selected".to_string());
+        return Ok(());
+    }
+
+    app.open_create_issue_editor(app.view());
+    app.set_status("Create issue: fill title and body".to_string());
+    Ok(())
+}
+
+pub(crate) fn submit_created_issue(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    let title = app.editor().name().trim().to_string();
+    if title.is_empty() {
+        app.set_status("Issue title required".to_string());
+        return Ok(());
+    }
+
+    let body_text = app.editor().text().to_string();
+    let body = if body_text.trim().is_empty() {
+        None
+    } else {
+        Some(body_text)
+    };
+
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_create_issue(owner, repo, token.to_string(), title, body, event_tx);
+    app.set_view(app.editor_cancel_view());
+    app.set_status("Creating issue".to_string());
+    Ok(())
+}
+
 pub(crate) fn post_issue_comment(
     app: &mut App,
     token: &str,
