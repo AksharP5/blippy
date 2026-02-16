@@ -443,6 +443,17 @@ struct NavigationState {
     issue_recent_comments_max_scroll: u16,
 }
 
+#[derive(Debug, Default)]
+struct SearchState {
+    repo_query: String,
+    repo_search_mode: bool,
+    filtered_repo_indices: Vec<usize>,
+    issue_query: String,
+    issue_search_mode: bool,
+    filtered_issue_indices: Vec<usize>,
+    help_overlay_visible: bool,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -457,13 +468,7 @@ pub struct App {
     issue_filter: IssueFilter,
     work_item_mode: WorkItemMode,
     assignee_filter: AssigneeFilter,
-    repo_query: String,
-    repo_search_mode: bool,
-    filtered_repo_indices: Vec<usize>,
-    issue_query: String,
-    issue_search_mode: bool,
-    help_overlay_visible: bool,
-    filtered_issue_indices: Vec<usize>,
+    search: SearchState,
     status: String,
     sync: SyncState,
     repo_label_colors: HashMap<String, String>,
@@ -499,13 +504,7 @@ impl App {
             issue_filter: IssueFilter::Open,
             work_item_mode: WorkItemMode::Issues,
             assignee_filter: AssigneeFilter::All,
-            repo_query: String::new(),
-            repo_search_mode: false,
-            filtered_repo_indices: Vec::new(),
-            issue_query: String::new(),
-            issue_search_mode: false,
-            help_overlay_visible: false,
-            filtered_issue_indices: Vec::new(),
+            search: SearchState::default(),
             status: String::new(),
             sync: SyncState::default(),
             repo_label_colors: HashMap::new(),
@@ -538,18 +537,18 @@ impl App {
     }
 
     pub fn filtered_repo_rows(&self) -> Vec<&LocalRepoRow> {
-        self.filtered_repo_indices
+        self.search.filtered_repo_indices
             .iter()
             .filter_map(|index| self.repos.get(*index))
             .collect::<Vec<&LocalRepoRow>>()
     }
 
     pub fn repo_query(&self) -> &str {
-        self.repo_query.as_str()
+        self.search.repo_query.as_str()
     }
 
     pub fn repo_search_mode(&self) -> bool {
-        self.repo_search_mode
+        self.search.repo_search_mode
     }
 
     pub fn remotes(&self) -> &[RemoteInfo] {
@@ -565,14 +564,14 @@ impl App {
     }
 
     pub fn issues_for_view(&self) -> Vec<&IssueRow> {
-        self.filtered_issue_indices
+        self.search.filtered_issue_indices
             .iter()
             .filter_map(|index| self.issues.get(*index))
             .collect::<Vec<&IssueRow>>()
     }
 
     pub fn selected_issue_row(&self) -> Option<&IssueRow> {
-        let issue_index = *self.filtered_issue_indices.get(self.navigation.selected_issue)?;
+        let issue_index = *self.search.filtered_issue_indices.get(self.navigation.selected_issue)?;
         self.issues.get(issue_index)
     }
 
@@ -752,7 +751,7 @@ impl App {
     }
 
     pub fn select_issue_by_number(&mut self, issue_number: i64) -> bool {
-        let selected = self.filtered_issue_indices.iter().position(|index| {
+        let selected = self.search.filtered_issue_indices.iter().position(|index| {
             self.issues
                 .get(*index)
                 .is_some_and(|issue| issue.number == issue_number)
@@ -767,15 +766,15 @@ impl App {
     }
 
     pub fn issue_query(&self) -> &str {
-        self.issue_query.as_str()
+        self.search.issue_query.as_str()
     }
 
     pub fn issue_search_mode(&self) -> bool {
-        self.issue_search_mode
+        self.search.issue_search_mode
     }
 
     pub fn help_overlay_visible(&self) -> bool {
-        self.help_overlay_visible
+        self.search.help_overlay_visible
     }
 
     pub fn issue_counts(&self) -> (usize, usize) {
@@ -807,7 +806,7 @@ impl App {
     }
 
     pub fn selected_repo_target(&self) -> Option<(String, String, String)> {
-        let repo_index = *self.filtered_repo_indices.get(self.navigation.selected_repo)?;
+        let repo_index = *self.search.filtered_repo_indices.get(self.navigation.selected_repo)?;
         let repo = self.repos.get(repo_index)?;
         Some((repo.owner.clone(), repo.repo.clone(), repo.path.clone()))
     }
@@ -1200,12 +1199,12 @@ impl App {
             return;
         }
         if self.view == View::RepoPicker
-            && self.repo_search_mode
+            && self.search.repo_search_mode
             && self.handle_repo_search_key(key)
         {
             return;
         }
-        if self.view == View::Issues && self.issue_search_mode && self.handle_issue_search_key(key)
+        if self.view == View::Issues && self.search.issue_search_mode && self.handle_issue_search_key(key)
         {
             return;
         }
@@ -1235,11 +1234,11 @@ impl App {
         }
 
         if key.code == KeyCode::Char('?') {
-            self.help_overlay_visible = !self.help_overlay_visible;
+            self.search.help_overlay_visible = !self.search.help_overlay_visible;
             return;
         }
-        if self.help_overlay_visible && key.code == KeyCode::Esc {
-            self.help_overlay_visible = false;
+        if self.search.help_overlay_visible && key.code == KeyCode::Esc {
+            self.search.help_overlay_visible = false;
             return;
         }
 
@@ -1251,11 +1250,11 @@ impl App {
                 self.open_repo_picker();
             }
             KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::RepoPicker => {
-                self.repo_search_mode = true;
+                self.search.repo_search_mode = true;
                 self.status = "Search repos".to_string();
             }
             KeyCode::Char('/') if key.modifiers.is_empty() && self.view == View::Issues => {
-                self.issue_search_mode = true;
+                self.search.issue_search_mode = true;
                 self.status = "Search issues".to_string();
             }
             KeyCode::Tab if key.modifiers.is_empty() && self.view == View::Issues => {
@@ -1324,7 +1323,7 @@ impl App {
                     ) =>
             {
                 let has_issue = if self.view == View::Issues {
-                    !self.filtered_issue_indices.is_empty()
+                    !self.search.filtered_issue_indices.is_empty()
                 } else {
                     self.context.issue_id.is_some() && self.context.issue_number.is_some()
                 };
@@ -1669,7 +1668,7 @@ impl App {
                 self.open_repo_picker();
             }
             Some(MouseTarget::RepoRow(index)) => {
-                self.navigation.selected_repo = index.min(self.filtered_repo_indices.len().saturating_sub(1));
+                self.navigation.selected_repo = index.min(self.search.filtered_repo_indices.len().saturating_sub(1));
                 self.action = Some(AppAction::PickRepo);
             }
             Some(MouseTarget::RepoListPane) => {}
@@ -1693,7 +1692,7 @@ impl App {
             Some(MouseTarget::IssueRow(index)) => {
                 self.focus = Focus::IssuesList;
                 self.navigation.selected_issue =
-                    index.min(self.filtered_issue_indices.len().saturating_sub(1));
+                    index.min(self.search.filtered_issue_indices.len().saturating_sub(1));
                 self.navigation.issues_preview_scroll = 0;
                 self.action = Some(AppAction::PickIssue);
             }
@@ -1785,15 +1784,15 @@ impl App {
     }
 
     fn open_repo_picker(&mut self) {
-        self.repo_query.clear();
-        self.repo_search_mode = false;
+        self.search.repo_query.clear();
+        self.search.repo_search_mode = false;
         self.rebuild_repo_picker_filter();
         self.set_view(View::RepoPicker);
     }
 
     pub fn set_view(&mut self, view: View) {
         self.view = view;
-        self.help_overlay_visible = false;
+        self.search.help_overlay_visible = false;
         if self.view != View::PullRequestFiles {
             self.pull_request.pull_request_diff_expanded = false;
         }
@@ -1804,9 +1803,9 @@ impl App {
                 self.pull_request.pull_request_review_focus = PullRequestReviewFocus::Files;
             }
             _ => {
-                self.issue_search_mode = false;
+                self.search.issue_search_mode = false;
                 if self.view != View::RepoPicker {
-                    self.repo_search_mode = false;
+                    self.search.repo_search_mode = false;
                 }
             }
         }
@@ -1815,8 +1814,8 @@ impl App {
     pub fn set_repos(&mut self, repos: Vec<LocalRepoRow>) {
         self.repos = repos;
         self.rebuild_repo_picker_filter();
-        if self.navigation.selected_repo >= self.filtered_repo_indices.len() {
-            self.navigation.selected_repo = self.filtered_repo_indices.len().saturating_sub(1);
+        if self.navigation.selected_repo >= self.search.filtered_repo_indices.len() {
+            self.navigation.selected_repo = self.search.filtered_repo_indices.len().saturating_sub(1);
         }
     }
 
@@ -1832,7 +1831,7 @@ impl App {
         self.rebuild_issue_filter();
         self.navigation.selected_issue = selected_issue_number
             .and_then(|number| {
-                self.filtered_issue_indices.iter().position(|index| {
+                self.search.filtered_issue_indices.iter().position(|index| {
                     self.issues
                         .get(*index)
                         .is_some_and(|issue| issue.number == number)
@@ -2194,11 +2193,11 @@ impl App {
         self.linked.issue_lookups.clear();
         self.linked.navigation_origin = None;
         self.reset_pull_request_state();
-        self.repo_search_mode = false;
+        self.search.repo_search_mode = false;
         self.assignee_filter = AssigneeFilter::All;
         self.work_item_mode = WorkItemMode::Issues;
-        self.issue_query.clear();
-        self.issue_search_mode = false;
+        self.search.issue_query.clear();
+        self.search.issue_search_mode = false;
     }
 
     pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
@@ -2253,8 +2252,8 @@ impl App {
             }
         }
         self.rebuild_issue_filter();
-        if self.navigation.selected_issue >= self.filtered_issue_indices.len() {
-            self.navigation.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
+        if self.navigation.selected_issue >= self.search.filtered_issue_indices.len() {
+            self.navigation.selected_issue = self.search.filtered_issue_indices.len().saturating_sub(1);
         }
     }
 
@@ -2711,7 +2710,7 @@ impl App {
     fn move_selection_down(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if self.navigation.selected_repo + 1 < self.filtered_repo_indices.len() {
+                if self.navigation.selected_repo + 1 < self.search.filtered_repo_indices.len() {
                     self.navigation.selected_repo += 1;
                 }
             }
@@ -2727,7 +2726,7 @@ impl App {
                         self.navigation.issues_preview_scroll.saturating_add(1).min(max);
                     return;
                 }
-                if self.navigation.selected_issue + 1 < self.filtered_issue_indices.len() {
+                if self.navigation.selected_issue + 1 < self.search.filtered_issue_indices.len() {
                     self.navigation.selected_issue += 1;
                     self.navigation.issues_preview_scroll = 0;
                 }
@@ -2925,8 +2924,8 @@ impl App {
     fn jump_bottom(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if !self.filtered_repo_indices.is_empty() {
-                    self.navigation.selected_repo = self.filtered_repo_indices.len() - 1;
+                if !self.search.filtered_repo_indices.is_empty() {
+                    self.navigation.selected_repo = self.search.filtered_repo_indices.len() - 1;
                 }
             }
             View::RemoteChooser => {
@@ -2939,8 +2938,8 @@ impl App {
                     self.navigation.issues_preview_scroll = self.navigation.issues_preview_max_scroll;
                     return;
                 }
-                if !self.filtered_issue_indices.is_empty() {
-                    self.navigation.selected_issue = self.filtered_issue_indices.len() - 1;
+                if !self.search.filtered_issue_indices.is_empty() {
+                    self.navigation.selected_issue = self.search.filtered_issue_indices.len() - 1;
                     self.navigation.issues_preview_scroll = 0;
                 }
             }
@@ -3370,8 +3369,8 @@ impl App {
     }
 
     fn rebuild_issue_filter(&mut self) {
-        let query = self.issue_query.trim().to_ascii_lowercase();
-        self.filtered_issue_indices = self
+        let query = self.search.issue_query.trim().to_ascii_lowercase();
+        self.search.filtered_issue_indices = self
             .issues
             .iter()
             .enumerate()
@@ -3387,7 +3386,7 @@ impl App {
             })
             .collect::<Vec<usize>>();
 
-        self.filtered_issue_indices
+        self.search.filtered_issue_indices
             .sort_by(|left_index, right_index| {
                 let left = self.issues.get(*left_index);
                 let right = self.issues.get(*right_index);
@@ -3405,8 +3404,8 @@ impl App {
                 }
             });
 
-        if self.navigation.selected_issue >= self.filtered_issue_indices.len() {
-            self.navigation.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
+        if self.navigation.selected_issue >= self.search.filtered_issue_indices.len() {
+            self.navigation.selected_issue = self.search.filtered_issue_indices.len().saturating_sub(1);
         }
     }
 
@@ -3482,7 +3481,7 @@ impl App {
         self.status = format!(
             "Assignee: {} ({} items)",
             self.assignee_filter.label(),
-            self.filtered_issue_indices.len()
+            self.search.filtered_issue_indices.len()
         );
     }
 
@@ -3493,7 +3492,7 @@ impl App {
         self.status = format!(
             "Assignee: {} ({} items)",
             self.assignee_filter.label(),
-            self.filtered_issue_indices.len()
+            self.search.filtered_issue_indices.len()
         );
     }
 
@@ -3656,7 +3655,7 @@ impl App {
 
     fn handle_issue_search_key(&mut self, key: KeyEvent) -> bool {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
-            self.issue_query.clear();
+            self.search.issue_query.clear();
             self.rebuild_issue_filter();
             self.navigation.issues_preview_scroll = 0;
             self.update_search_status();
@@ -3665,18 +3664,18 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                self.issue_search_mode = false;
-                self.issue_query.clear();
+                self.search.issue_search_mode = false;
+                self.search.issue_query.clear();
                 self.rebuild_issue_filter();
                 self.navigation.issues_preview_scroll = 0;
                 self.status = "Search cleared".to_string();
             }
             KeyCode::Enter => {
-                self.issue_search_mode = false;
+                self.search.issue_search_mode = false;
                 self.update_search_status();
             }
             KeyCode::Backspace => {
-                self.issue_query.pop();
+                self.search.issue_query.pop();
                 self.rebuild_issue_filter();
                 self.navigation.issues_preview_scroll = 0;
                 self.update_search_status();
@@ -3684,7 +3683,7 @@ impl App {
             KeyCode::Char(ch)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
             {
-                self.issue_query.push(ch);
+                self.search.issue_query.push(ch);
                 self.rebuild_issue_filter();
                 self.navigation.issues_preview_scroll = 0;
                 self.update_search_status();
@@ -3696,7 +3695,7 @@ impl App {
 
     fn handle_repo_search_key(&mut self, key: KeyEvent) -> bool {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
-            self.repo_query.clear();
+            self.search.repo_query.clear();
             self.rebuild_repo_picker_filter();
             self.navigation.selected_repo = 0;
             self.status = "Repo search cleared".to_string();
@@ -3705,25 +3704,25 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                self.repo_search_mode = false;
-                self.repo_query.clear();
+                self.search.repo_search_mode = false;
+                self.search.repo_query.clear();
                 self.rebuild_repo_picker_filter();
                 self.navigation.selected_repo = 0;
                 self.status = String::new();
             }
             KeyCode::Enter => {
-                self.repo_search_mode = false;
-                self.status = format!("{} repos", self.filtered_repo_indices.len());
+                self.search.repo_search_mode = false;
+                self.status = format!("{} repos", self.search.filtered_repo_indices.len());
             }
             KeyCode::Backspace => {
-                self.repo_query.pop();
+                self.search.repo_query.pop();
                 self.rebuild_repo_picker_filter();
                 self.navigation.selected_repo = 0;
             }
             KeyCode::Char(ch)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
             {
-                self.repo_query.push(ch);
+                self.search.repo_query.push(ch);
                 self.rebuild_repo_picker_filter();
                 self.navigation.selected_repo = 0;
             }
@@ -3797,7 +3796,7 @@ impl App {
     }
 
     fn update_search_status(&mut self) {
-        if self.issue_query.trim().is_empty() {
+        if self.search.issue_query.trim().is_empty() {
             self.status = format!(
                 "Filter: {} | assignee: {}",
                 self.issue_filter.label(),
@@ -3807,9 +3806,9 @@ impl App {
         }
         self.status = format!(
             "Search: {} | assignee: {} ({} results)",
-            self.issue_query,
+            self.search.issue_query,
             self.assignee_filter.label(),
-            self.filtered_issue_indices.len()
+            self.search.filtered_issue_indices.len()
         );
     }
 
@@ -3857,8 +3856,8 @@ impl App {
     }
 
     fn rebuild_repo_picker_filter(&mut self) {
-        let query = self.repo_query.trim().to_ascii_lowercase();
-        self.filtered_repo_indices = self
+        let query = self.search.repo_query.trim().to_ascii_lowercase();
+        self.search.filtered_repo_indices = self
             .repos
             .iter()
             .enumerate()
