@@ -339,3 +339,82 @@ fn linked_pull_request_none_does_not_clear_cached_link() {
 
     assert_eq!(app.linked_pull_request_for_issue(7), Some(42));
 }
+
+#[test]
+fn linked_pull_request_multi_preserves_all_candidates() {
+    let mut app = App::new(Config::default());
+    app.set_linked_pull_requests(7, vec![42, 84]);
+
+    assert_eq!(app.linked_pull_request_for_issue(7), Some(42));
+    assert_eq!(app.linked_pull_requests_for_issue(7), vec![42, 84]);
+}
+
+#[test]
+fn linked_issue_multi_preserves_all_candidates() {
+    let mut app = App::new(Config::default());
+    app.set_linked_issues_for_pull_request(42, vec![7, 9]);
+
+    assert_eq!(app.linked_issue_for_pull_request(42), Some(7));
+    assert_eq!(app.linked_issues_for_pull_request(42), vec![7, 9]);
+}
+
+#[test]
+fn linked_picker_keyboard_flow_selects_item() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::IssueDetail);
+    app.open_linked_picker(
+        View::IssueDetail,
+        LinkedPickerTarget::PullRequestTui,
+        vec![11, 22],
+    );
+
+    assert_eq!(app.view(), View::LinkedPicker);
+    assert_eq!(app.linked_picker_numbers(), vec![11, 22]);
+    assert_eq!(app.selected_linked_picker_index(), 0);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert_eq!(app.selected_linked_picker_index(), 1);
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.take_action(), Some(AppAction::PickLinkedItem));
+}
+
+#[test]
+fn linked_picker_escape_returns_to_previous_view() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::IssueComments);
+    app.open_linked_picker(
+        View::IssueComments,
+        LinkedPickerTarget::IssueBrowser,
+        vec![101, 102],
+    );
+
+    app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert_eq!(app.view(), View::IssueComments);
+}
+
+#[test]
+fn linked_picker_labels_include_cached_titles() {
+    let mut app = App::new(Config::default());
+    app.set_issues(vec![IssueRow {
+        id: 1,
+        repo_id: 1,
+        number: 22,
+        state: "open".to_string(),
+        title: "Fix flaky sync test".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+    app.open_linked_picker(
+        View::IssueDetail,
+        LinkedPickerTarget::PullRequestTui,
+        vec![22],
+    );
+
+    assert_eq!(app.linked_picker_labels(), vec!["#22  Fix flaky sync test"]);
+}

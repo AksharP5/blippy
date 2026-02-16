@@ -19,6 +19,7 @@ const HEADER_HEIGHT: u16 = 1;
 mod ui_editor_views;
 mod ui_issue_detail;
 mod ui_issues;
+mod ui_linked_picker;
 mod ui_metadata;
 mod ui_pull_request;
 mod ui_repo;
@@ -47,6 +48,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, area: Rect, theme: &ThemePalett
         }
         View::IssueComments => "Comments",
         View::PullRequestFiles => "Files",
+        View::LinkedPicker => "Linked",
         View::LabelPicker => "Labels",
         View::AssigneePicker => "Assignees",
         View::CommentPresetPicker => "Close",
@@ -125,6 +127,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         View::PullRequestFiles => {
             ui_pull_request::draw_pull_request_files(frame, app, content_area, theme)
         }
+        View::LinkedPicker => ui_linked_picker::draw_linked_picker(frame, app, content_area, theme),
         View::LabelPicker => ui_metadata::draw_label_picker(frame, app, content_area, theme),
         View::AssigneePicker => ui_metadata::draw_assignee_picker(frame, app, content_area, theme),
         View::CommentPresetPicker => {

@@ -1,4 +1,5 @@
 use reqwest::header::{ETAG, IF_NONE_MATCH};
+use std::collections::HashSet;
 
 use super::*;
 
@@ -41,94 +42,120 @@ impl GitHubClient {
         Ok(ApiIssuesPageResult::Page(ApiIssuesPage { issues, etag }))
     }
 
-    pub async fn find_linked_pull_request(
+    pub async fn find_linked_pull_requests(
         &self,
         owner: &str,
         repo: &str,
         issue_number: i64,
-    ) -> Result<Option<(i64, String)>> {
-        let url = format!(
-            "{}/repos/{}/{}/issues/{}/timeline",
-            API_BASE, owner, repo, issue_number
-        );
-        let response = self
-            .client
-            .get(url)
-            .bearer_auth(&self.token)
-            .query(&[("per_page", "100")])
-            .send()
-            .await?
-            .error_for_status()?;
-        let events = response.json::<Vec<serde_json::Value>>().await?;
+    ) -> Result<Vec<(i64, String)>> {
+        let mut linked = Vec::new();
+        let mut seen = HashSet::new();
+        let mut page = 1u32;
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/issues/{}/timeline",
+                API_BASE, owner, repo, issue_number
+            );
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let events = response.json::<Vec<serde_json::Value>>().await?;
+            if events.is_empty() {
+                break;
+            }
 
-        for event in events {
-            let issue = match event.get("source").and_then(|value| value.get("issue")) {
-                Some(issue) => issue,
-                None => continue,
-            };
-            if issue.get("pull_request").is_none() {
-                continue;
+            for event in &events {
+                let issue = match event.get("source").and_then(|value| value.get("issue")) {
+                    Some(issue) => issue,
+                    None => continue,
+                };
+                if issue.get("pull_request").is_none() {
+                    continue;
+                }
+                let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
+                    Some(html_url) => html_url,
+                    None => continue,
+                };
+                let pull_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
+                    Some(pull_number) => pull_number,
+                    None => continue,
+                };
+                if !html_url.contains("/pull/") || !seen.insert(pull_number) {
+                    continue;
+                }
+                linked.push((pull_number, html_url.to_string()));
             }
-            let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
-                Some(html_url) => html_url,
-                None => continue,
-            };
-            let pull_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
-                Some(pull_number) => pull_number,
-                None => continue,
-            };
-            if !html_url.contains("/pull/") {
-                continue;
+
+            if events.len() < 100 {
+                break;
             }
-            return Ok(Some((pull_number, html_url.to_string())));
+            page += 1;
         }
 
-        Ok(None)
+        Ok(linked)
     }
 
-    pub async fn find_linked_issue_for_pull_request(
+    pub async fn find_linked_issues_for_pull_request(
         &self,
         owner: &str,
         repo: &str,
         pull_number: i64,
-    ) -> Result<Option<(i64, String)>> {
-        let url = format!(
-            "{}/repos/{}/{}/issues/{}/timeline",
-            API_BASE, owner, repo, pull_number
-        );
-        let response = self
-            .client
-            .get(url)
-            .bearer_auth(&self.token)
-            .query(&[("per_page", "100")])
-            .send()
-            .await?
-            .error_for_status()?;
-        let events = response.json::<Vec<serde_json::Value>>().await?;
+    ) -> Result<Vec<(i64, String)>> {
+        let mut linked = Vec::new();
+        let mut seen = HashSet::new();
+        let mut page = 1u32;
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/issues/{}/timeline",
+                API_BASE, owner, repo, pull_number
+            );
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .query(&[("per_page", "100"), ("page", &page.to_string())])
+                .send()
+                .await?
+                .error_for_status()?;
+            let events = response.json::<Vec<serde_json::Value>>().await?;
+            if events.is_empty() {
+                break;
+            }
 
-        for event in events {
-            let issue = match event.get("source").and_then(|value| value.get("issue")) {
-                Some(issue) => issue,
-                None => continue,
-            };
-            if issue.get("pull_request").is_some() {
-                continue;
+            for event in &events {
+                let issue = match event.get("source").and_then(|value| value.get("issue")) {
+                    Some(issue) => issue,
+                    None => continue,
+                };
+                if issue.get("pull_request").is_some() {
+                    continue;
+                }
+                let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
+                    Some(html_url) => html_url,
+                    None => continue,
+                };
+                let issue_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
+                    Some(issue_number) => issue_number,
+                    None => continue,
+                };
+                if !html_url.contains("/issues/") || !seen.insert(issue_number) {
+                    continue;
+                }
+                linked.push((issue_number, html_url.to_string()));
             }
-            let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
-                Some(html_url) => html_url,
-                None => continue,
-            };
-            let issue_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
-                Some(issue_number) => issue_number,
-                None => continue,
-            };
-            if !html_url.contains("/issues/") {
-                continue;
+
+            if events.len() < 100 {
+                break;
             }
-            return Ok(Some((issue_number, html_url.to_string())));
+            page += 1;
         }
 
-        Ok(None)
+        Ok(linked)
     }
 
     pub async fn close_issue(&self, owner: &str, repo: &str, issue_number: i64) -> Result<()> {

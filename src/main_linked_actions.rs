@@ -63,10 +63,23 @@ pub(super) fn try_open_cached_linked_pull_request(
         return Ok(false);
     }
 
-    let pull_number = match app.linked_pull_request_for_issue(issue.number) {
-        Some(pull_number) => pull_number,
-        None => return Ok(false),
-    };
+    let pull_numbers = app.linked_pull_requests_for_issue(issue.number);
+    if pull_numbers.is_empty() {
+        return Ok(false);
+    }
+
+    if pull_numbers.len() > 1 {
+        let picker_target = match target {
+            LinkedPullRequestTarget::Tui => LinkedPickerTarget::PullRequestTui,
+            LinkedPullRequestTarget::Browser => LinkedPickerTarget::PullRequestBrowser,
+            LinkedPullRequestTarget::Probe => return Ok(true),
+        };
+        app.open_linked_picker(app.view(), picker_target, pull_numbers);
+        app.set_status("Multiple linked pull requests found".to_string());
+        return Ok(true);
+    }
+
+    let pull_number = pull_numbers[0];
 
     if target == LinkedPullRequestTarget::Tui {
         app.capture_linked_navigation_origin();
@@ -118,10 +131,23 @@ pub(super) fn try_open_cached_linked_issue(
         return Ok(false);
     }
 
-    let issue_number = match app.linked_issue_for_pull_request(issue.number) {
-        Some(issue_number) => issue_number,
-        None => return Ok(false),
-    };
+    let issue_numbers = app.linked_issues_for_pull_request(issue.number);
+    if issue_numbers.is_empty() {
+        return Ok(false);
+    }
+
+    if issue_numbers.len() > 1 {
+        let picker_target = match target {
+            LinkedIssueTarget::Tui => LinkedPickerTarget::IssueTui,
+            LinkedIssueTarget::Browser => LinkedPickerTarget::IssueBrowser,
+            LinkedIssueTarget::Probe => return Ok(true),
+        };
+        app.open_linked_picker(app.view(), picker_target, issue_numbers);
+        app.set_status("Multiple linked issues found".to_string());
+        return Ok(true);
+    }
+
+    let issue_number = issue_numbers[0];
 
     if target == LinkedIssueTarget::Tui {
         app.capture_linked_navigation_origin();
@@ -243,6 +269,91 @@ pub(super) fn open_linked_issue(
     Ok(())
 }
 
+pub(super) fn open_selected_linked_item(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
+    let target = match app.linked_picker_target() {
+        Some(target) => target,
+        None => {
+            app.set_status("No linked item selected".to_string());
+            return Ok(());
+        }
+    };
+    let number = match app.selected_linked_picker_number() {
+        Some(number) => number,
+        None => {
+            app.set_status("No linked item selected".to_string());
+            return Ok(());
+        }
+    };
+
+    let cancel_view = app.linked_picker_cancel_view();
+    app.clear_linked_picker_state();
+
+    match target {
+        LinkedPickerTarget::PullRequestTui => {
+            app.capture_linked_navigation_origin();
+            refresh_current_repo_issues(app, conn)?;
+            if open_pull_request_in_tui(app, conn, number)? {
+                app.set_status(format!("Opened linked pull request #{} in TUI", number));
+                return Ok(());
+            }
+            app.clear_linked_navigation_origin();
+            app.set_view(cancel_view);
+            app.set_status(format!(
+                "Linked PR #{} not cached in TUI yet; press r then Shift+P",
+                number
+            ));
+        }
+        LinkedPickerTarget::IssueTui => {
+            app.capture_linked_navigation_origin();
+            refresh_current_repo_issues(app, conn)?;
+            if open_issue_in_tui(app, conn, number)? {
+                app.set_status(format!("Opened linked issue #{} in TUI", number));
+                return Ok(());
+            }
+            app.clear_linked_navigation_origin();
+            app.set_view(cancel_view);
+            app.set_status(format!(
+                "Linked issue #{} not cached in TUI yet; press r then Shift+P",
+                number
+            ));
+        }
+        LinkedPickerTarget::PullRequestBrowser => {
+            app.set_view(cancel_view);
+            let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+                (Some(owner), Some(repo)) => (owner, repo),
+                _ => {
+                    app.set_status("No repo selected".to_string());
+                    return Ok(());
+                }
+            };
+            let url = format!("https://github.com/{}/{}/pull/{}", owner, repo, number);
+            if let Err(error) = open_url(url.as_str()) {
+                app.set_status(format!("Open linked PR failed: {}", error));
+                return Ok(());
+            }
+            app.set_status(format!("Opened linked pull request #{} in browser", number));
+        }
+        LinkedPickerTarget::IssueBrowser => {
+            app.set_view(cancel_view);
+            let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+                (Some(owner), Some(repo)) => (owner, repo),
+                _ => {
+                    app.set_status("No repo selected".to_string());
+                    return Ok(());
+                }
+            };
+            let url = format!("https://github.com/{}/{}/issues/{}", owner, repo, number);
+            if let Err(error) = open_url(url.as_str()) {
+                app.set_status(format!("Open linked issue failed: {}", error));
+                return Ok(());
+            }
+            app.set_status(format!("Opened linked issue #{} in browser", number));
+        }
+    }
+
+    Ok(())
+}
+
 pub(super) fn open_pull_request_in_tui(
     app: &mut App,
     conn: &rusqlite::Connection,
@@ -327,20 +438,15 @@ pub(super) fn start_linked_pull_request_lookup(
             let result = services.runtime.block_on(async {
                 services
                     .client
-                    .find_linked_pull_request(&owner, &repo, issue_number)
+                    .find_linked_pull_requests(&owner, &repo, issue_number)
                     .await
             });
 
             match result {
-                Ok(linked) => {
-                    let (pull_number, url) = match linked {
-                        Some((pull_number, url)) => (Some(pull_number), Some(url)),
-                        None => (None, None),
-                    };
+                Ok(pull_requests) => {
                     let _ = event_tx.send(AppEvent::LinkedPullRequestResolved {
                         issue_number,
-                        pull_number,
-                        url,
+                        pull_requests,
                         target,
                     });
                 }
@@ -376,20 +482,15 @@ pub(super) fn start_linked_issue_lookup(
             let result = services.runtime.block_on(async {
                 services
                     .client
-                    .find_linked_issue_for_pull_request(&owner, &repo, pull_number)
+                    .find_linked_issues_for_pull_request(&owner, &repo, pull_number)
                     .await
             });
 
             match result {
-                Ok(linked) => {
-                    let (issue_number, url) = match linked {
-                        Some((issue_number, url)) => (Some(issue_number), Some(url)),
-                        None => (None, None),
-                    };
+                Ok(issues) => {
                     let _ = event_tx.send(AppEvent::LinkedIssueResolved {
                         pull_number,
-                        issue_number,
-                        url,
+                        issues,
                         target,
                     });
                 }
