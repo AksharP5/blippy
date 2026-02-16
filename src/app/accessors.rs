@@ -133,7 +133,7 @@ impl App {
             .issues
             .iter()
             .filter(|issue| self.work_item_mode.matches(issue))
-            .filter(|issue| issue.state.eq_ignore_ascii_case("closed"))
+            .filter(|issue| issue_state_is_closed(issue.state.as_str()))
             .count();
         (open, closed)
     }

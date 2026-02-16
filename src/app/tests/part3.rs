@@ -234,6 +234,151 @@ fn slash_search_supports_qualifier_tokens() {
 }
 
 #[test]
+fn closed_filter_includes_merged_pull_requests() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![
+        IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 11,
+            state: "merged".to_string(),
+            title: "Merged PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: Some("2024-01-03T00:00:00Z".to_string()),
+            is_pr: true,
+        },
+        IssueRow {
+            id: 2,
+            repo_id: 1,
+            number: 12,
+            state: "closed".to_string(),
+            title: "Closed PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: Some("2024-01-02T00:00:00Z".to_string()),
+            is_pr: true,
+        },
+        IssueRow {
+            id: 3,
+            repo_id: 1,
+            number: 13,
+            state: "open".to_string(),
+            title: "Open PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: Some("2024-01-04T00:00:00Z".to_string()),
+            is_pr: true,
+        },
+    ]);
+
+    app.set_issue_filter(IssueFilter::Closed);
+
+    let numbers = app
+        .issues_for_view()
+        .iter()
+        .map(|issue| issue.number)
+        .collect::<Vec<i64>>();
+    assert_eq!(numbers, vec![11, 12]);
+}
+
+#[test]
+fn is_closed_query_matches_merged_pull_requests() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![
+        IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 21,
+            state: "merged".to_string(),
+            title: "Merged PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        },
+        IssueRow {
+            id: 2,
+            repo_id: 1,
+            number: 22,
+            state: "closed".to_string(),
+            title: "Closed PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        },
+    ]);
+    app.set_issue_filter(IssueFilter::Closed);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+    for ch in "is:closed #21".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+
+    assert_eq!(app.issues_for_view().len(), 1);
+    assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(21));
+}
+
+#[test]
+fn is_merged_query_matches_merged_pull_requests() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![
+        IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 31,
+            state: "merged".to_string(),
+            title: "Merged PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        },
+        IssueRow {
+            id: 2,
+            repo_id: 1,
+            number: 32,
+            state: "closed".to_string(),
+            title: "Closed PR".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        },
+    ]);
+    app.set_issue_filter(IssueFilter::Closed);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+    for ch in "is:merged".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+
+    assert_eq!(app.issues_for_view().len(), 1);
+    assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(31));
+}
+
+#[test]
 fn assignee_qualifier_matches_exact_user() {
     let mut app = App::new(Config::default());
     app.set_view(View::Issues);

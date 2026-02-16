@@ -233,6 +233,14 @@ pub(crate) fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent
         return Ok(());
     }
 
+    if issue_state
+        .as_deref()
+        .is_some_and(|state| state.eq_ignore_ascii_case("merged"))
+    {
+        app.set_status("Merged pull requests cannot be reopened".to_string());
+        return Ok(());
+    }
+
     app.set_current_issue(issue_id, issue_number);
     let (owner, repo) = match (app.current_owner(), app.current_repo()) {
         (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),

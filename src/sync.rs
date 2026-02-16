@@ -66,18 +66,31 @@ pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
         .map(|user| user.login.as_str())
         .collect::<Vec<&str>>()
         .join(",");
+    let is_pr = issue.pull_request.is_some();
+    let is_merged = is_pr
+        && issue
+            .pull_request
+            .as_ref()
+            .and_then(|pull_request| pull_request.get("merged_at"))
+            .and_then(serde_json::Value::as_str)
+            .is_some();
+    let state = if is_merged {
+        "merged".to_string()
+    } else {
+        issue.state.clone()
+    };
     Some(IssueRow {
         id: issue.id,
         repo_id,
         number: issue.number,
-        state: issue.state.clone(),
+        state,
         title: issue.title.clone(),
         body: issue.body.clone().unwrap_or_default(),
         labels,
         assignees,
         comments_count: issue.comments,
         updated_at: issue.updated_at.clone(),
-        is_pr: issue.pull_request.is_some(),
+        is_pr,
     })
 }
 

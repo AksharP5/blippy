@@ -318,8 +318,16 @@ impl IssueFilter {
         if self == Self::Open {
             return issue.state.eq_ignore_ascii_case("open");
         }
-        issue.state.eq_ignore_ascii_case("closed")
+        issue_state_is_closed(issue.state.as_str())
     }
+}
+
+fn issue_state_is_merged(state: &str) -> bool {
+    state.eq_ignore_ascii_case("merged")
+}
+
+fn issue_state_is_closed(state: &str) -> bool {
+    state.eq_ignore_ascii_case("closed") || issue_state_is_merged(state)
 }
 
 impl WorkItemMode {

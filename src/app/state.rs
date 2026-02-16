@@ -363,11 +363,11 @@ impl App {
         if self.view == View::Issues {
             return self
                 .selected_issue_row()
-                .is_some_and(|issue| issue.state.eq_ignore_ascii_case("closed"));
+                .is_some_and(|issue| issue_state_is_closed(issue.state.as_str()));
         }
 
         self.current_issue_row()
-            .is_some_and(|issue| issue.state.eq_ignore_ascii_case("closed"))
+            .is_some_and(|issue| issue_state_is_closed(issue.state.as_str()))
     }
 
     pub(super) fn current_view_issue_is_pull_request(&self) -> bool {

@@ -161,6 +161,9 @@ pub(super) fn filter_tab(
 }
 
 pub(super) fn issue_state_color(state: &str, theme: &ThemePalette) -> Color {
+    if state.eq_ignore_ascii_case("merged") {
+        return theme.accent_merged;
+    }
     if state.eq_ignore_ascii_case("closed") {
         return theme.accent_danger;
     }

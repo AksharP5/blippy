@@ -60,6 +60,33 @@ fn map_issue_to_row_marks_pull_requests() {
 }
 
 #[test]
+fn map_issue_to_row_marks_merged_pull_requests() {
+    let issue = ApiIssue {
+        id: 12,
+        number: 3,
+        state: "closed".to_string(),
+        title: "Merged PR".to_string(),
+        body: Some("body".to_string()),
+        comments: 0,
+        updated_at: None,
+        labels: Vec::new(),
+        assignees: Vec::new(),
+        user: ApiUser {
+            login: "dev".to_string(),
+            user_type: None,
+        },
+        pull_request: Some(serde_json::json!({
+            "url": "x",
+            "merged_at": "2024-02-01T12:00:00Z"
+        })),
+    };
+
+    let row = map_issue_to_row(1, &issue).expect("row");
+    assert!(row.is_pr);
+    assert_eq!(row.state, "merged");
+}
+
+#[test]
 fn map_issue_to_row_builds_label_and_assignee_strings() {
     let issue = ApiIssue {
         id: 11,

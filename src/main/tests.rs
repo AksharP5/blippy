@@ -2,6 +2,7 @@ use super::main_actions::issue_url;
 use crate::app::{View, WorkItemMode};
 use crate::config::Config;
 use crate::store::IssueRow;
+use std::sync::mpsc::channel;
 
 fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
     let mut values = Vec::new();
@@ -152,4 +153,32 @@ fn linked_issue_action_opens_picker_when_multiple_cached() {
     assert!(handled);
     assert_eq!(app.view(), View::LinkedPicker);
     assert_eq!(app.linked_picker_numbers(), vec![100, 101]);
+}
+
+#[test]
+fn reopen_issue_blocks_merged_pull_requests() {
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issue_filter(crate::app::IssueFilter::Closed);
+    app.set_issues(vec![IssueRow {
+        id: 30,
+        repo_id: 1,
+        number: 88,
+        state: "merged".to_string(),
+        title: "Merged PR".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+
+    let (event_tx, _event_rx) = channel();
+    super::main_action_utils::reopen_issue(&mut app, "token", event_tx).expect("reopen helper");
+
+    assert_eq!(app.status(), "Merged pull requests cannot be reopened");
+    assert_eq!(app.pending_issue_badge(88), None);
 }

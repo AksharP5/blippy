@@ -83,6 +83,12 @@ impl App {
                 if value == "issue" {
                     return !issue.is_pr;
                 }
+                if value == "closed" {
+                    return issue_state_is_closed(issue.state.as_str());
+                }
+                if value == "merged" {
+                    return issue_state_is_merged(issue.state.as_str());
+                }
                 return value == state;
             }
             if let Some(value) = token.strip_prefix("label:") {
