@@ -427,20 +427,33 @@ struct MetadataPickerState {
     assignee_query: String,
 }
 
+#[derive(Debug, Default)]
+struct NavigationState {
+    selected_repo: usize,
+    selected_remote: usize,
+    selected_issue: usize,
+    selected_comment: usize,
+    issue_detail_scroll: u16,
+    issue_detail_max_scroll: u16,
+    issues_preview_scroll: u16,
+    issues_preview_max_scroll: u16,
+    issue_comments_scroll: u16,
+    issue_comments_max_scroll: u16,
+    issue_recent_comments_scroll: u16,
+    issue_recent_comments_max_scroll: u16,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
     keybinds: Keybinds,
     view: View,
     focus: Focus,
+    navigation: NavigationState,
     repos: Vec<LocalRepoRow>,
     remotes: Vec<RemoteInfo>,
     issues: Vec<IssueRow>,
     comments: Vec<CommentRow>,
-    selected_repo: usize,
-    selected_remote: usize,
-    selected_issue: usize,
-    selected_comment: usize,
     issue_filter: IssueFilter,
     work_item_mode: WorkItemMode,
     assignee_filter: AssigneeFilter,
@@ -451,14 +464,6 @@ pub struct App {
     issue_search_mode: bool,
     help_overlay_visible: bool,
     filtered_issue_indices: Vec<usize>,
-    issue_detail_scroll: u16,
-    issue_detail_max_scroll: u16,
-    issues_preview_scroll: u16,
-    issues_preview_max_scroll: u16,
-    issue_comments_scroll: u16,
-    issue_comments_max_scroll: u16,
-    issue_recent_comments_scroll: u16,
-    issue_recent_comments_max_scroll: u16,
     status: String,
     sync: SyncState,
     repo_label_colors: HashMap<String, String>,
@@ -486,14 +491,11 @@ impl App {
             keybinds,
             view: View::RepoPicker,
             focus: Focus::IssuesList,
+            navigation: NavigationState::default(),
             repos: Vec::new(),
             remotes: Vec::new(),
             issues: Vec::new(),
             comments: Vec::new(),
-            selected_repo: 0,
-            selected_remote: 0,
-            selected_issue: 0,
-            selected_comment: 0,
             issue_filter: IssueFilter::Open,
             work_item_mode: WorkItemMode::Issues,
             assignee_filter: AssigneeFilter::All,
@@ -504,14 +506,6 @@ impl App {
             issue_search_mode: false,
             help_overlay_visible: false,
             filtered_issue_indices: Vec::new(),
-            issue_detail_scroll: 0,
-            issue_detail_max_scroll: 0,
-            issues_preview_scroll: 0,
-            issues_preview_max_scroll: 0,
-            issue_comments_scroll: 0,
-            issue_comments_max_scroll: 0,
-            issue_recent_comments_scroll: 0,
-            issue_recent_comments_max_scroll: 0,
             status: String::new(),
             sync: SyncState::default(),
             repo_label_colors: HashMap::new(),
@@ -578,7 +572,7 @@ impl App {
     }
 
     pub fn selected_issue_row(&self) -> Option<&IssueRow> {
-        let issue_index = *self.filtered_issue_indices.get(self.selected_issue)?;
+        let issue_index = *self.filtered_issue_indices.get(self.navigation.selected_issue)?;
         self.issues.get(issue_index)
     }
 
@@ -742,7 +736,7 @@ impl App {
     pub fn set_issue_filter(&mut self, filter: IssueFilter) {
         self.issue_filter = filter;
         self.rebuild_issue_filter();
-        self.issues_preview_scroll = 0;
+        self.navigation.issues_preview_scroll = 0;
         self.status = format!(
             "Filter: {} | assignee: {}",
             self.issue_filter.label(),
@@ -753,8 +747,8 @@ impl App {
     pub fn set_work_item_mode(&mut self, mode: WorkItemMode) {
         self.work_item_mode = mode;
         self.rebuild_issue_filter();
-        self.selected_issue = 0;
-        self.issues_preview_scroll = 0;
+        self.navigation.selected_issue = 0;
+        self.navigation.issues_preview_scroll = 0;
     }
 
     pub fn select_issue_by_number(&mut self, issue_number: i64) -> bool {
@@ -767,8 +761,8 @@ impl App {
             Some(selected) => selected,
             None => return false,
         };
-        self.selected_issue = selected;
-        self.issues_preview_scroll = 0;
+        self.navigation.selected_issue = selected;
+        self.navigation.issues_preview_scroll = 0;
         true
     }
 
@@ -809,45 +803,45 @@ impl App {
     }
 
     pub fn selected_repo(&self) -> usize {
-        self.selected_repo
+        self.navigation.selected_repo
     }
 
     pub fn selected_repo_target(&self) -> Option<(String, String, String)> {
-        let repo_index = *self.filtered_repo_indices.get(self.selected_repo)?;
+        let repo_index = *self.filtered_repo_indices.get(self.navigation.selected_repo)?;
         let repo = self.repos.get(repo_index)?;
         Some((repo.owner.clone(), repo.repo.clone(), repo.path.clone()))
     }
 
     pub fn selected_remote(&self) -> usize {
-        self.selected_remote
+        self.navigation.selected_remote
     }
 
     pub fn selected_issue(&self) -> usize {
-        self.selected_issue
+        self.navigation.selected_issue
     }
 
     pub fn selected_comment(&self) -> usize {
-        self.selected_comment
+        self.navigation.selected_comment
     }
 
     pub fn selected_comment_row(&self) -> Option<&CommentRow> {
-        self.comments.get(self.selected_comment)
+        self.comments.get(self.navigation.selected_comment)
     }
 
     pub fn issue_detail_scroll(&self) -> u16 {
-        self.issue_detail_scroll
+        self.navigation.issue_detail_scroll
     }
 
     pub fn issues_preview_scroll(&self) -> u16 {
-        self.issues_preview_scroll
+        self.navigation.issues_preview_scroll
     }
 
     pub fn issue_comments_scroll(&self) -> u16 {
-        self.issue_comments_scroll
+        self.navigation.issue_comments_scroll
     }
 
     pub fn issue_recent_comments_scroll(&self) -> u16 {
-        self.issue_recent_comments_scroll
+        self.navigation.issue_recent_comments_scroll
     }
 
     pub fn selected_preset(&self) -> usize {
@@ -1274,7 +1268,7 @@ impl App {
                 self.work_item_mode = self.work_item_mode.toggle();
                 self.assignee_filter = AssigneeFilter::All;
                 self.rebuild_issue_filter();
-                self.issues_preview_scroll = 0;
+                self.navigation.issues_preview_scroll = 0;
                 self.status = format!("Showing {}", self.work_item_mode.label());
             }
             KeyCode::Char('a') if key.modifiers.is_empty() && self.view == View::Issues => {
@@ -1675,12 +1669,12 @@ impl App {
                 self.open_repo_picker();
             }
             Some(MouseTarget::RepoRow(index)) => {
-                self.selected_repo = index.min(self.filtered_repo_indices.len().saturating_sub(1));
+                self.navigation.selected_repo = index.min(self.filtered_repo_indices.len().saturating_sub(1));
                 self.action = Some(AppAction::PickRepo);
             }
             Some(MouseTarget::RepoListPane) => {}
             Some(MouseTarget::RemoteRow(index)) => {
-                self.selected_remote = index.min(self.remotes.len().saturating_sub(1));
+                self.navigation.selected_remote = index.min(self.remotes.len().saturating_sub(1));
                 self.action = Some(AppAction::PickRemote);
             }
             Some(MouseTarget::RemoteListPane) => {}
@@ -1698,9 +1692,9 @@ impl App {
             }
             Some(MouseTarget::IssueRow(index)) => {
                 self.focus = Focus::IssuesList;
-                self.selected_issue =
+                self.navigation.selected_issue =
                     index.min(self.filtered_issue_indices.len().saturating_sub(1));
-                self.issues_preview_scroll = 0;
+                self.navigation.issues_preview_scroll = 0;
                 self.action = Some(AppAction::PickIssue);
             }
             Some(MouseTarget::IssueBodyPane) => {
@@ -1733,7 +1727,7 @@ impl App {
             }
             Some(MouseTarget::CommentsPane) => {}
             Some(MouseTarget::CommentRow(index)) => {
-                self.selected_comment = index.min(self.comments.len().saturating_sub(1));
+                self.navigation.selected_comment = index.min(self.comments.len().saturating_sub(1));
             }
             Some(MouseTarget::PullRequestFocusFiles) | Some(MouseTarget::PullRequestFilesPane) => {
                 self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
@@ -1821,14 +1815,14 @@ impl App {
     pub fn set_repos(&mut self, repos: Vec<LocalRepoRow>) {
         self.repos = repos;
         self.rebuild_repo_picker_filter();
-        if self.selected_repo >= self.filtered_repo_indices.len() {
-            self.selected_repo = self.filtered_repo_indices.len().saturating_sub(1);
+        if self.navigation.selected_repo >= self.filtered_repo_indices.len() {
+            self.navigation.selected_repo = self.filtered_repo_indices.len().saturating_sub(1);
         }
     }
 
     pub fn set_remotes(&mut self, remotes: Vec<RemoteInfo>) {
         self.remotes = remotes;
-        self.selected_remote = 0;
+        self.navigation.selected_remote = 0;
     }
 
     pub fn set_issues(&mut self, issues: Vec<IssueRow>) {
@@ -1836,7 +1830,7 @@ impl App {
         let current_issue_number = self.context.issue_number;
         self.issues = issues;
         self.rebuild_issue_filter();
-        self.selected_issue = selected_issue_number
+        self.navigation.selected_issue = selected_issue_number
             .and_then(|number| {
                 self.filtered_issue_indices.iter().position(|index| {
                     self.issues
@@ -1850,32 +1844,32 @@ impl App {
         {
             self.context.issue_id = Some(issue.id);
         }
-        self.issues_preview_scroll = 0;
-        self.issues_preview_max_scroll = 0;
+        self.navigation.issues_preview_scroll = 0;
+        self.navigation.issues_preview_max_scroll = 0;
     }
 
     pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
         let selected_comment_id = self.selected_comment_row().map(|comment| comment.id);
         self.comments = comments;
         if self.comments.is_empty() {
-            self.selected_comment = 0;
-            self.issue_comments_scroll = 0;
-            self.issue_recent_comments_scroll = 0;
-            self.issue_comments_max_scroll = 0;
-            self.issue_recent_comments_max_scroll = 0;
+            self.navigation.selected_comment = 0;
+            self.navigation.issue_comments_scroll = 0;
+            self.navigation.issue_recent_comments_scroll = 0;
+            self.navigation.issue_comments_max_scroll = 0;
+            self.navigation.issue_recent_comments_max_scroll = 0;
             return;
         }
-        self.selected_comment = selected_comment_id
+        self.navigation.selected_comment = selected_comment_id
             .and_then(|comment_id| {
                 self.comments
                     .iter()
                     .position(|comment| comment.id == comment_id)
             })
             .unwrap_or(0);
-        self.issue_comments_scroll = 0;
-        self.issue_recent_comments_scroll = 0;
-        self.issue_comments_max_scroll = 0;
-        self.issue_recent_comments_max_scroll = 0;
+        self.navigation.issue_comments_scroll = 0;
+        self.navigation.issue_recent_comments_scroll = 0;
+        self.navigation.issue_comments_max_scroll = 0;
+        self.navigation.issue_recent_comments_max_scroll = 0;
     }
 
     pub fn set_pull_request_files(&mut self, issue_id: i64, files: Vec<PullRequestFile>) {
@@ -2042,38 +2036,38 @@ impl App {
     }
 
     pub fn reset_issue_detail_scroll(&mut self) {
-        self.issue_detail_scroll = 0;
+        self.navigation.issue_detail_scroll = 0;
     }
 
     pub fn set_issue_detail_max_scroll(&mut self, max_scroll: u16) {
-        self.issue_detail_max_scroll = max_scroll;
-        if self.issue_detail_scroll > max_scroll {
-            self.issue_detail_scroll = max_scroll;
+        self.navigation.issue_detail_max_scroll = max_scroll;
+        if self.navigation.issue_detail_scroll > max_scroll {
+            self.navigation.issue_detail_scroll = max_scroll;
         }
     }
 
     pub fn set_issues_preview_max_scroll(&mut self, max_scroll: u16) {
-        self.issues_preview_max_scroll = max_scroll;
-        if self.issues_preview_scroll > max_scroll {
-            self.issues_preview_scroll = max_scroll;
+        self.navigation.issues_preview_max_scroll = max_scroll;
+        if self.navigation.issues_preview_scroll > max_scroll {
+            self.navigation.issues_preview_scroll = max_scroll;
         }
     }
 
     pub fn reset_issue_comments_scroll(&mut self) {
-        self.issue_comments_scroll = 0;
+        self.navigation.issue_comments_scroll = 0;
     }
 
     pub fn set_issue_comments_max_scroll(&mut self, max_scroll: u16) {
-        self.issue_comments_max_scroll = max_scroll;
-        if self.issue_comments_scroll > max_scroll {
-            self.issue_comments_scroll = max_scroll;
+        self.navigation.issue_comments_max_scroll = max_scroll;
+        if self.navigation.issue_comments_scroll > max_scroll {
+            self.navigation.issue_comments_scroll = max_scroll;
         }
     }
 
     pub fn set_issue_recent_comments_max_scroll(&mut self, max_scroll: u16) {
-        self.issue_recent_comments_max_scroll = max_scroll;
-        if self.issue_recent_comments_scroll > max_scroll {
-            self.issue_recent_comments_scroll = max_scroll;
+        self.navigation.issue_recent_comments_max_scroll = max_scroll;
+        if self.navigation.issue_recent_comments_scroll > max_scroll {
+            self.navigation.issue_recent_comments_scroll = max_scroll;
         }
     }
 
@@ -2259,8 +2253,8 @@ impl App {
             }
         }
         self.rebuild_issue_filter();
-        if self.selected_issue >= self.filtered_issue_indices.len() {
-            self.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
+        if self.navigation.selected_issue >= self.filtered_issue_indices.len() {
+            self.navigation.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
         }
     }
 
@@ -2311,17 +2305,17 @@ impl App {
 
         self.comments.remove(removed_index);
         if self.comments.is_empty() {
-            self.selected_comment = 0;
-            self.issue_comments_scroll = 0;
+            self.navigation.selected_comment = 0;
+            self.navigation.issue_comments_scroll = 0;
             return;
         }
 
-        if self.selected_comment >= self.comments.len() {
-            self.selected_comment = self.comments.len() - 1;
+        if self.navigation.selected_comment >= self.comments.len() {
+            self.navigation.selected_comment = self.comments.len() - 1;
             return;
         }
-        if removed_index <= self.selected_comment && self.selected_comment > 0 {
-            self.selected_comment -= 1;
+        if removed_index <= self.navigation.selected_comment && self.navigation.selected_comment > 0 {
+            self.navigation.selected_comment -= 1;
         }
     }
 
@@ -2612,32 +2606,32 @@ impl App {
     fn move_selection_up(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if self.selected_repo > 0 {
-                    self.selected_repo -= 1;
+                if self.navigation.selected_repo > 0 {
+                    self.navigation.selected_repo -= 1;
                 }
             }
             View::RemoteChooser => {
-                if self.selected_remote > 0 {
-                    self.selected_remote -= 1;
+                if self.navigation.selected_remote > 0 {
+                    self.navigation.selected_remote -= 1;
                 }
             }
             View::Issues => {
                 if self.focus == Focus::IssuesPreview {
-                    self.issues_preview_scroll = self.issues_preview_scroll.saturating_sub(1);
+                    self.navigation.issues_preview_scroll = self.navigation.issues_preview_scroll.saturating_sub(1);
                     return;
                 }
-                if self.selected_issue > 0 {
-                    self.selected_issue -= 1;
-                    self.issues_preview_scroll = 0;
+                if self.navigation.selected_issue > 0 {
+                    self.navigation.selected_issue -= 1;
+                    self.navigation.issues_preview_scroll = 0;
                 }
             }
             View::IssueDetail => {
                 if self.focus == Focus::IssueRecentComments {
-                    self.issue_recent_comments_scroll =
-                        self.issue_recent_comments_scroll.saturating_sub(1);
+                    self.navigation.issue_recent_comments_scroll =
+                        self.navigation.issue_recent_comments_scroll.saturating_sub(1);
                     return;
                 }
-                self.issue_detail_scroll = self.issue_detail_scroll.saturating_sub(1);
+                self.navigation.issue_detail_scroll = self.navigation.issue_detail_scroll.saturating_sub(1);
             }
             View::IssueComments => {
                 self.jump_prev_comment();
@@ -2717,36 +2711,36 @@ impl App {
     fn move_selection_down(&mut self) {
         match self.view {
             View::RepoPicker => {
-                if self.selected_repo + 1 < self.filtered_repo_indices.len() {
-                    self.selected_repo += 1;
+                if self.navigation.selected_repo + 1 < self.filtered_repo_indices.len() {
+                    self.navigation.selected_repo += 1;
                 }
             }
             View::RemoteChooser => {
-                if self.selected_remote + 1 < self.remotes.len() {
-                    self.selected_remote += 1;
+                if self.navigation.selected_remote + 1 < self.remotes.len() {
+                    self.navigation.selected_remote += 1;
                 }
             }
             View::Issues => {
                 if self.focus == Focus::IssuesPreview {
-                    let max = self.issues_preview_max_scroll;
-                    self.issues_preview_scroll =
-                        self.issues_preview_scroll.saturating_add(1).min(max);
+                    let max = self.navigation.issues_preview_max_scroll;
+                    self.navigation.issues_preview_scroll =
+                        self.navigation.issues_preview_scroll.saturating_add(1).min(max);
                     return;
                 }
-                if self.selected_issue + 1 < self.filtered_issue_indices.len() {
-                    self.selected_issue += 1;
-                    self.issues_preview_scroll = 0;
+                if self.navigation.selected_issue + 1 < self.filtered_issue_indices.len() {
+                    self.navigation.selected_issue += 1;
+                    self.navigation.issues_preview_scroll = 0;
                 }
             }
             View::IssueDetail => {
                 if self.focus == Focus::IssueRecentComments {
-                    let max = self.issue_recent_comments_max_scroll;
-                    self.issue_recent_comments_scroll =
-                        self.issue_recent_comments_scroll.saturating_add(1).min(max);
+                    let max = self.navigation.issue_recent_comments_max_scroll;
+                    self.navigation.issue_recent_comments_scroll =
+                        self.navigation.issue_recent_comments_scroll.saturating_add(1).min(max);
                     return;
                 }
-                let max = self.issue_detail_max_scroll;
-                self.issue_detail_scroll = self.issue_detail_scroll.saturating_add(1).min(max);
+                let max = self.navigation.issue_detail_max_scroll;
+                self.navigation.issue_detail_scroll = self.navigation.issue_detail_scroll.saturating_add(1).min(max);
             }
             View::IssueComments => {
                 self.jump_next_comment();
@@ -2879,26 +2873,26 @@ impl App {
 
     fn jump_top(&mut self) {
         match self.view {
-            View::RepoPicker => self.selected_repo = 0,
-            View::RemoteChooser => self.selected_remote = 0,
+            View::RepoPicker => self.navigation.selected_repo = 0,
+            View::RemoteChooser => self.navigation.selected_remote = 0,
             View::Issues => {
                 if self.focus == Focus::IssuesPreview {
-                    self.issues_preview_scroll = 0;
+                    self.navigation.issues_preview_scroll = 0;
                     return;
                 }
-                self.selected_issue = 0;
-                self.issues_preview_scroll = 0;
+                self.navigation.selected_issue = 0;
+                self.navigation.issues_preview_scroll = 0;
             }
             View::IssueDetail => {
                 if self.focus == Focus::IssueRecentComments {
-                    self.issue_recent_comments_scroll = 0;
+                    self.navigation.issue_recent_comments_scroll = 0;
                     return;
                 }
-                self.issue_detail_scroll = 0;
+                self.navigation.issue_detail_scroll = 0;
             }
             View::IssueComments => {
-                self.selected_comment = 0;
-                self.issue_comments_scroll = 0;
+                self.navigation.selected_comment = 0;
+                self.navigation.issue_comments_scroll = 0;
             }
             View::PullRequestFiles => {
                 if self.pull_request.pull_request_review_focus == PullRequestReviewFocus::Files {
@@ -2932,36 +2926,36 @@ impl App {
         match self.view {
             View::RepoPicker => {
                 if !self.filtered_repo_indices.is_empty() {
-                    self.selected_repo = self.filtered_repo_indices.len() - 1;
+                    self.navigation.selected_repo = self.filtered_repo_indices.len() - 1;
                 }
             }
             View::RemoteChooser => {
                 if !self.remotes.is_empty() {
-                    self.selected_remote = self.remotes.len() - 1;
+                    self.navigation.selected_remote = self.remotes.len() - 1;
                 }
             }
             View::Issues => {
                 if self.focus == Focus::IssuesPreview {
-                    self.issues_preview_scroll = self.issues_preview_max_scroll;
+                    self.navigation.issues_preview_scroll = self.navigation.issues_preview_max_scroll;
                     return;
                 }
                 if !self.filtered_issue_indices.is_empty() {
-                    self.selected_issue = self.filtered_issue_indices.len() - 1;
-                    self.issues_preview_scroll = 0;
+                    self.navigation.selected_issue = self.filtered_issue_indices.len() - 1;
+                    self.navigation.issues_preview_scroll = 0;
                 }
             }
             View::IssueDetail => {
                 if self.focus == Focus::IssueRecentComments {
-                    self.issue_recent_comments_scroll = self.issue_recent_comments_max_scroll;
+                    self.navigation.issue_recent_comments_scroll = self.navigation.issue_recent_comments_max_scroll;
                     return;
                 }
-                self.issue_detail_scroll = self.issue_detail_max_scroll;
+                self.navigation.issue_detail_scroll = self.navigation.issue_detail_max_scroll;
             }
             View::IssueComments => {
                 if !self.comments.is_empty() {
-                    self.selected_comment = self.comments.len() - 1;
+                    self.navigation.selected_comment = self.comments.len() - 1;
                 }
-                self.issue_comments_scroll = self.issue_comments_max_scroll;
+                self.navigation.issue_comments_scroll = self.navigation.issue_comments_max_scroll;
             }
             View::PullRequestFiles => {
                 if self.pull_request.pull_request_review_focus == PullRequestReviewFocus::Files {
@@ -3012,23 +3006,23 @@ impl App {
 
     fn jump_next_comment(&mut self) {
         let offsets = self.comment_offsets();
-        if offsets.is_empty() || self.selected_comment + 1 >= offsets.len() {
+        if offsets.is_empty() || self.navigation.selected_comment + 1 >= offsets.len() {
             return;
         }
-        self.selected_comment += 1;
-        self.issue_comments_scroll =
-            offsets[self.selected_comment].min(self.issue_comments_max_scroll);
-        self.status = format!("Comment {}/{}", self.selected_comment + 1, offsets.len());
+        self.navigation.selected_comment += 1;
+        self.navigation.issue_comments_scroll =
+            offsets[self.navigation.selected_comment].min(self.navigation.issue_comments_max_scroll);
+        self.status = format!("Comment {}/{}", self.navigation.selected_comment + 1, offsets.len());
     }
 
     fn jump_prev_comment(&mut self) {
         let offsets = self.comment_offsets();
-        if offsets.is_empty() || self.selected_comment == 0 {
+        if offsets.is_empty() || self.navigation.selected_comment == 0 {
             return;
         }
-        self.selected_comment -= 1;
-        self.issue_comments_scroll = offsets[self.selected_comment];
-        self.status = format!("Comment {}/{}", self.selected_comment + 1, offsets.len());
+        self.navigation.selected_comment -= 1;
+        self.navigation.issue_comments_scroll = offsets[self.navigation.selected_comment];
+        self.status = format!("Comment {}/{}", self.navigation.selected_comment + 1, offsets.len());
     }
 
     fn comment_offsets(&self) -> Vec<u16> {
@@ -3411,8 +3405,8 @@ impl App {
                 }
             });
 
-        if self.selected_issue >= self.filtered_issue_indices.len() {
-            self.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
+        if self.navigation.selected_issue >= self.filtered_issue_indices.len() {
+            self.navigation.selected_issue = self.filtered_issue_indices.len().saturating_sub(1);
         }
     }
 
@@ -3484,7 +3478,7 @@ impl App {
 
         self.assignee_filter = options[next].clone();
         self.rebuild_issue_filter();
-        self.issues_preview_scroll = 0;
+        self.navigation.issues_preview_scroll = 0;
         self.status = format!(
             "Assignee: {} ({} items)",
             self.assignee_filter.label(),
@@ -3495,7 +3489,7 @@ impl App {
     fn reset_assignee_filter(&mut self) {
         self.assignee_filter = AssigneeFilter::All;
         self.rebuild_issue_filter();
-        self.issues_preview_scroll = 0;
+        self.navigation.issues_preview_scroll = 0;
         self.status = format!(
             "Assignee: {} ({} items)",
             self.assignee_filter.label(),
@@ -3664,7 +3658,7 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
             self.issue_query.clear();
             self.rebuild_issue_filter();
-            self.issues_preview_scroll = 0;
+            self.navigation.issues_preview_scroll = 0;
             self.update_search_status();
             return true;
         }
@@ -3674,7 +3668,7 @@ impl App {
                 self.issue_search_mode = false;
                 self.issue_query.clear();
                 self.rebuild_issue_filter();
-                self.issues_preview_scroll = 0;
+                self.navigation.issues_preview_scroll = 0;
                 self.status = "Search cleared".to_string();
             }
             KeyCode::Enter => {
@@ -3684,7 +3678,7 @@ impl App {
             KeyCode::Backspace => {
                 self.issue_query.pop();
                 self.rebuild_issue_filter();
-                self.issues_preview_scroll = 0;
+                self.navigation.issues_preview_scroll = 0;
                 self.update_search_status();
             }
             KeyCode::Char(ch)
@@ -3692,7 +3686,7 @@ impl App {
             {
                 self.issue_query.push(ch);
                 self.rebuild_issue_filter();
-                self.issues_preview_scroll = 0;
+                self.navigation.issues_preview_scroll = 0;
                 self.update_search_status();
             }
             _ => {}
@@ -3704,7 +3698,7 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
             self.repo_query.clear();
             self.rebuild_repo_picker_filter();
-            self.selected_repo = 0;
+            self.navigation.selected_repo = 0;
             self.status = "Repo search cleared".to_string();
             return true;
         }
@@ -3714,7 +3708,7 @@ impl App {
                 self.repo_search_mode = false;
                 self.repo_query.clear();
                 self.rebuild_repo_picker_filter();
-                self.selected_repo = 0;
+                self.navigation.selected_repo = 0;
                 self.status = String::new();
             }
             KeyCode::Enter => {
@@ -3724,14 +3718,14 @@ impl App {
             KeyCode::Backspace => {
                 self.repo_query.pop();
                 self.rebuild_repo_picker_filter();
-                self.selected_repo = 0;
+                self.navigation.selected_repo = 0;
             }
             KeyCode::Char(ch)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
             {
                 self.repo_query.push(ch);
                 self.rebuild_repo_picker_filter();
-                self.selected_repo = 0;
+                self.navigation.selected_repo = 0;
             }
             _ => {}
         }
