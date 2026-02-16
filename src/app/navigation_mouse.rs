@@ -119,6 +119,10 @@ impl App {
                     self.back_from_pull_request_files();
                     return;
                 }
+                if self.view == View::LinkedPicker {
+                    self.cancel_linked_picker();
+                    return;
+                }
                 if matches!(self.view, View::LabelPicker | View::AssigneePicker) {
                     self.set_view(self.editor_flow.cancel_view);
                     return;
@@ -238,6 +242,13 @@ impl App {
             Some(MouseTarget::PresetOption(index)) => {
                 self.preset.choice = index.min(self.preset_items_len().saturating_sub(1));
                 self.interaction.action = Some(AppAction::PickPreset);
+            }
+            Some(MouseTarget::LinkedPickerOption(index)) => {
+                self.set_selected_linked_picker_index(index);
+                self.interaction.action = Some(AppAction::PickLinkedItem);
+            }
+            Some(MouseTarget::LinkedPickerCancel) => {
+                self.cancel_linked_picker();
             }
             None => {}
         }

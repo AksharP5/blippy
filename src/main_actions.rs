@@ -145,6 +145,9 @@ pub(super) fn handle_actions(
                 )?;
             }
         }
+        AppAction::PickLinkedItem => {
+            super::main_linked_actions::open_selected_linked_item(app, conn)?;
+        }
         AppAction::AddIssueComment => {
             let (issue_id, issue_number, _) = match selected_issue_for_action(app) {
                 Some(issue) => issue,

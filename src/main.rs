@@ -39,8 +39,8 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app::{
-    App, AppAction, IssueFilter, PendingIssueAction, PresetSelection, PullRequestFile,
-    PullRequestReviewComment, ReviewSide, View, WorkItemMode,
+    App, AppAction, IssueFilter, LinkedPickerTarget, PendingIssueAction, PresetSelection,
+    PullRequestFile, PullRequestReviewComment, ReviewSide, View, WorkItemMode,
 };
 use crate::auth::{SystemAuth, clear_auth_token, resolve_auth_token};
 use crate::cli::{CliCommand, parse_args};
@@ -475,8 +475,7 @@ enum AppEvent {
     },
     LinkedPullRequestResolved {
         issue_number: i64,
-        pull_number: Option<i64>,
-        url: Option<String>,
+        pull_requests: Vec<(i64, String)>,
         target: LinkedPullRequestTarget,
     },
     LinkedPullRequestLookupFailed {
@@ -486,8 +485,7 @@ enum AppEvent {
     },
     LinkedIssueResolved {
         pull_number: i64,
-        issue_number: Option<i64>,
-        url: Option<String>,
+        issues: Vec<(i64, String)>,
         target: LinkedIssueTarget,
     },
     LinkedIssueLookupFailed {

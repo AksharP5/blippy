@@ -18,6 +18,7 @@ pub enum View {
     IssueDetail,
     IssueComments,
     PullRequestFiles,
+    LinkedPicker,
     LabelPicker,
     AssigneePicker,
     CommentPresetPicker,
@@ -36,6 +37,7 @@ pub enum AppAction {
     OpenLinkedPullRequestInTui,
     OpenLinkedIssueInBrowser,
     OpenLinkedIssueInTui,
+    PickLinkedItem,
     CloseIssue,
     ReopenIssue,
     AddIssueComment,
@@ -78,6 +80,8 @@ pub enum MouseTarget {
     LinkedPullRequestWebButton,
     LinkedIssueTuiButton,
     LinkedIssueWebButton,
+    LinkedPickerOption(usize),
+    LinkedPickerCancel,
     CommentRow(usize),
     CommentsPane,
     PullRequestFilesPane,
@@ -136,6 +140,20 @@ pub enum IssueFilter {
 pub enum WorkItemMode {
     Issues,
     PullRequests,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkedPickerTarget {
+    PullRequestTui,
+    PullRequestBrowser,
+    IssueTui,
+    IssueBrowser,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkedPickerOption {
+    number: i64,
+    title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,8 +366,8 @@ struct SyncState {
 
 #[derive(Debug, Default)]
 struct LinkedState {
-    pull_requests: HashMap<i64, Option<i64>>,
-    issues: HashMap<i64, Option<i64>>,
+    pull_requests: HashMap<i64, Vec<i64>>,
+    issues: HashMap<i64, Vec<i64>>,
     pull_request_lookups: HashSet<i64>,
     issue_lookups: HashSet<i64>,
     navigation_origin: Option<(i64, WorkItemMode)>,
@@ -454,6 +472,27 @@ struct SearchState {
     help_overlay_visible: bool,
 }
 
+#[derive(Debug)]
+struct LinkedPickerState {
+    options: Vec<LinkedPickerOption>,
+    selected: usize,
+    target: Option<LinkedPickerTarget>,
+    cancel_view: View,
+    origin: Option<(i64, WorkItemMode)>,
+}
+
+impl Default for LinkedPickerState {
+    fn default() -> Self {
+        Self {
+            options: Vec::new(),
+            selected: 0,
+            target: None,
+            cancel_view: View::Issues,
+            origin: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct InteractionState {
     action: Option<AppAction>,
@@ -519,6 +558,7 @@ pub struct App {
     interaction: InteractionState,
     context: RepoContextState,
     linked: LinkedState,
+    linked_picker: LinkedPickerState,
     pull_request: PullRequestState,
     comment_editor: CommentEditorState,
     editor_flow: EditorFlowState,
@@ -550,6 +590,7 @@ impl App {
             interaction: InteractionState::default(),
             context: RepoContextState::default(),
             linked: LinkedState::default(),
+            linked_picker: LinkedPickerState::default(),
             pull_request: PullRequestState::default(),
             comment_editor: CommentEditorState::default(),
             editor_flow: EditorFlowState::default(),

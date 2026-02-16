@@ -82,6 +82,11 @@ impl App {
                     self.preset.choice -= 1;
                 }
             }
+            View::LinkedPicker => {
+                if self.linked_picker.selected > 0 {
+                    self.linked_picker.selected -= 1;
+                }
+            }
             View::LabelPicker => {
                 let filtered = self.filtered_label_indices();
                 if filtered.is_empty() {
@@ -204,6 +209,11 @@ impl App {
                     self.preset.choice += 1;
                 }
             }
+            View::LinkedPicker => {
+                if self.linked_picker.selected + 1 < self.linked_picker.options.len() {
+                    self.linked_picker.selected += 1;
+                }
+            }
             View::LabelPicker => {
                 let filtered = self.filtered_label_indices();
                 if filtered.is_empty() {
@@ -276,6 +286,9 @@ impl App {
             View::CommentPresetPicker => {
                 self.interaction.action = Some(AppAction::PickPreset);
             }
+            View::LinkedPicker => {
+                self.interaction.action = Some(AppAction::PickLinkedItem);
+            }
             View::CommentPresetName
             | View::CommentEditor
             | View::LabelPicker
@@ -320,6 +333,7 @@ impl App {
                 self.sync_selected_pull_request_review_comment();
             }
             View::CommentPresetPicker => self.preset.choice = 0,
+            View::LinkedPicker => self.linked_picker.selected = 0,
             View::LabelPicker => {
                 if let Some(index) = self.filtered_label_indices().first() {
                     self.metadata_picker.selected_label_option = *index;
@@ -400,6 +414,11 @@ impl App {
                 let max = self.preset_items_len();
                 if max > 0 {
                     self.preset.choice = max - 1;
+                }
+            }
+            View::LinkedPicker => {
+                if !self.linked_picker.options.is_empty() {
+                    self.linked_picker.selected = self.linked_picker.options.len() - 1;
                 }
             }
             View::LabelPicker => {

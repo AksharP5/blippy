@@ -231,6 +231,7 @@ impl App {
         self.linked.pull_request_lookups.clear();
         self.linked.issue_lookups.clear();
         self.linked.navigation_origin = None;
+        self.clear_linked_picker_state();
         self.reset_pull_request_state();
         self.search.repo_search_mode = false;
         self.assignee_filter = AssigneeFilter::All;

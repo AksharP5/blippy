@@ -213,6 +213,13 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("Shift+R", "Resolve/reopen thread"),
             ]
         }
+        View::LinkedPicker => vec![
+            ("j / k", "Move linked items"),
+            ("Enter", "Open selected linked item"),
+            ("b or Esc", "Cancel"),
+            ("Ctrl+C", "Quit"),
+            ("?", "Toggle help"),
+        ],
         View::LabelPicker | View::AssigneePicker => vec![
             ("Type", "Filter options"),
             ("j / k", "Move options"),
@@ -284,6 +291,7 @@ fn mode_meta(app: &App, theme: &ThemePalette) -> (&'static str, Color) {
             View::IssueDetail => ("DETAIL", theme.accent_primary),
             View::IssueComments => ("COMMENTS", theme.accent_primary),
             View::PullRequestFiles => ("FILES", theme.accent_primary),
+            View::LinkedPicker => ("LINKED", theme.accent_primary),
             View::LabelPicker => ("LABELS", theme.accent_subtle),
             View::AssigneePicker => ("ASSIGNEES", theme.accent_subtle),
             View::CommentPresetPicker => ("CLOSE", theme.accent_danger),
@@ -391,6 +399,7 @@ fn primary_help_text(app: &App) -> String {
                 toggle_hint
             )
         }
+        View::LinkedPicker => "j/k move • Enter open • Esc cancel • ? help".to_string(),
         View::LabelPicker | View::AssigneePicker => {
             "Type filter • j/k move • Space toggle • Enter apply • Esc cancel • ? help".to_string()
         }
@@ -511,6 +520,9 @@ fn help_text(app: &App) -> String {
                 "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Ctrl+C quit",
                 toggle_hint
             )
+        }
+        View::LinkedPicker => {
+            "j/k move • Enter open linked item • b/Esc cancel • Ctrl+C quit".to_string()
         }
         View::LabelPicker => {
             "Type to filter • j/k move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"

@@ -244,28 +244,53 @@ pub(super) fn handle_events(
             }
             AppEvent::LinkedPullRequestResolved {
                 issue_number,
-                pull_number,
-                url,
+                pull_requests,
                 target,
             } => {
-                app.set_linked_pull_request(issue_number, pull_number);
-                let pull_number = match pull_number {
-                    Some(pull_number) => pull_number,
-                    None => {
-                        if target == LinkedPullRequestTarget::Probe {
-                            continue;
-                        }
-                        app.set_status(format!(
-                            "No linked pull request found for #{}",
-                            issue_number
-                        ));
+                let pull_numbers = pull_requests
+                    .iter()
+                    .map(|(pull_number, _url)| *pull_number)
+                    .collect::<Vec<i64>>();
+                app.set_linked_pull_requests(issue_number, pull_numbers.clone());
+
+                if pull_numbers.is_empty() {
+                    if target == LinkedPullRequestTarget::Probe {
                         continue;
                     }
-                };
+                    app.set_status(format!(
+                        "No linked pull request found for #{}",
+                        issue_number
+                    ));
+                    continue;
+                }
 
                 if target == LinkedPullRequestTarget::Probe {
                     continue;
                 }
+
+                if pull_numbers.len() > 1 {
+                    let picker_target = match target {
+                        LinkedPullRequestTarget::Tui => LinkedPickerTarget::PullRequestTui,
+                        LinkedPullRequestTarget::Browser => LinkedPickerTarget::PullRequestBrowser,
+                        LinkedPullRequestTarget::Probe => LinkedPickerTarget::PullRequestTui,
+                    };
+                    app.open_linked_picker(app.view(), picker_target, pull_numbers);
+                    app.set_status(format!(
+                        "Found {} linked pull requests for #{}",
+                        app.linked_picker_numbers().len(),
+                        issue_number
+                    ));
+                    continue;
+                }
+
+                let pull_number = pull_numbers[0];
+                let url = pull_requests.into_iter().find_map(|(number, url)| {
+                    if number == pull_number {
+                        Some(url)
+                    } else {
+                        None
+                    }
+                });
 
                 if target == LinkedPullRequestTarget::Tui {
                     app.capture_linked_navigation_origin();
@@ -339,25 +364,50 @@ pub(super) fn handle_events(
             }
             AppEvent::LinkedIssueResolved {
                 pull_number,
-                issue_number,
-                url,
+                issues,
                 target,
             } => {
-                app.set_linked_issue_for_pull_request(pull_number, issue_number);
-                let issue_number = match issue_number {
-                    Some(issue_number) => issue_number,
-                    None => {
-                        if target == LinkedIssueTarget::Probe {
-                            continue;
-                        }
-                        app.set_status(format!("No linked issue found for PR #{}", pull_number));
+                let issue_numbers = issues
+                    .iter()
+                    .map(|(issue_number, _url)| *issue_number)
+                    .collect::<Vec<i64>>();
+                app.set_linked_issues_for_pull_request(pull_number, issue_numbers.clone());
+
+                if issue_numbers.is_empty() {
+                    if target == LinkedIssueTarget::Probe {
                         continue;
                     }
-                };
+                    app.set_status(format!("No linked issue found for PR #{}", pull_number));
+                    continue;
+                }
 
                 if target == LinkedIssueTarget::Probe {
                     continue;
                 }
+
+                if issue_numbers.len() > 1 {
+                    let picker_target = match target {
+                        LinkedIssueTarget::Tui => LinkedPickerTarget::IssueTui,
+                        LinkedIssueTarget::Browser => LinkedPickerTarget::IssueBrowser,
+                        LinkedIssueTarget::Probe => LinkedPickerTarget::IssueTui,
+                    };
+                    app.open_linked_picker(app.view(), picker_target, issue_numbers);
+                    app.set_status(format!(
+                        "Found {} linked issues for PR #{}",
+                        app.linked_picker_numbers().len(),
+                        pull_number
+                    ));
+                    continue;
+                }
+
+                let issue_number = issue_numbers[0];
+                let url = issues.into_iter().find_map(|(number, url)| {
+                    if number == issue_number {
+                        Some(url)
+                    } else {
+                        None
+                    }
+                });
 
                 if target == LinkedIssueTarget::Tui {
                     app.capture_linked_navigation_origin();

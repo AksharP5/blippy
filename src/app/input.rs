@@ -280,6 +280,9 @@ impl App {
             KeyCode::Char('b') if self.view == View::PullRequestFiles => {
                 self.back_from_pull_request_files();
             }
+            KeyCode::Char('b') if self.view == View::LinkedPicker => {
+                self.cancel_linked_picker();
+            }
             KeyCode::Esc if self.view == View::IssueDetail => {
                 self.back_from_issue_detail();
             }
@@ -288,6 +291,9 @@ impl App {
             }
             KeyCode::Esc if self.view == View::PullRequestFiles => {
                 self.back_from_pull_request_files();
+            }
+            KeyCode::Esc if self.view == View::LinkedPicker => {
+                self.cancel_linked_picker();
             }
             KeyCode::Esc if self.view == View::CommentPresetPicker => {
                 self.set_view(View::Issues);
@@ -357,6 +363,9 @@ impl App {
     }
 
     pub fn set_view(&mut self, view: View) {
+        if view != View::LinkedPicker {
+            self.clear_linked_picker_state();
+        }
         self.view = view;
         self.search.help_overlay_visible = false;
         if self.view != View::PullRequestFiles {
