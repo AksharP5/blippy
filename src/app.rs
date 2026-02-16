@@ -327,6 +327,25 @@ impl WorkItemMode {
     }
 }
 
+#[derive(Debug, Default)]
+struct SyncState {
+    scanning: bool,
+    syncing: bool,
+    repo_permissions_syncing: bool,
+    repo_permissions_sync_requested: bool,
+    repo_issue_metadata_editable: Option<bool>,
+    repo_labels_syncing: bool,
+    repo_labels_sync_requested: bool,
+    comment_syncing: bool,
+    pull_request_files_syncing: bool,
+    pull_request_review_comments_syncing: bool,
+    comment_sync_requested: bool,
+    pull_request_files_sync_requested: bool,
+    pull_request_review_comments_sync_requested: bool,
+    sync_requested: bool,
+    rescan_requested: bool,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -360,22 +379,8 @@ pub struct App {
     issue_recent_comments_scroll: u16,
     issue_recent_comments_max_scroll: u16,
     status: String,
-    scanning: bool,
-    syncing: bool,
-    repo_permissions_syncing: bool,
-    repo_permissions_sync_requested: bool,
-    repo_issue_metadata_editable: Option<bool>,
-    repo_labels_syncing: bool,
-    repo_labels_sync_requested: bool,
+    sync: SyncState,
     repo_label_colors: HashMap<String, String>,
-    comment_syncing: bool,
-    pull_request_files_syncing: bool,
-    pull_request_review_comments_syncing: bool,
-    comment_sync_requested: bool,
-    pull_request_files_sync_requested: bool,
-    pull_request_review_comments_sync_requested: bool,
-    sync_requested: bool,
-    rescan_requested: bool,
     action: Option<AppAction>,
     current_owner: Option<String>,
     current_repo: Option<String>,
@@ -461,22 +466,8 @@ impl App {
             issue_recent_comments_scroll: 0,
             issue_recent_comments_max_scroll: 0,
             status: String::new(),
-            scanning: false,
-            syncing: false,
-            repo_permissions_syncing: false,
-            repo_permissions_sync_requested: false,
-            repo_issue_metadata_editable: None,
-            repo_labels_syncing: false,
-            repo_labels_sync_requested: false,
+            sync: SyncState::default(),
             repo_label_colors: HashMap::new(),
-            comment_syncing: false,
-            pull_request_files_syncing: false,
-            pull_request_review_comments_syncing: false,
-            comment_sync_requested: false,
-            pull_request_files_sync_requested: false,
-            pull_request_review_comments_sync_requested: false,
-            sync_requested: false,
-            rescan_requested: false,
             action: None,
             current_owner: None,
             current_repo: None,
@@ -946,23 +937,23 @@ impl App {
     }
 
     pub fn scanning(&self) -> bool {
-        self.scanning
+        self.sync.scanning
     }
 
     pub fn syncing(&self) -> bool {
-        self.syncing
+        self.sync.syncing
     }
 
     pub fn repo_permissions_syncing(&self) -> bool {
-        self.repo_permissions_syncing
+        self.sync.repo_permissions_syncing
     }
 
     pub fn repo_labels_syncing(&self) -> bool {
-        self.repo_labels_syncing
+        self.sync.repo_labels_syncing
     }
 
     pub fn repo_issue_metadata_editable(&self) -> Option<bool> {
-        self.repo_issue_metadata_editable
+        self.sync.repo_issue_metadata_editable
     }
 
     pub fn repo_label_color(&self, label: &str) -> Option<&str> {
@@ -971,15 +962,15 @@ impl App {
     }
 
     pub fn comment_syncing(&self) -> bool {
-        self.comment_syncing
+        self.sync.comment_syncing
     }
 
     pub fn pull_request_files_syncing(&self) -> bool {
-        self.pull_request_files_syncing
+        self.sync.pull_request_files_syncing
     }
 
     pub fn pull_request_review_comments_syncing(&self) -> bool {
-        self.pull_request_review_comments_syncing
+        self.sync.pull_request_review_comments_syncing
     }
 
     pub fn pull_request_files(&self) -> &[PullRequestFile] {
@@ -1199,8 +1190,8 @@ impl App {
             && key.code == KeyCode::Char('r')
             && self.view == View::RepoPicker
         {
-            self.rescan_requested = true;
-            self.scanning = true;
+            self.sync.rescan_requested = true;
+            self.sync.scanning = true;
             self.status = "Scanning".to_string();
             return;
         }
@@ -2065,94 +2056,94 @@ impl App {
     }
 
     pub fn set_scanning(&mut self, scanning: bool) {
-        self.scanning = scanning;
+        self.sync.scanning = scanning;
     }
 
     pub fn set_syncing(&mut self, syncing: bool) {
-        self.syncing = syncing;
+        self.sync.syncing = syncing;
     }
 
     pub fn set_repo_permissions_syncing(&mut self, syncing: bool) {
-        self.repo_permissions_syncing = syncing;
+        self.sync.repo_permissions_syncing = syncing;
     }
 
     pub fn set_repo_labels_syncing(&mut self, syncing: bool) {
-        self.repo_labels_syncing = syncing;
+        self.sync.repo_labels_syncing = syncing;
     }
 
     pub fn set_repo_issue_metadata_editable(&mut self, editable: Option<bool>) {
-        self.repo_issue_metadata_editable = editable;
+        self.sync.repo_issue_metadata_editable = editable;
     }
 
     pub fn set_comment_syncing(&mut self, syncing: bool) {
-        self.comment_syncing = syncing;
+        self.sync.comment_syncing = syncing;
     }
 
     pub fn set_pull_request_files_syncing(&mut self, syncing: bool) {
-        self.pull_request_files_syncing = syncing;
+        self.sync.pull_request_files_syncing = syncing;
     }
 
     pub fn set_pull_request_review_comments_syncing(&mut self, syncing: bool) {
-        self.pull_request_review_comments_syncing = syncing;
+        self.sync.pull_request_review_comments_syncing = syncing;
     }
 
     pub fn request_comment_sync(&mut self) {
-        self.comment_sync_requested = true;
+        self.sync.comment_sync_requested = true;
     }
 
     pub fn take_comment_sync_request(&mut self) -> bool {
-        let requested = self.comment_sync_requested;
-        self.comment_sync_requested = false;
+        let requested = self.sync.comment_sync_requested;
+        self.sync.comment_sync_requested = false;
         requested
     }
 
     pub fn request_pull_request_files_sync(&mut self) {
-        self.pull_request_files_sync_requested = true;
+        self.sync.pull_request_files_sync_requested = true;
     }
 
     pub fn take_pull_request_files_sync_request(&mut self) -> bool {
-        let requested = self.pull_request_files_sync_requested;
-        self.pull_request_files_sync_requested = false;
+        let requested = self.sync.pull_request_files_sync_requested;
+        self.sync.pull_request_files_sync_requested = false;
         requested
     }
 
     pub fn request_pull_request_review_comments_sync(&mut self) {
-        self.pull_request_review_comments_sync_requested = true;
+        self.sync.pull_request_review_comments_sync_requested = true;
     }
 
     pub fn take_pull_request_review_comments_sync_request(&mut self) -> bool {
-        let requested = self.pull_request_review_comments_sync_requested;
-        self.pull_request_review_comments_sync_requested = false;
+        let requested = self.sync.pull_request_review_comments_sync_requested;
+        self.sync.pull_request_review_comments_sync_requested = false;
         requested
     }
 
     pub fn request_sync(&mut self) {
-        self.sync_requested = true;
+        self.sync.sync_requested = true;
     }
 
     pub fn request_repo_permissions_sync(&mut self) {
-        self.repo_permissions_sync_requested = true;
+        self.sync.repo_permissions_sync_requested = true;
     }
 
     pub fn take_repo_permissions_sync_request(&mut self) -> bool {
-        let requested = self.repo_permissions_sync_requested;
-        self.repo_permissions_sync_requested = false;
+        let requested = self.sync.repo_permissions_sync_requested;
+        self.sync.repo_permissions_sync_requested = false;
         requested
     }
 
     pub fn request_repo_labels_sync(&mut self) {
-        self.repo_labels_sync_requested = true;
+        self.sync.repo_labels_sync_requested = true;
     }
 
     pub fn take_repo_labels_sync_request(&mut self) -> bool {
-        let requested = self.repo_labels_sync_requested;
-        self.repo_labels_sync_requested = false;
+        let requested = self.sync.repo_labels_sync_requested;
+        self.sync.repo_labels_sync_requested = false;
         requested
     }
 
     pub fn take_sync_request(&mut self) -> bool {
-        let requested = self.sync_requested;
-        self.sync_requested = false;
+        let requested = self.sync.sync_requested;
+        self.sync.sync_requested = false;
         requested
     }
 
@@ -2162,11 +2153,11 @@ impl App {
         self.current_repo_path = path.map(ToString::to_string);
         self.current_issue_id = None;
         self.current_issue_number = None;
-        self.repo_permissions_syncing = false;
-        self.repo_permissions_sync_requested = true;
-        self.repo_issue_metadata_editable = None;
-        self.repo_labels_syncing = false;
-        self.repo_labels_sync_requested = true;
+        self.sync.repo_permissions_syncing = false;
+        self.sync.repo_permissions_sync_requested = true;
+        self.sync.repo_issue_metadata_editable = None;
+        self.sync.repo_labels_syncing = false;
+        self.sync.repo_labels_sync_requested = true;
         self.repo_label_colors.clear();
         self.linked_pull_requests.clear();
         self.linked_issues.clear();
@@ -2528,8 +2519,8 @@ impl App {
     }
 
     pub fn take_rescan_request(&mut self) -> bool {
-        let requested = self.rescan_requested;
-        self.rescan_requested = false;
+        let requested = self.sync.rescan_requested;
+        self.sync.rescan_requested = false;
         requested
     }
 
