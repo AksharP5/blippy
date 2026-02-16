@@ -346,6 +346,15 @@ struct SyncState {
     rescan_requested: bool,
 }
 
+#[derive(Debug, Default)]
+struct LinkedState {
+    pull_requests: HashMap<i64, Option<i64>>,
+    issues: HashMap<i64, Option<i64>>,
+    pull_request_lookups: HashSet<i64>,
+    issue_lookups: HashSet<i64>,
+    navigation_origin: Option<(i64, WorkItemMode)>,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -387,11 +396,7 @@ pub struct App {
     current_repo_path: Option<String>,
     current_issue_id: Option<i64>,
     current_issue_number: Option<i64>,
-    linked_pull_requests: HashMap<i64, Option<i64>>,
-    linked_issues: HashMap<i64, Option<i64>>,
-    linked_pull_request_lookups: HashSet<i64>,
-    linked_issue_lookups: HashSet<i64>,
-    linked_navigation_origin: Option<(i64, WorkItemMode)>,
+    linked: LinkedState,
     pull_request_files_issue_id: Option<i64>,
     pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
@@ -474,11 +479,7 @@ impl App {
             current_repo_path: None,
             current_issue_id: None,
             current_issue_number: None,
-            linked_pull_requests: HashMap::new(),
-            linked_issues: HashMap::new(),
-            linked_pull_request_lookups: HashSet::new(),
-            linked_issue_lookups: HashSet::new(),
-            linked_navigation_origin: None,
+            linked: LinkedState::default(),
             pull_request_files_issue_id: None,
             pull_request_id: None,
             pull_request_files: Vec::new(),
@@ -602,60 +603,63 @@ impl App {
     }
 
     pub fn linked_pull_request_for_issue(&self, issue_number: i64) -> Option<i64> {
-        self.linked_pull_requests
+        self.linked
+            .pull_requests
             .get(&issue_number)
             .and_then(|pull_number| *pull_number)
     }
 
     pub fn linked_issue_for_pull_request(&self, pull_number: i64) -> Option<i64> {
-        self.linked_issues
+        self.linked
+            .issues
             .get(&pull_number)
             .and_then(|issue_number| *issue_number)
     }
 
     pub fn linked_pull_request_known(&self, issue_number: i64) -> bool {
-        self.linked_pull_requests.contains_key(&issue_number)
+        self.linked.pull_requests.contains_key(&issue_number)
     }
 
     pub fn linked_issue_known(&self, pull_number: i64) -> bool {
-        self.linked_issues.contains_key(&pull_number)
+        self.linked.issues.contains_key(&pull_number)
     }
 
     pub fn begin_linked_pull_request_lookup(&mut self, issue_number: i64) -> bool {
         if self.linked_pull_request_known(issue_number) {
             return false;
         }
-        self.linked_pull_request_lookups.insert(issue_number)
+        self.linked.pull_request_lookups.insert(issue_number)
     }
 
     pub fn begin_linked_issue_lookup(&mut self, pull_number: i64) -> bool {
         if self.linked_issue_known(pull_number) {
             return false;
         }
-        self.linked_issue_lookups.insert(pull_number)
+        self.linked.issue_lookups.insert(pull_number)
     }
 
     pub fn end_linked_pull_request_lookup(&mut self, issue_number: i64) {
-        self.linked_pull_request_lookups.remove(&issue_number);
+        self.linked.pull_request_lookups.remove(&issue_number);
     }
 
     pub fn end_linked_issue_lookup(&mut self, pull_number: i64) {
-        self.linked_issue_lookups.remove(&pull_number);
+        self.linked.issue_lookups.remove(&pull_number);
     }
 
     pub fn set_linked_pull_request(&mut self, issue_number: i64, pull_number: Option<i64>) {
         self.end_linked_pull_request_lookup(issue_number);
         if pull_number.is_none()
             && self
-                .linked_pull_requests
+                .linked
+                .pull_requests
                 .get(&issue_number)
                 .is_some_and(|existing| existing.is_some())
         {
             return;
         }
-        self.linked_pull_requests.insert(issue_number, pull_number);
+        self.linked.pull_requests.insert(issue_number, pull_number);
         if let Some(pull_number) = pull_number {
-            self.linked_issues.insert(pull_number, Some(issue_number));
+            self.linked.issues.insert(pull_number, Some(issue_number));
             self.end_linked_issue_lookup(pull_number);
         }
     }
@@ -668,15 +672,17 @@ impl App {
         self.end_linked_issue_lookup(pull_number);
         if issue_number.is_none()
             && self
-                .linked_issues
+                .linked
+                .issues
                 .get(&pull_number)
                 .is_some_and(|existing| existing.is_some())
         {
             return;
         }
-        self.linked_issues.insert(pull_number, issue_number);
+        self.linked.issues.insert(pull_number, issue_number);
         if let Some(issue_number) = issue_number {
-            self.linked_pull_requests
+            self.linked
+                .pull_requests
                 .insert(issue_number, Some(pull_number));
             self.end_linked_pull_request_lookup(issue_number);
         }
@@ -692,11 +698,11 @@ impl App {
         } else {
             WorkItemMode::Issues
         };
-        self.linked_navigation_origin = Some((issue.number, mode));
+        self.linked.navigation_origin = Some((issue.number, mode));
     }
 
     pub fn clear_linked_navigation_origin(&mut self) {
-        self.linked_navigation_origin = None;
+        self.linked.navigation_origin = None;
     }
 
     pub fn selected_issue_has_known_linked_pr(&self) -> bool {
@@ -1965,11 +1971,11 @@ impl App {
     }
 
     fn restore_linked_navigation_origin(&mut self) -> bool {
-        let (issue_number, mode) = match self.linked_navigation_origin {
+        let (issue_number, mode) = match self.linked.navigation_origin {
             Some(origin) => origin,
             None => return false,
         };
-        self.linked_navigation_origin = None;
+        self.linked.navigation_origin = None;
 
         self.set_view(View::Issues);
         self.set_work_item_mode(mode);
@@ -2159,11 +2165,11 @@ impl App {
         self.sync.repo_labels_syncing = false;
         self.sync.repo_labels_sync_requested = true;
         self.repo_label_colors.clear();
-        self.linked_pull_requests.clear();
-        self.linked_issues.clear();
-        self.linked_pull_request_lookups.clear();
-        self.linked_issue_lookups.clear();
-        self.linked_navigation_origin = None;
+        self.linked.pull_requests.clear();
+        self.linked.issues.clear();
+        self.linked.pull_request_lookups.clear();
+        self.linked.issue_lookups.clear();
+        self.linked.navigation_origin = None;
         self.pull_request_files_issue_id = None;
         self.pull_request_id = None;
         self.pull_request_files.clear();
