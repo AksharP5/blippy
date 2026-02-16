@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/AksharP5/blippy/compare/v0.1.4...v0.1.5) - 2026-02-16
+
+### Added
+
+- add confirmed TUI issue creation workflow
+- handle merged pull request state in filters and status
+- show linked item overflow hint in issue detail
+- improve linked picker context and multi-link labels
+- add linked picker for multiple linked issues and pull requests
+
+### Other
+
+- move main tests into dedicated module
+- move sync tests into dedicated module
+- split github client into focused modules
+- split app navigation into keyboard and mouse modules
+- move store tests into dedicated module
+- extract shared ui helper module
+- extract app input handling module
+- split sync workflows into focused modules
+- split issue detail and action utility modules
+- separate main action utilities
+- split ui rendering into focused modules
+- split main workflow into modules
+- split app module into focused submodules
+- extract interaction state
+- extract search state
+- extract navigation state
+- extract metadata picker state
+- extract pull request state
+- extract pull request diff reset helpers
+- centralize pull request state reset
+- extract repo context state
+- centralize store connection usage
+- extract linked navigation state
+- extract sync state from app
+- streamline worker setup
+
 ## [0.1.4](https://github.com/AksharP5/blippy/compare/v0.1.3...v0.1.4) - 2026-02-13
 
 ### Fixed
