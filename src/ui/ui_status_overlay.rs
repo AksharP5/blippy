@@ -318,8 +318,8 @@ pub(super) fn draw_modal_background(
 ) {
     match app.editor_cancel_view() {
         View::Issues => ui_issues::draw_issues(frame, app, area, theme),
-        View::IssueDetail => ui_issues::draw_issue_detail(frame, app, area, theme),
-        View::IssueComments => ui_issues::draw_issue_comments(frame, app, area, theme),
+        View::IssueDetail => ui_issue_detail::draw_issue_detail(frame, app, area, theme),
+        View::IssueComments => ui_issue_detail::draw_issue_comments(frame, app, area, theme),
         View::PullRequestFiles => ui_pull_request::draw_pull_request_files(frame, app, area, theme),
         _ => {
             frame.render_widget(panel_block("blippy", theme), area);

@@ -20,6 +20,7 @@ const RECENT_COMMENTS_HEIGHT: u16 = 10;
 const HEADER_HEIGHT: u16 = 1;
 
 mod ui_editor_views;
+mod ui_issue_detail;
 mod ui_issues;
 mod ui_metadata;
 mod ui_pull_request;
@@ -117,8 +118,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         View::RepoPicker => ui_repo::draw_repo_picker(frame, app, content_area, theme),
         View::RemoteChooser => ui_repo::draw_remote_chooser(frame, app, content_area, theme),
         View::Issues => ui_issues::draw_issues(frame, app, content_area, theme),
-        View::IssueDetail => ui_issues::draw_issue_detail(frame, app, content_area, theme),
-        View::IssueComments => ui_issues::draw_issue_comments(frame, app, content_area, theme),
+        View::IssueDetail => ui_issue_detail::draw_issue_detail(frame, app, content_area, theme),
+        View::IssueComments => {
+            ui_issue_detail::draw_issue_comments(frame, app, content_area, theme)
+        }
         View::PullRequestFiles => {
             ui_pull_request::draw_pull_request_files(frame, app, content_area, theme)
         }
