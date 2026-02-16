@@ -2171,6 +2171,23 @@ impl App {
         self.linked.pull_request_lookups.clear();
         self.linked.issue_lookups.clear();
         self.linked.navigation_origin = None;
+        self.reset_pull_request_state();
+        self.repo_search_mode = false;
+        self.assignee_filter = AssigneeFilter::All;
+        self.work_item_mode = WorkItemMode::Issues;
+        self.issue_query.clear();
+        self.issue_search_mode = false;
+    }
+
+    pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
+        self.context.issue_id = Some(issue_id);
+        self.context.issue_number = Some(issue_number);
+        if self.pull_request_files_issue_id != Some(issue_id) {
+            self.reset_pull_request_state();
+        }
+    }
+
+    fn reset_pull_request_state(&mut self) {
         self.pull_request_files_issue_id = None;
         self.pull_request_id = None;
         self.pull_request_files.clear();
@@ -2191,38 +2208,6 @@ impl App {
         self.selected_pull_request_review_comment_id = None;
         self.editing_pull_request_review_comment_id = None;
         self.pending_review_target = None;
-        self.repo_search_mode = false;
-        self.assignee_filter = AssigneeFilter::All;
-        self.work_item_mode = WorkItemMode::Issues;
-        self.issue_query.clear();
-        self.issue_search_mode = false;
-    }
-
-    pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
-        self.context.issue_id = Some(issue_id);
-        self.context.issue_number = Some(issue_number);
-        self.pending_review_target = None;
-        if self.pull_request_files_issue_id != Some(issue_id) {
-            self.pull_request_files_issue_id = None;
-            self.pull_request_id = None;
-            self.pull_request_files.clear();
-            self.pull_request_viewed_files.clear();
-            self.pull_request_collapsed_hunks.clear();
-            self.pull_request_review_comments.clear();
-            self.selected_pull_request_file = 0;
-            self.selected_pull_request_diff_line = 0;
-            self.pull_request_diff_scroll = 0;
-            self.pull_request_diff_horizontal_scroll = 0;
-            self.pull_request_diff_max_scroll = 0;
-            self.pull_request_diff_horizontal_max = 0;
-            self.pull_request_diff_expanded = false;
-            self.pull_request_review_focus = PullRequestReviewFocus::Files;
-            self.pull_request_review_side = ReviewSide::Right;
-            self.pull_request_visual_mode = false;
-            self.pull_request_visual_anchor = None;
-            self.selected_pull_request_review_comment_id = None;
-            self.editing_pull_request_review_comment_id = None;
-        }
     }
 
     pub fn update_issue_state_by_number(&mut self, issue_number: i64, state: &str) {
