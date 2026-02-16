@@ -415,6 +415,18 @@ impl Default for PullRequestState {
     }
 }
 
+#[derive(Debug, Default)]
+struct MetadataPickerState {
+    label_options: Vec<String>,
+    label_selected: HashSet<String>,
+    selected_label_option: usize,
+    label_query: String,
+    assignee_options: Vec<String>,
+    assignee_selected: HashSet<String>,
+    selected_assignee_option: usize,
+    assignee_query: String,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -461,14 +473,7 @@ pub struct App {
     comment_editor: CommentEditorState,
     editor_cancel_view: View,
     editing_comment_id: Option<i64>,
-    label_options: Vec<String>,
-    label_selected: HashSet<String>,
-    selected_label_option: usize,
-    label_query: String,
-    assignee_options: Vec<String>,
-    assignee_selected: HashSet<String>,
-    selected_assignee_option: usize,
-    assignee_query: String,
+    metadata_picker: MetadataPickerState,
     preset_choice: usize,
 }
 
@@ -521,14 +526,7 @@ impl App {
             comment_editor: CommentEditorState::default(),
             editor_cancel_view: View::Issues,
             editing_comment_id: None,
-            label_options: Vec::new(),
-            label_selected: HashSet::new(),
-            selected_label_option: 0,
-            label_query: String::new(),
-            assignee_options: Vec::new(),
-            assignee_selected: HashSet::new(),
-            selected_assignee_option: 0,
-            assignee_query: String::new(),
+            metadata_picker: MetadataPickerState::default(),
             preset_choice: 0,
         }
     }
@@ -857,24 +855,24 @@ impl App {
     }
 
     pub fn label_options(&self) -> &[String] {
-        &self.label_options
+        &self.metadata_picker.label_options
     }
 
     pub fn selected_label_option(&self) -> usize {
-        self.selected_label_option
+        self.metadata_picker.selected_label_option
     }
 
     pub fn label_option_selected(&self, label: &str) -> bool {
-        self.label_selected.contains(&label.to_ascii_lowercase())
+        self.metadata_picker.label_selected.contains(&label.to_ascii_lowercase())
     }
 
     pub fn label_query(&self) -> &str {
-        self.label_query.as_str()
+        self.metadata_picker.label_query.as_str()
     }
 
     pub fn filtered_label_indices(&self) -> Vec<usize> {
-        let query = self.label_query.trim().to_ascii_lowercase();
-        self.label_options
+        let query = self.metadata_picker.label_query.trim().to_ascii_lowercase();
+        self.metadata_picker.label_options
             .iter()
             .enumerate()
             .filter_map(|(index, label)| {
@@ -890,25 +888,25 @@ impl App {
     }
 
     pub fn assignee_options(&self) -> &[String] {
-        &self.assignee_options
+        &self.metadata_picker.assignee_options
     }
 
     pub fn selected_assignee_option(&self) -> usize {
-        self.selected_assignee_option
+        self.metadata_picker.selected_assignee_option
     }
 
     pub fn assignee_option_selected(&self, assignee: &str) -> bool {
-        self.assignee_selected
+        self.metadata_picker.assignee_selected
             .contains(&assignee.to_ascii_lowercase())
     }
 
     pub fn assignee_query(&self) -> &str {
-        self.assignee_query.as_str()
+        self.metadata_picker.assignee_query.as_str()
     }
 
     pub fn filtered_assignee_indices(&self) -> Vec<usize> {
-        let query = self.assignee_query.trim().to_ascii_lowercase();
-        self.assignee_options
+        let query = self.metadata_picker.assignee_query.trim().to_ascii_lowercase();
+        self.metadata_picker.assignee_options
             .iter()
             .enumerate()
             .filter_map(|(index, assignee)| {
@@ -1758,7 +1756,7 @@ impl App {
             }
             Some(MouseTarget::LabelOption(index)) => {
                 if let Some(filtered_index) = self.filtered_label_indices().get(index).copied() {
-                    self.selected_label_option = filtered_index;
+                    self.metadata_picker.selected_label_option = filtered_index;
                     self.toggle_selected_label();
                 }
             }
@@ -1770,7 +1768,7 @@ impl App {
             }
             Some(MouseTarget::AssigneeOption(index)) => {
                 if let Some(filtered_index) = self.filtered_assignee_indices().get(index).copied() {
-                    self.selected_assignee_option = filtered_index;
+                    self.metadata_picker.selected_assignee_option = filtered_index;
                     self.toggle_selected_assignee();
                 }
             }
@@ -2399,10 +2397,10 @@ impl App {
         self.editor_cancel_view = return_view;
         options.sort_by_key(|value| value.to_ascii_lowercase());
         options.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-        self.label_options = options;
-        self.selected_label_option = 0;
-        self.label_query.clear();
-        self.label_selected = Self::csv_set(current_labels);
+        self.metadata_picker.label_options = options;
+        self.metadata_picker.selected_label_option = 0;
+        self.metadata_picker.label_query.clear();
+        self.metadata_picker.label_selected = Self::csv_set(current_labels);
         self.set_view(View::LabelPicker);
     }
 
@@ -2415,15 +2413,15 @@ impl App {
         self.editor_cancel_view = return_view;
         options.sort_by_key(|value| value.to_ascii_lowercase());
         options.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-        self.assignee_options = options;
-        self.selected_assignee_option = 0;
-        self.assignee_query.clear();
-        self.assignee_selected = Self::csv_set(current_assignees);
+        self.metadata_picker.assignee_options = options;
+        self.metadata_picker.selected_assignee_option = 0;
+        self.metadata_picker.assignee_query.clear();
+        self.metadata_picker.assignee_selected = Self::csv_set(current_assignees);
         self.set_view(View::AssigneePicker);
     }
 
     pub fn merge_label_options(&mut self, labels: Vec<String>) {
-        let mut merged = self.label_options.clone();
+        let mut merged = self.metadata_picker.label_options.clone();
         for label in labels {
             if label.trim().is_empty() {
                 continue;
@@ -2437,9 +2435,9 @@ impl App {
             merged.push(label);
         }
         merged.sort_by_key(|value| value.to_ascii_lowercase());
-        self.label_options = merged;
+        self.metadata_picker.label_options = merged;
         if let Some(index) = self.filtered_label_indices().first() {
-            self.selected_label_option = *index;
+            self.metadata_picker.selected_label_option = *index;
         }
     }
 
@@ -2455,7 +2453,7 @@ impl App {
     }
 
     pub fn merge_assignee_options(&mut self, assignees: Vec<String>) {
-        let mut merged = self.assignee_options.clone();
+        let mut merged = self.metadata_picker.assignee_options.clone();
         for assignee in assignees {
             if assignee.trim().is_empty() {
                 continue;
@@ -2469,14 +2467,15 @@ impl App {
             merged.push(assignee);
         }
         merged.sort_by_key(|value| value.to_ascii_lowercase());
-        self.assignee_options = merged;
+        self.metadata_picker.assignee_options = merged;
         if let Some(index) = self.filtered_assignee_indices().first() {
-            self.selected_assignee_option = *index;
+            self.metadata_picker.selected_assignee_option = *index;
         }
     }
 
     pub fn selected_labels_csv(&self) -> String {
         let mut values = self
+            .metadata_picker
             .label_options
             .iter()
             .filter(|label| self.label_option_selected(label.as_str()))
@@ -2497,6 +2496,7 @@ impl App {
 
     pub fn selected_assignees_csv(&self) -> String {
         let mut values = self
+            .metadata_picker
             .assignee_options
             .iter()
             .filter(|assignee| self.assignee_option_selected(assignee.as_str()))
@@ -2693,10 +2693,10 @@ impl App {
                 }
                 let current = filtered
                     .iter()
-                    .position(|index| *index == self.selected_label_option)
+                    .position(|index| *index == self.metadata_picker.selected_label_option)
                     .unwrap_or(0);
                 let next = current.saturating_sub(1);
-                self.selected_label_option = filtered[next];
+                self.metadata_picker.selected_label_option = filtered[next];
             }
             View::AssigneePicker => {
                 let filtered = self.filtered_assignee_indices();
@@ -2705,10 +2705,10 @@ impl App {
                 }
                 let current = filtered
                     .iter()
-                    .position(|index| *index == self.selected_assignee_option)
+                    .position(|index| *index == self.metadata_picker.selected_assignee_option)
                     .unwrap_or(0);
                 let next = current.saturating_sub(1);
-                self.selected_assignee_option = filtered[next];
+                self.metadata_picker.selected_assignee_option = filtered[next];
             }
             View::CommentPresetName | View::CommentEditor => {}
         }
@@ -2805,10 +2805,10 @@ impl App {
                 }
                 let current = filtered
                     .iter()
-                    .position(|index| *index == self.selected_label_option)
+                    .position(|index| *index == self.metadata_picker.selected_label_option)
                     .unwrap_or(0);
                 let next = (current + 1).min(filtered.len() - 1);
-                self.selected_label_option = filtered[next];
+                self.metadata_picker.selected_label_option = filtered[next];
             }
             View::AssigneePicker => {
                 let filtered = self.filtered_assignee_indices();
@@ -2817,10 +2817,10 @@ impl App {
                 }
                 let current = filtered
                     .iter()
-                    .position(|index| *index == self.selected_assignee_option)
+                    .position(|index| *index == self.metadata_picker.selected_assignee_option)
                     .unwrap_or(0);
                 let next = (current + 1).min(filtered.len() - 1);
-                self.selected_assignee_option = filtered[next];
+                self.metadata_picker.selected_assignee_option = filtered[next];
             }
             View::CommentPresetName | View::CommentEditor => {}
         }
@@ -2916,12 +2916,12 @@ impl App {
             View::CommentPresetPicker => self.preset_choice = 0,
             View::LabelPicker => {
                 if let Some(index) = self.filtered_label_indices().first() {
-                    self.selected_label_option = *index;
+                    self.metadata_picker.selected_label_option = *index;
                 }
             }
             View::AssigneePicker => {
                 if let Some(index) = self.filtered_assignee_indices().first() {
-                    self.selected_assignee_option = *index;
+                    self.metadata_picker.selected_assignee_option = *index;
                 }
             }
             View::CommentPresetName | View::CommentEditor => {}
@@ -2997,13 +2997,13 @@ impl App {
             View::LabelPicker => {
                 let filtered = self.filtered_label_indices();
                 if !filtered.is_empty() {
-                    self.selected_label_option = *filtered.last().unwrap_or(&0);
+                    self.metadata_picker.selected_label_option = *filtered.last().unwrap_or(&0);
                 }
             }
             View::AssigneePicker => {
                 let filtered = self.filtered_assignee_indices();
                 if !filtered.is_empty() {
-                    self.selected_assignee_option = *filtered.last().unwrap_or(&0);
+                    self.metadata_picker.selected_assignee_option = *filtered.last().unwrap_or(&0);
                 }
             }
             View::CommentPresetName | View::CommentEditor => {}
@@ -3559,37 +3559,37 @@ impl App {
     fn toggle_selected_label(&mut self) {
         if !self
             .filtered_label_indices()
-            .contains(&self.selected_label_option)
+            .contains(&self.metadata_picker.selected_label_option)
         {
             return;
         }
-        let label = match self.label_options.get(self.selected_label_option) {
+        let label = match self.metadata_picker.label_options.get(self.metadata_picker.selected_label_option) {
             Some(label) => label.to_ascii_lowercase(),
             None => return,
         };
-        if self.label_selected.contains(label.as_str()) {
-            self.label_selected.remove(label.as_str());
+        if self.metadata_picker.label_selected.contains(label.as_str()) {
+            self.metadata_picker.label_selected.remove(label.as_str());
             return;
         }
-        self.label_selected.insert(label);
+        self.metadata_picker.label_selected.insert(label);
     }
 
     fn toggle_selected_assignee(&mut self) {
         if !self
             .filtered_assignee_indices()
-            .contains(&self.selected_assignee_option)
+            .contains(&self.metadata_picker.selected_assignee_option)
         {
             return;
         }
-        let assignee = match self.assignee_options.get(self.selected_assignee_option) {
+        let assignee = match self.metadata_picker.assignee_options.get(self.metadata_picker.selected_assignee_option) {
             Some(assignee) => assignee.to_ascii_lowercase(),
             None => return,
         };
-        if self.assignee_selected.contains(assignee.as_str()) {
-            self.assignee_selected.remove(assignee.as_str());
+        if self.metadata_picker.assignee_selected.contains(assignee.as_str()) {
+            self.metadata_picker.assignee_selected.remove(assignee.as_str());
             return;
         }
-        self.assignee_selected.insert(assignee);
+        self.metadata_picker.assignee_selected.insert(assignee);
     }
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
@@ -3741,16 +3741,16 @@ impl App {
     fn handle_popup_filter_key(&mut self, key: KeyEvent) -> bool {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
             if self.view == View::LabelPicker {
-                self.label_query.clear();
+                self.metadata_picker.label_query.clear();
                 if let Some(index) = self.filtered_label_indices().first() {
-                    self.selected_label_option = *index;
+                    self.metadata_picker.selected_label_option = *index;
                 }
                 return true;
             }
             if self.view == View::AssigneePicker {
-                self.assignee_query.clear();
+                self.metadata_picker.assignee_query.clear();
                 if let Some(index) = self.filtered_assignee_indices().first() {
-                    self.selected_assignee_option = *index;
+                    self.metadata_picker.selected_assignee_option = *index;
                 }
                 return true;
             }
@@ -3759,16 +3759,16 @@ impl App {
         match key.code {
             KeyCode::Backspace => {
                 if self.view == View::LabelPicker {
-                    self.label_query.pop();
+                    self.metadata_picker.label_query.pop();
                     if let Some(index) = self.filtered_label_indices().first() {
-                        self.selected_label_option = *index;
+                        self.metadata_picker.selected_label_option = *index;
                     }
                     return true;
                 }
                 if self.view == View::AssigneePicker {
-                    self.assignee_query.pop();
+                    self.metadata_picker.assignee_query.pop();
                     if let Some(index) = self.filtered_assignee_indices().first() {
-                        self.selected_assignee_option = *index;
+                        self.metadata_picker.selected_assignee_option = *index;
                     }
                     return true;
                 }
@@ -3777,22 +3777,22 @@ impl App {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
             {
                 if self.view == View::LabelPicker {
-                    if self.label_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
+                    if self.metadata_picker.label_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
                         return false;
                     }
-                    self.label_query.push(ch);
+                    self.metadata_picker.label_query.push(ch);
                     if let Some(index) = self.filtered_label_indices().first() {
-                        self.selected_label_option = *index;
+                        self.metadata_picker.selected_label_option = *index;
                     }
                     return true;
                 }
                 if self.view == View::AssigneePicker {
-                    if self.assignee_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
+                    if self.metadata_picker.assignee_query.is_empty() && matches!(ch, 'j' | 'k' | 'g' | 'G') {
                         return false;
                     }
-                    self.assignee_query.push(ch);
+                    self.metadata_picker.assignee_query.push(ch);
                     if let Some(index) = self.filtered_assignee_indices().first() {
-                        self.selected_assignee_option = *index;
+                        self.metadata_picker.selected_assignee_option = *index;
                     }
                     return true;
                 }
