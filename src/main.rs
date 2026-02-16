@@ -129,6 +129,15 @@ where
     });
 }
 
+fn with_store_conn<F>(mut work: F)
+where
+    F: FnMut(&rusqlite::Connection),
+{
+    if let Ok(conn) = crate::store::open_db() {
+        work(&conn);
+    }
+}
+
 const AUTH_DEBUG_ENV: &str = "BLIPPY_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -3434,13 +3443,13 @@ fn start_update_comment(
 
             match result {
                 Ok(()) => {
-                    if let Ok(conn) = crate::store::open_db() {
+                    with_store_conn(|conn| {
                         let _ = crate::store::update_comment_body_by_id(
-                            &conn,
+                            conn,
                             comment_id,
                             body.as_str(),
                         );
-                    }
+                    });
                     let _ = event_tx.send(AppEvent::IssueCommentUpdated {
                         issue_number,
                         comment_id,
@@ -3485,13 +3494,13 @@ fn start_delete_comment(
             match result {
                 Ok(()) => {
                     let mut count = 0usize;
-                    if let Ok(conn) = crate::store::open_db() {
-                        let _ = crate::store::delete_comment_by_id(&conn, comment_id);
-                        let comments =
-                            crate::store::comments_for_issue(&conn, issue_id).unwrap_or_default();
+                    with_store_conn(|conn| {
+                        let _ = crate::store::delete_comment_by_id(conn, comment_id);
+                        let comments = crate::store::comments_for_issue(conn, issue_id)
+                            .unwrap_or_default();
                         count = comments.len();
-                        let _ = update_issue_comments_count(&conn, issue_id, count as i64);
-                    }
+                        let _ = update_issue_comments_count(conn, issue_id, count as i64);
+                    });
                     let _ = event_tx.send(AppEvent::IssueCommentDeleted {
                         issue_number,
                         comment_id,
