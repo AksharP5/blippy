@@ -1717,13 +1717,7 @@ impl App {
                 self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
                 self.selected_pull_request_file =
                     index.min(self.pull_request_files.len().saturating_sub(1));
-                self.selected_pull_request_diff_line = 0;
-                self.pull_request_diff_scroll = 0;
-                self.pull_request_diff_horizontal_scroll = 0;
-                self.pull_request_diff_horizontal_max = 0;
-                self.pull_request_diff_expanded = false;
-                self.pull_request_visual_mode = false;
-                self.pull_request_visual_anchor = None;
+                self.reset_pull_request_diff_view_for_file_selection();
                 self.sync_selected_pull_request_review_comment();
             }
             Some(MouseTarget::PullRequestDiffRow(index, side)) => {
@@ -2210,6 +2204,20 @@ impl App {
         self.pending_review_target = None;
     }
 
+    fn reset_pull_request_diff_position(&mut self) {
+        self.selected_pull_request_diff_line = 0;
+        self.pull_request_diff_scroll = 0;
+        self.pull_request_diff_horizontal_scroll = 0;
+        self.pull_request_diff_horizontal_max = 0;
+        self.pull_request_visual_mode = false;
+        self.pull_request_visual_anchor = None;
+    }
+
+    fn reset_pull_request_diff_view_for_file_selection(&mut self) {
+        self.reset_pull_request_diff_position();
+        self.pull_request_diff_expanded = false;
+    }
+
     pub fn update_issue_state_by_number(&mut self, issue_number: i64, state: &str) {
         for issue in &mut self.issues {
             if issue.number == issue_number {
@@ -2600,13 +2608,7 @@ impl App {
                 if self.pull_request_review_focus == PullRequestReviewFocus::Files {
                     if self.selected_pull_request_file > 0 {
                         self.selected_pull_request_file -= 1;
-                        self.selected_pull_request_diff_line = 0;
-                        self.pull_request_diff_scroll = 0;
-                        self.pull_request_diff_horizontal_scroll = 0;
-                        self.pull_request_diff_horizontal_max = 0;
-                        self.pull_request_diff_expanded = false;
-                        self.pull_request_visual_mode = false;
-                        self.pull_request_visual_anchor = None;
+                        self.reset_pull_request_diff_view_for_file_selection();
                     }
                     self.sync_selected_pull_request_review_comment();
                     return;
@@ -2715,13 +2717,7 @@ impl App {
                 if self.pull_request_review_focus == PullRequestReviewFocus::Files {
                     if self.selected_pull_request_file + 1 < self.pull_request_files.len() {
                         self.selected_pull_request_file += 1;
-                        self.selected_pull_request_diff_line = 0;
-                        self.pull_request_diff_scroll = 0;
-                        self.pull_request_diff_horizontal_scroll = 0;
-                        self.pull_request_diff_horizontal_max = 0;
-                        self.pull_request_diff_expanded = false;
-                        self.pull_request_visual_mode = false;
-                        self.pull_request_visual_anchor = None;
+                        self.reset_pull_request_diff_view_for_file_selection();
                     }
                     self.sync_selected_pull_request_review_comment();
                     return;
@@ -2867,12 +2863,7 @@ impl App {
             View::PullRequestFiles => {
                 if self.pull_request_review_focus == PullRequestReviewFocus::Files {
                     self.selected_pull_request_file = 0;
-                    self.selected_pull_request_diff_line = 0;
-                    self.pull_request_diff_scroll = 0;
-                    self.pull_request_diff_horizontal_scroll = 0;
-                    self.pull_request_diff_horizontal_max = 0;
-                    self.pull_request_visual_mode = false;
-                    self.pull_request_visual_anchor = None;
+                    self.reset_pull_request_diff_position();
                     self.sync_selected_pull_request_review_comment();
                     return;
                 }
@@ -2936,12 +2927,7 @@ impl App {
                 if self.pull_request_review_focus == PullRequestReviewFocus::Files {
                     if !self.pull_request_files.is_empty() {
                         self.selected_pull_request_file = self.pull_request_files.len() - 1;
-                        self.selected_pull_request_diff_line = 0;
-                        self.pull_request_diff_scroll = 0;
-                        self.pull_request_diff_horizontal_scroll = 0;
-                        self.pull_request_diff_horizontal_max = 0;
-                        self.pull_request_visual_mode = false;
-                        self.pull_request_visual_anchor = None;
+                        self.reset_pull_request_diff_position();
                     }
                     self.sync_selected_pull_request_review_comment();
                     return;
