@@ -487,7 +487,8 @@ mod editor;
 mod metadata;
 mod preset;
 
-mod navigation;
+mod navigation_keyboard;
+mod navigation_mouse;
 mod pull_request;
 mod search;
 
