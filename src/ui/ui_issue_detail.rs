@@ -143,13 +143,10 @@ pub(super) fn draw_issue_detail(
                     } else {
                         "linked issues "
                     };
-                    let open_label = if linked_issues.len() == 1 {
-                        format!("[ Issue #{} ]", linked_issues[0])
-                    } else {
-                        format!("[ choose {} issues ]", linked_issues.len())
-                    };
+                    let (open_label, more_hint) =
+                        linked_item_label("Issue", linked_issues[0], linked_issues.len());
                     let web_label = "[ web ]";
-                    body_lines.push(Line::from(vec![
+                    let mut linked_row = vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
                         Span::styled(
                             open_label.clone(),
@@ -158,24 +155,39 @@ pub(super) fn draw_issue_detail(
                                 .bg(theme.accent_success)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::raw(" "),
-                        Span::styled(
-                            web_label,
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_primary)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
+                    ];
+                    let mut more_hint_width = 0u16;
+                    if let Some(more_hint) = more_hint {
+                        more_hint_width = more_hint.chars().count() as u16;
+                        linked_row.push(Span::raw(" "));
+                        linked_row.push(Span::styled(
+                            more_hint,
+                            Style::default().fg(theme.text_muted),
+                        ));
+                    }
+                    linked_row.push(Span::raw(" "));
+                    linked_row.push(Span::styled(
+                        web_label,
+                        Style::default()
+                            .fg(theme.bg_app)
+                            .bg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    body_lines.push(Line::from(linked_row));
                     let prefix_width = prefix.chars().count() as u16;
                     let open_width = open_label.chars().count() as u16;
                     let web_width = web_label.chars().count() as u16;
+                    let web_offset = if more_hint_width == 0 {
+                        prefix_width.saturating_add(open_width).saturating_add(1)
+                    } else {
+                        prefix_width
+                            .saturating_add(open_width)
+                            .saturating_add(1)
+                            .saturating_add(more_hint_width)
+                            .saturating_add(1)
+                    };
                     linked_issue_tui_hit = Some((link_line, prefix_width, open_width));
-                    linked_issue_web_hit = Some((
-                        link_line,
-                        prefix_width.saturating_add(open_width).saturating_add(1),
-                        web_width,
-                    ));
+                    linked_issue_web_hit = Some((link_line, web_offset, web_width));
                 }
             } else {
                 let linked_prs = app.linked_pull_requests_for_issue(number);
@@ -185,13 +197,10 @@ pub(super) fn draw_issue_detail(
                     } else {
                         "linked PRs "
                     };
-                    let open_label = if linked_prs.len() == 1 {
-                        format!("[ PR #{} ]", linked_prs[0])
-                    } else {
-                        format!("[ choose {} PRs ]", linked_prs.len())
-                    };
+                    let (open_label, more_hint) =
+                        linked_item_label("PR", linked_prs[0], linked_prs.len());
                     let web_label = "[ web ]";
-                    body_lines.push(Line::from(vec![
+                    let mut linked_row = vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
                         Span::styled(
                             open_label.clone(),
@@ -200,24 +209,39 @@ pub(super) fn draw_issue_detail(
                                 .bg(theme.accent_success)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::raw(" "),
-                        Span::styled(
-                            web_label,
-                            Style::default()
-                                .fg(theme.bg_app)
-                                .bg(theme.accent_primary)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
+                    ];
+                    let mut more_hint_width = 0u16;
+                    if let Some(more_hint) = more_hint {
+                        more_hint_width = more_hint.chars().count() as u16;
+                        linked_row.push(Span::raw(" "));
+                        linked_row.push(Span::styled(
+                            more_hint,
+                            Style::default().fg(theme.text_muted),
+                        ));
+                    }
+                    linked_row.push(Span::raw(" "));
+                    linked_row.push(Span::styled(
+                        web_label,
+                        Style::default()
+                            .fg(theme.bg_app)
+                            .bg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    body_lines.push(Line::from(linked_row));
                     let prefix_width = prefix.chars().count() as u16;
                     let open_width = open_label.chars().count() as u16;
                     let web_width = web_label.chars().count() as u16;
+                    let web_offset = if more_hint_width == 0 {
+                        prefix_width.saturating_add(open_width).saturating_add(1)
+                    } else {
+                        prefix_width
+                            .saturating_add(open_width)
+                            .saturating_add(1)
+                            .saturating_add(more_hint_width)
+                            .saturating_add(1)
+                    };
                     linked_pr_tui_hit = Some((link_line, prefix_width, open_width));
-                    linked_pr_web_hit = Some((
-                        link_line,
-                        prefix_width.saturating_add(open_width).saturating_add(1),
-                        web_width,
-                    ));
+                    linked_pr_web_hit = Some((link_line, web_offset, web_width));
                 }
             }
         }
@@ -612,5 +636,33 @@ pub(super) fn draw_issue_comments(
             content_inner.width,
             1,
         );
+    }
+}
+
+fn linked_item_label(kind: &str, number: i64, total: usize) -> (String, Option<String>) {
+    let open = format!("[ {} #{} ]", kind, number);
+    let more = total.saturating_sub(1);
+    if more == 0 {
+        return (open, None);
+    }
+    (open, Some(format!("+{} more", more)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::linked_item_label;
+
+    #[test]
+    fn linked_item_label_omits_hint_for_single() {
+        let (label, hint) = linked_item_label("Issue", 42, 1);
+        assert_eq!(label, "[ Issue #42 ]");
+        assert_eq!(hint, None);
+    }
+
+    #[test]
+    fn linked_item_label_adds_more_hint_for_multiple() {
+        let (label, hint) = linked_item_label("PR", 7, 3);
+        assert_eq!(label, "[ PR #7 ]");
+        assert_eq!(hint.as_deref(), Some("+2 more"));
     }
 }
