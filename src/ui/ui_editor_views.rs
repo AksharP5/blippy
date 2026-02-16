@@ -93,6 +93,11 @@ pub(super) fn draw_comment_editor(
     area: ratatui::layout::Rect,
     theme: &ThemePalette,
 ) {
+    if app.editor_mode() == EditorMode::CreateIssue {
+        draw_create_issue_editor(frame, app, area, theme);
+        return;
+    }
+
     let close_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
         "Close Pull Request Comment"
     } else {
@@ -100,6 +105,7 @@ pub(super) fn draw_comment_editor(
     };
     let title = match app.editor_mode() {
         EditorMode::CloseIssue => close_editor_title,
+        EditorMode::CreateIssue => "Create Issue",
         EditorMode::AddComment => "Add Issue Comment",
         EditorMode::EditComment => "Edit Issue Comment",
         EditorMode::AddPullRequestReviewComment => "Add Pull Request Review Comment",
@@ -132,4 +138,167 @@ pub(super) fn draw_comment_editor(
             .saturating_add(col.min(text_area.width.saturating_sub(1)));
         frame.set_cursor_position((cursor_x, cursor_y));
     }
+}
+
+fn draw_create_issue_editor(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
+    let editor_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
+
+    let outer_block = panel_block("Create Issue", theme);
+    frame.render_widget(outer_block, editor_area);
+
+    let content_area = editor_area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(4)])
+        .split(content_area);
+
+    let title_focused = app.editor().create_issue_title_focused();
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Title")
+        .border_style(if title_focused {
+            Style::default().fg(theme.border_focus)
+        } else {
+            Style::default().fg(theme.border_panel)
+        });
+    let title = Paragraph::new(app.editor().name())
+        .block(title_block)
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel));
+    frame.render_widget(title, sections[0]);
+
+    let body_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Body")
+        .border_style(if title_focused {
+            Style::default().fg(theme.border_panel)
+        } else {
+            Style::default().fg(theme.border_focus)
+        });
+    let body = Paragraph::new(app.editor().text())
+        .block(body_block)
+        .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(body, sections[1]);
+
+    if title_focused {
+        let title_inner = sections[0].inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        if title_inner.width > 0 {
+            let cursor_x = title_inner
+                .x
+                .saturating_add(app.editor().name().chars().count() as u16)
+                .min(
+                    title_inner
+                        .x
+                        .saturating_add(title_inner.width.saturating_sub(1)),
+                );
+            frame.set_cursor_position((cursor_x, title_inner.y));
+        }
+        if app.editor().create_issue_confirm_visible() {
+            draw_create_issue_confirm(frame, app, area, theme);
+        }
+        return;
+    }
+
+    let body_inner = sections[1].inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if body_inner.width > 0 && body_inner.height > 0 {
+        let (row, col) = editor_cursor_position(app.editor().text());
+        let cursor_y = body_inner
+            .y
+            .saturating_add(row.min(body_inner.height.saturating_sub(1)));
+        let cursor_x = body_inner
+            .x
+            .saturating_add(col.min(body_inner.width.saturating_sub(1)));
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    if app.editor().create_issue_confirm_visible() {
+        draw_create_issue_confirm(frame, app, area, theme);
+    }
+}
+
+fn draw_create_issue_confirm(
+    frame: &mut Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+    theme: &ThemePalette,
+) {
+    let popup = ui_status_overlay::centered_rect(52, 28, area);
+    frame.render_widget(Clear, popup);
+    let block = popup_block("Create this issue?", theme);
+    frame.render_widget(block, popup);
+
+    let content = popup.inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
+    let title = app.editor().name().trim();
+    let title = if title.is_empty() {
+        "(untitled)".to_string()
+    } else {
+        fit_inline(title, content.width.saturating_sub(2) as usize)
+    };
+    let prompt = Line::from(vec![
+        Span::styled("Title: ", Style::default().fg(theme.text_muted)),
+        Span::styled(title, Style::default().fg(theme.text_primary)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(prompt).style(Style::default().bg(theme.bg_popup)),
+        Rect {
+            x: content.x,
+            y: content.y,
+            width: content.width,
+            height: 1,
+        },
+    );
+
+    let submit_selected = app.editor().create_issue_confirm_submit_selected();
+    let cancel_style = if submit_selected {
+        Style::default().fg(theme.text_muted)
+    } else {
+        Style::default()
+            .fg(theme.bg_app)
+            .bg(theme.accent_danger)
+            .add_modifier(Modifier::BOLD)
+    };
+    let create_style = if submit_selected {
+        Style::default()
+            .fg(theme.bg_app)
+            .bg(theme.accent_success)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.text_muted)
+    };
+
+    let actions = Line::from(vec![
+        Span::styled("[ Cancel ]", cancel_style),
+        Span::raw("  "),
+        Span::styled("[ Create ]", create_style),
+    ]);
+    let action_y = content.y.saturating_add(content.height.saturating_sub(1));
+    frame.render_widget(
+        Paragraph::new(actions).style(Style::default().bg(theme.bg_popup)),
+        Rect {
+            x: content.x,
+            y: action_y,
+            width: content.width,
+            height: 1,
+        },
+    );
 }

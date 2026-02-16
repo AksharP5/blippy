@@ -275,6 +275,16 @@ fn custom_quit_keybinding_remaps_and_disables_default() {
 }
 
 #[test]
+fn shift_n_triggers_create_issue_action() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+
+    assert_eq!(app.take_action(), Some(AppAction::CreateIssue));
+}
+
+#[test]
 fn diff_horizontal_scroll_uses_keyboard_and_mouse() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);

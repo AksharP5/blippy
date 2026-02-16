@@ -107,6 +107,25 @@ pub(super) fn handle_events(
                     app.request_comment_sync();
                 }
             }
+            AppEvent::IssueCreated { issue_number } => {
+                app.set_work_item_mode(WorkItemMode::Issues);
+                app.set_issue_filter(IssueFilter::Open);
+                refresh_current_repo_issues(app, conn)?;
+                if app.select_issue_by_number(issue_number)
+                    && let Some((issue_id, issue_number)) = app
+                        .selected_issue_row()
+                        .map(|issue| (issue.id, issue.number))
+                {
+                    app.set_current_issue(issue_id, issue_number);
+                    load_comments_for_issue(app, conn, issue_id)?;
+                    app.set_view(View::IssueDetail);
+                }
+                app.set_status(format!("Created issue #{}", issue_number));
+                app.request_sync();
+            }
+            AppEvent::IssueCreateFailed { message } => {
+                app.set_status(format!("Issue creation failed: {}", message));
+            }
             AppEvent::IssueLabelsUpdated {
                 issue_number,
                 labels,

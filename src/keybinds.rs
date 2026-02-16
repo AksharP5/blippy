@@ -146,6 +146,11 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         description: "Reopen issue",
     },
     BindingSpec {
+        action: "create_issue",
+        default: "shift+n",
+        description: "Create issue",
+    },
+    BindingSpec {
         action: "popup_toggle",
         default: "space",
         description: "Toggle popup item",

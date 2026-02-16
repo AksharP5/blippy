@@ -4,6 +4,30 @@ use std::collections::HashSet;
 use super::*;
 
 impl GitHubClient {
+    pub async fn create_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: Option<&str>,
+    ) -> Result<ApiIssue> {
+        let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
+        let mut payload = serde_json::json!({ "title": title });
+        if let Some(body) = body {
+            payload["body"] = serde_json::Value::String(body.to_string());
+        }
+
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(&self.token)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(response.json::<ApiIssue>().await?)
+    }
+
     pub async fn list_issues_page_conditional(
         &self,
         owner: &str,

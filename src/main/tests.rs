@@ -1,5 +1,5 @@
 use super::main_actions::issue_url;
-use crate::app::{View, WorkItemMode};
+use crate::app::{EditorMode, View, WorkItemMode};
 use crate::config::Config;
 use crate::store::IssueRow;
 use std::sync::mpsc::channel;
@@ -122,6 +122,24 @@ fn linked_pull_request_action_opens_picker_when_multiple_cached() {
 }
 
 #[test]
+fn create_issue_action_opens_create_issue_editor() {
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_view(View::Issues);
+    app.on_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('N'),
+        crossterm::event::KeyModifiers::SHIFT,
+    ));
+
+    let (event_tx, _event_rx) = channel();
+    super::main_actions::handle_actions(&mut app, &conn, "token", event_tx).expect("handled");
+
+    assert_eq!(app.view(), View::CommentEditor);
+    assert_eq!(app.editor_mode(), EditorMode::CreateIssue);
+}
+
+#[test]
 fn linked_issue_action_opens_picker_when_multiple_cached() {
     let conn = rusqlite::Connection::open_in_memory().expect("conn");
     let mut app = crate::app::App::new(Config::default());
@@ -181,4 +199,22 @@ fn reopen_issue_blocks_merged_pull_requests() {
 
     assert_eq!(app.status(), "Merged pull requests cannot be reopened");
     assert_eq!(app.pending_issue_badge(88), None);
+}
+
+#[test]
+fn submit_created_issue_requires_non_empty_title() {
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.open_create_issue_editor(View::Issues);
+    app.on_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+
+    let (event_tx, _event_rx) = channel();
+    super::main_actions::handle_actions(&mut app, &conn, "token", event_tx).expect("handled");
+
+    assert_eq!(app.status(), "Issue title required");
+    assert_eq!(app.view(), View::CommentEditor);
 }

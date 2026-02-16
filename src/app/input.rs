@@ -178,6 +178,15 @@ impl App {
             {
                 self.interaction.action = Some(AppAction::AddIssueComment);
             }
+            KeyCode::Char('N')
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    && matches!(
+                        self.view,
+                        View::Issues | View::IssueDetail | View::IssueComments
+                    ) =>
+            {
+                self.interaction.action = Some(AppAction::CreateIssue);
+            }
             KeyCode::Char('w') if self.view == View::PullRequestFiles => {
                 self.interaction.action = Some(AppAction::TogglePullRequestFileViewed);
             }

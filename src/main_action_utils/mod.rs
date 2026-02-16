@@ -8,8 +8,8 @@ mod preset;
 
 pub(super) use checkout::checkout_pull_request;
 pub(super) use issue_actions::{
-    close_issue_with_comment, delete_issue_comment, post_issue_comment, reopen_issue,
-    update_issue_assignees, update_issue_comment, update_issue_labels,
+    close_issue_with_comment, create_issue, delete_issue_comment, post_issue_comment, reopen_issue,
+    submit_created_issue, update_issue_assignees, update_issue_comment, update_issue_labels,
 };
 pub(super) use issue_selection::{
     assignee_options_for_repo, ensure_can_edit_issue_metadata, issue_number, issue_url,

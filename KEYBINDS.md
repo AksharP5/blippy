@@ -32,8 +32,10 @@ Search mode:
 - `a`: Cycle assignee filter
 - `Ctrl+a`: Reset assignee filter to all
 - `/`: Start issue/PR search
+- `Shift+N`: Create issue
 - `r`: Refresh list
 - `m`: Add comment
+- `Shift+N`: Create issue
 - `l`: Edit labels
 - `Shift+A`: Edit assignees
 - `u`: Reopen selected closed item
@@ -69,6 +71,7 @@ Search mode:
 
 - `j` / `k`: Move between comments
 - `m`: Add comment
+- `Shift+N`: Create issue
 - `e`: Edit selected comment
 - `x`: Delete selected comment
 - `l`: Edit labels
@@ -128,7 +131,10 @@ Search mode:
 ## Text Editors (comment body / preset body)
 
 - `Enter`: Submit
-- `Shift+Enter`, `Alt+Enter`, or `Ctrl+j`: Insert newline
+- `Ctrl+j` / `Ctrl+k`: Switch body/title field (create issue)
+- `Tab` / `Shift+Tab`: Switch cancel/create in create-issue confirmation
+- `Shift+Enter` or `Alt+Enter`: Insert newline
+- `Ctrl+j`: Insert newline (non-create-issue editors)
 - `Esc`: Cancel
 
 ## Search Qualifiers
@@ -172,6 +178,7 @@ All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or unde
 | `edit_labels` | `l` |
 | `edit_assignees` | `shift+a` |
 | `reopen_issue` | `u` |
+| `create_issue` | `shift+n` |
 | `popup_toggle` | `space` |
 | `submit` | `enter` |
 | `back` | `b` |
