@@ -454,6 +454,15 @@ struct SearchState {
     help_overlay_visible: bool,
 }
 
+#[derive(Debug, Default)]
+struct InteractionState {
+    action: Option<AppAction>,
+    pending_issue_actions: HashMap<i64, PendingIssueAction>,
+    pending_g: bool,
+    pending_d: bool,
+    mouse_regions: Vec<MouseRegion>,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -472,14 +481,10 @@ pub struct App {
     status: String,
     sync: SyncState,
     repo_label_colors: HashMap<String, String>,
-    action: Option<AppAction>,
+    interaction: InteractionState,
     context: RepoContextState,
     linked: LinkedState,
     pull_request: PullRequestState,
-    pending_issue_actions: HashMap<i64, PendingIssueAction>,
-    pending_g: bool,
-    pending_d: bool,
-    mouse_regions: Vec<MouseRegion>,
     comment_editor: CommentEditorState,
     editor_cancel_view: View,
     editing_comment_id: Option<i64>,
@@ -508,14 +513,10 @@ impl App {
             status: String::new(),
             sync: SyncState::default(),
             repo_label_colors: HashMap::new(),
-            action: None,
+            interaction: InteractionState::default(),
             context: RepoContextState::default(),
             linked: LinkedState::default(),
             pull_request: PullRequestState::default(),
-            pending_issue_actions: HashMap::new(),
-            pending_g: false,
-            pending_d: false,
-            mouse_regions: Vec::new(),
             comment_editor: CommentEditorState::default(),
             editor_cancel_view: View::Issues,
             editing_comment_id: None,
@@ -1227,10 +1228,10 @@ impl App {
         }
 
         if key.code != KeyCode::Char('g') {
-            self.pending_g = false;
+            self.interaction.pending_g = false;
         }
         if key.code != KeyCode::Char('d') {
-            self.pending_d = false;
+            self.interaction.pending_d = false;
         }
 
         if key.code == KeyCode::Char('?') {
@@ -1305,11 +1306,11 @@ impl App {
                 self.status = "Syncing issue and comments".to_string();
             }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
-                if self.pending_g {
+                if self.interaction.pending_g {
                     self.jump_top();
-                    self.pending_g = false;
+                    self.interaction.pending_g = false;
                 } else {
-                    self.pending_g = true;
+                    self.interaction.pending_g = true;
                 }
             }
             KeyCode::Char('d')
@@ -1328,20 +1329,20 @@ impl App {
                     self.context.issue_id.is_some() && self.context.issue_number.is_some()
                 };
                 if !has_issue {
-                    self.pending_d = false;
+                    self.interaction.pending_d = false;
                     self.status = "No issue selected".to_string();
                     return;
                 }
                 if self.current_view_issue_is_closed() {
-                    self.pending_d = false;
+                    self.interaction.pending_d = false;
                     self.status = "Issue already closed".to_string();
                     return;
                 }
-                if self.pending_d {
-                    self.action = Some(AppAction::CloseIssue);
-                    self.pending_d = false;
+                if self.interaction.pending_d {
+                    self.interaction.action = Some(AppAction::CloseIssue);
+                    self.interaction.pending_d = false;
                 } else {
-                    self.pending_d = true;
+                    self.interaction.pending_d = true;
                 }
             }
             KeyCode::Char('G') => self.jump_bottom(),
@@ -1362,22 +1363,22 @@ impl App {
                     View::Issues | View::IssueDetail | View::IssueComments
                 ) =>
             {
-                self.action = Some(AppAction::AddIssueComment);
+                self.interaction.action = Some(AppAction::AddIssueComment);
             }
             KeyCode::Char('w') if self.view == View::PullRequestFiles => {
-                self.action = Some(AppAction::TogglePullRequestFileViewed);
+                self.interaction.action = Some(AppAction::TogglePullRequestFileViewed);
             }
             KeyCode::Char('m') if self.view == View::PullRequestFiles => {
-                self.action = Some(AppAction::AddPullRequestReviewComment);
+                self.interaction.action = Some(AppAction::AddPullRequestReviewComment);
             }
             KeyCode::Char('e') if self.view == View::PullRequestFiles => {
-                self.action = Some(AppAction::EditPullRequestReviewComment);
+                self.interaction.action = Some(AppAction::EditPullRequestReviewComment);
             }
             KeyCode::Char('x') if self.view == View::PullRequestFiles => {
-                self.action = Some(AppAction::DeletePullRequestReviewComment);
+                self.interaction.action = Some(AppAction::DeletePullRequestReviewComment);
             }
             KeyCode::Char('R') if self.view == View::PullRequestFiles => {
-                self.action = Some(AppAction::ResolvePullRequestReviewComment);
+                self.interaction.action = Some(AppAction::ResolvePullRequestReviewComment);
             }
             KeyCode::Char('n') if self.view == View::PullRequestFiles => {
                 self.cycle_pull_request_review_comment(true);
@@ -1410,10 +1411,10 @@ impl App {
                 self.reset_pull_request_diff_horizontal_scroll();
             }
             KeyCode::Char('e') if self.view == View::IssueComments => {
-                self.action = Some(AppAction::EditIssueComment);
+                self.interaction.action = Some(AppAction::EditIssueComment);
             }
             KeyCode::Char('x') if self.view == View::IssueComments => {
-                self.action = Some(AppAction::DeleteIssueComment);
+                self.interaction.action = Some(AppAction::DeleteIssueComment);
             }
             KeyCode::Char('l')
                 if matches!(
@@ -1421,7 +1422,7 @@ impl App {
                     View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
                 ) =>
             {
-                self.action = Some(AppAction::EditLabels);
+                self.interaction.action = Some(AppAction::EditLabels);
             }
             KeyCode::Char('A')
                 if key.modifiers.contains(KeyModifiers::SHIFT)
@@ -1433,7 +1434,7 @@ impl App {
                             | View::PullRequestFiles
                     ) =>
             {
-                self.action = Some(AppAction::EditAssignees);
+                self.interaction.action = Some(AppAction::EditAssignees);
             }
             KeyCode::Char('u')
                 if matches!(
@@ -1441,7 +1442,7 @@ impl App {
                     View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
                 ) =>
             {
-                self.action = Some(AppAction::ReopenIssue);
+                self.interaction.action = Some(AppAction::ReopenIssue);
             }
             KeyCode::Char(' ') if self.view == View::LabelPicker => {
                 self.toggle_selected_label();
@@ -1451,11 +1452,11 @@ impl App {
             }
             KeyCode::Enter if self.view == View::LabelPicker => {
                 self.toggle_selected_label();
-                self.action = Some(AppAction::SubmitLabels);
+                self.interaction.action = Some(AppAction::SubmitLabels);
             }
             KeyCode::Enter if self.view == View::AssigneePicker => {
                 self.toggle_selected_assignee();
-                self.action = Some(AppAction::SubmitAssignees);
+                self.interaction.action = Some(AppAction::SubmitAssignees);
             }
             KeyCode::Char('b') if self.view == View::IssueDetail => {
                 self.back_from_issue_detail();
@@ -1490,7 +1491,7 @@ impl App {
                     View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
                 ) =>
             {
-                self.action = Some(AppAction::OpenInBrowser);
+                self.interaction.action = Some(AppAction::OpenInBrowser);
             }
             KeyCode::Char('O')
                 if key.modifiers.contains(KeyModifiers::SHIFT)
@@ -1506,10 +1507,10 @@ impl App {
                     .current_or_selected_issue()
                     .is_some_and(|issue| issue.is_pr)
                 {
-                    self.action = Some(AppAction::OpenLinkedIssueInBrowser);
+                    self.interaction.action = Some(AppAction::OpenLinkedIssueInBrowser);
                     return;
                 }
-                self.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
+                self.interaction.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
             }
             KeyCode::Char('P')
                 if key.modifiers.contains(KeyModifiers::SHIFT)
@@ -1525,10 +1526,10 @@ impl App {
                     .current_or_selected_issue()
                     .is_some_and(|issue| issue.is_pr)
                 {
-                    self.action = Some(AppAction::OpenLinkedIssueInTui);
+                    self.interaction.action = Some(AppAction::OpenLinkedIssueInTui);
                     return;
                 }
-                self.action = Some(AppAction::OpenLinkedPullRequestInTui);
+                self.interaction.action = Some(AppAction::OpenLinkedPullRequestInTui);
             }
             KeyCode::Char('v')
                 if matches!(
@@ -1536,7 +1537,7 @@ impl App {
                     View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
                 ) =>
             {
-                self.action = Some(AppAction::CheckoutPullRequest);
+                self.interaction.action = Some(AppAction::CheckoutPullRequest);
             }
             _ => {}
         }
@@ -1669,12 +1670,12 @@ impl App {
             }
             Some(MouseTarget::RepoRow(index)) => {
                 self.navigation.selected_repo = index.min(self.search.filtered_repo_indices.len().saturating_sub(1));
-                self.action = Some(AppAction::PickRepo);
+                self.interaction.action = Some(AppAction::PickRepo);
             }
             Some(MouseTarget::RepoListPane) => {}
             Some(MouseTarget::RemoteRow(index)) => {
                 self.navigation.selected_remote = index.min(self.remotes.len().saturating_sub(1));
-                self.action = Some(AppAction::PickRemote);
+                self.interaction.action = Some(AppAction::PickRemote);
             }
             Some(MouseTarget::RemoteListPane) => {}
             Some(MouseTarget::IssueTabOpen) => {
@@ -1694,7 +1695,7 @@ impl App {
                 self.navigation.selected_issue =
                     index.min(self.search.filtered_issue_indices.len().saturating_sub(1));
                 self.navigation.issues_preview_scroll = 0;
-                self.action = Some(AppAction::PickIssue);
+                self.interaction.action = Some(AppAction::PickIssue);
             }
             Some(MouseTarget::IssueBodyPane) => {
                 self.focus = Focus::IssueBody;
@@ -1710,19 +1711,19 @@ impl App {
             }
             Some(MouseTarget::LinkedPullRequestTuiButton) => {
                 self.focus = Focus::IssuesPreview;
-                self.action = Some(AppAction::OpenLinkedPullRequestInTui);
+                self.interaction.action = Some(AppAction::OpenLinkedPullRequestInTui);
             }
             Some(MouseTarget::LinkedPullRequestWebButton) => {
                 self.focus = Focus::IssuesPreview;
-                self.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
+                self.interaction.action = Some(AppAction::OpenLinkedPullRequestInBrowser);
             }
             Some(MouseTarget::LinkedIssueTuiButton) => {
                 self.focus = Focus::IssuesPreview;
-                self.action = Some(AppAction::OpenLinkedIssueInTui);
+                self.interaction.action = Some(AppAction::OpenLinkedIssueInTui);
             }
             Some(MouseTarget::LinkedIssueWebButton) => {
                 self.focus = Focus::IssuesPreview;
-                self.action = Some(AppAction::OpenLinkedIssueInBrowser);
+                self.interaction.action = Some(AppAction::OpenLinkedIssueInBrowser);
             }
             Some(MouseTarget::CommentsPane) => {}
             Some(MouseTarget::CommentRow(index)) => {
@@ -1754,7 +1755,7 @@ impl App {
                 }
             }
             Some(MouseTarget::LabelApply) => {
-                self.action = Some(AppAction::SubmitLabels);
+                self.interaction.action = Some(AppAction::SubmitLabels);
             }
             Some(MouseTarget::LabelCancel) => {
                 self.set_view(self.editor_cancel_view);
@@ -1766,14 +1767,14 @@ impl App {
                 }
             }
             Some(MouseTarget::AssigneeApply) => {
-                self.action = Some(AppAction::SubmitAssignees);
+                self.interaction.action = Some(AppAction::SubmitAssignees);
             }
             Some(MouseTarget::AssigneeCancel) => {
                 self.set_view(self.editor_cancel_view);
             }
             Some(MouseTarget::PresetOption(index)) => {
                 self.preset_choice = index.min(self.preset_items_len().saturating_sub(1));
-                self.action = Some(AppAction::PickPreset);
+                self.interaction.action = Some(AppAction::PickPreset);
             }
             None => {}
         }
@@ -2535,15 +2536,15 @@ impl App {
     }
 
     pub fn set_pending_issue_action(&mut self, issue_number: i64, action: PendingIssueAction) {
-        self.pending_issue_actions.insert(issue_number, action);
+        self.interaction.pending_issue_actions.insert(issue_number, action);
     }
 
     pub fn clear_pending_issue_action(&mut self, issue_number: i64) {
-        self.pending_issue_actions.remove(&issue_number);
+        self.interaction.pending_issue_actions.remove(&issue_number);
     }
 
     pub fn pending_issue_badge(&self, issue_number: i64) -> Option<&'static str> {
-        self.pending_issue_actions
+        self.interaction.pending_issue_actions
             .get(&issue_number)
             .copied()
             .map(PendingIssueAction::label)
@@ -2556,11 +2557,11 @@ impl App {
     }
 
     pub fn take_action(&mut self) -> Option<AppAction> {
-        self.action.take()
+        self.interaction.action.take()
     }
 
     pub fn clear_mouse_regions(&mut self) {
-        self.mouse_regions.clear();
+        self.interaction.mouse_regions.clear();
     }
 
     pub fn register_mouse_region(
@@ -2574,7 +2575,7 @@ impl App {
         if width == 0 || height == 0 {
             return;
         }
-        self.mouse_regions.push(MouseRegion {
+        self.interaction.mouse_regions.push(MouseRegion {
             target,
             x,
             y,
@@ -2584,10 +2585,10 @@ impl App {
     }
 
     fn mouse_target_at(&self, column: u16, row: u16) -> Option<MouseTarget> {
-        let mut index = self.mouse_regions.len();
+        let mut index = self.interaction.mouse_regions.len();
         while index > 0 {
             index -= 1;
-            let region = self.mouse_regions[index];
+            let region = self.interaction.mouse_regions[index];
             if column < region.x || row < region.y {
                 continue;
             }
@@ -2822,13 +2823,13 @@ impl App {
     fn activate_selection(&mut self) {
         match self.view {
             View::RepoPicker => {
-                self.action = Some(AppAction::PickRepo);
+                self.interaction.action = Some(AppAction::PickRepo);
             }
             View::RemoteChooser => {
-                self.action = Some(AppAction::PickRemote);
+                self.interaction.action = Some(AppAction::PickRemote);
             }
             View::Issues => {
-                self.action = Some(AppAction::PickIssue);
+                self.interaction.action = Some(AppAction::PickIssue);
             }
             View::IssueDetail => {
                 if self.focus == Focus::IssueBody {
@@ -2861,7 +2862,7 @@ impl App {
                 self.toggle_pull_request_diff_expanded();
             }
             View::CommentPresetPicker => {
-                self.action = Some(AppAction::PickPreset);
+                self.interaction.action = Some(AppAction::PickPreset);
             }
             View::CommentPresetName
             | View::CommentEditor
@@ -3627,22 +3628,22 @@ impl App {
                 }
                 KeyCode::Enter => match self.comment_editor.mode() {
                     EditorMode::CloseIssue => {
-                        self.action = Some(AppAction::SubmitComment);
+                        self.interaction.action = Some(AppAction::SubmitComment);
                     }
                     EditorMode::AddComment => {
-                        self.action = Some(AppAction::SubmitIssueComment);
+                        self.interaction.action = Some(AppAction::SubmitIssueComment);
                     }
                     EditorMode::EditComment => {
-                        self.action = Some(AppAction::SubmitEditedComment);
+                        self.interaction.action = Some(AppAction::SubmitEditedComment);
                     }
                     EditorMode::AddPullRequestReviewComment => {
-                        self.action = Some(AppAction::SubmitPullRequestReviewComment);
+                        self.interaction.action = Some(AppAction::SubmitPullRequestReviewComment);
                     }
                     EditorMode::EditPullRequestReviewComment => {
-                        self.action = Some(AppAction::SubmitEditedPullRequestReviewComment);
+                        self.interaction.action = Some(AppAction::SubmitEditedPullRequestReviewComment);
                     }
                     EditorMode::AddPreset => {
-                        self.action = Some(AppAction::SavePreset);
+                        self.interaction.action = Some(AppAction::SavePreset);
                     }
                 },
                 KeyCode::Backspace => self.comment_editor.backspace_text(),
