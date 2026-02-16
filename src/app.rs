@@ -355,6 +355,15 @@ struct LinkedState {
     navigation_origin: Option<(i64, WorkItemMode)>,
 }
 
+#[derive(Debug, Default)]
+struct RepoContextState {
+    owner: Option<String>,
+    repo: Option<String>,
+    path: Option<String>,
+    issue_id: Option<i64>,
+    issue_number: Option<i64>,
+}
+
 pub struct App {
     should_quit: bool,
     config: Config,
@@ -391,11 +400,7 @@ pub struct App {
     sync: SyncState,
     repo_label_colors: HashMap<String, String>,
     action: Option<AppAction>,
-    current_owner: Option<String>,
-    current_repo: Option<String>,
-    current_repo_path: Option<String>,
-    current_issue_id: Option<i64>,
-    current_issue_number: Option<i64>,
+    context: RepoContextState,
     linked: LinkedState,
     pull_request_files_issue_id: Option<i64>,
     pull_request_id: Option<String>,
@@ -474,11 +479,7 @@ impl App {
             sync: SyncState::default(),
             repo_label_colors: HashMap::new(),
             action: None,
-            current_owner: None,
-            current_repo: None,
-            current_repo_path: None,
-            current_issue_id: None,
-            current_issue_number: None,
+            context: RepoContextState::default(),
             linked: LinkedState::default(),
             pull_request_files_issue_id: None,
             pull_request_id: None,
@@ -571,7 +572,7 @@ impl App {
     }
 
     pub fn current_issue_row(&self) -> Option<&IssueRow> {
-        let issue_id = self.current_issue_id?;
+        let issue_id = self.context.issue_id?;
         self.issues.iter().find(|issue| issue.id == issue_id)
     }
 
@@ -584,7 +585,7 @@ impl App {
     }
 
     pub fn current_repo_path(&self) -> Option<&str> {
-        self.current_repo_path.as_deref()
+        self.context.path.as_deref()
     }
 
     pub fn assignee_filter_label(&self) -> String {
@@ -935,11 +936,11 @@ impl App {
     }
 
     pub fn current_owner(&self) -> Option<&str> {
-        self.current_owner.as_deref()
+        self.context.owner.as_deref()
     }
 
     pub fn current_repo(&self) -> Option<&str> {
-        self.current_repo.as_deref()
+        self.context.repo.as_deref()
     }
 
     pub fn scanning(&self) -> bool {
@@ -1304,7 +1305,7 @@ impl App {
                 let has_issue = if self.view == View::Issues {
                     !self.filtered_issue_indices.is_empty()
                 } else {
-                    self.current_issue_id.is_some() && self.current_issue_number.is_some()
+                    self.context.issue_id.is_some() && self.context.issue_number.is_some()
                 };
                 if !has_issue {
                     self.pending_d = false;
@@ -1810,7 +1811,7 @@ impl App {
 
     pub fn set_issues(&mut self, issues: Vec<IssueRow>) {
         let selected_issue_number = self.selected_issue_row().map(|issue| issue.number);
-        let current_issue_number = self.current_issue_number;
+        let current_issue_number = self.context.issue_number;
         self.issues = issues;
         self.rebuild_issue_filter();
         self.selected_issue = selected_issue_number
@@ -1825,7 +1826,7 @@ impl App {
         if let Some(number) = current_issue_number
             && let Some(issue) = self.issues.iter().find(|issue| issue.number == number)
         {
-            self.current_issue_id = Some(issue.id);
+            self.context.issue_id = Some(issue.id);
         }
         self.issues_preview_scroll = 0;
         self.issues_preview_max_scroll = 0;
@@ -2154,11 +2155,11 @@ impl App {
     }
 
     pub fn set_current_repo_with_path(&mut self, owner: &str, repo: &str, path: Option<&str>) {
-        self.current_owner = Some(owner.to_string());
-        self.current_repo = Some(repo.to_string());
-        self.current_repo_path = path.map(ToString::to_string);
-        self.current_issue_id = None;
-        self.current_issue_number = None;
+        self.context.owner = Some(owner.to_string());
+        self.context.repo = Some(repo.to_string());
+        self.context.path = path.map(ToString::to_string);
+        self.context.issue_id = None;
+        self.context.issue_number = None;
         self.sync.repo_permissions_syncing = false;
         self.sync.repo_permissions_sync_requested = true;
         self.sync.repo_issue_metadata_editable = None;
@@ -2198,8 +2199,8 @@ impl App {
     }
 
     pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
-        self.current_issue_id = Some(issue_id);
-        self.current_issue_number = Some(issue_number);
+        self.context.issue_id = Some(issue_id);
+        self.context.issue_number = Some(issue_number);
         self.pending_review_target = None;
         if self.pull_request_files_issue_id != Some(issue_id) {
             self.pull_request_files_issue_id = None;
@@ -2502,11 +2503,11 @@ impl App {
     }
 
     pub fn current_issue_id(&self) -> Option<i64> {
-        self.current_issue_id
+        self.context.issue_id
     }
 
     pub fn current_issue_number(&self) -> Option<i64> {
-        self.current_issue_number
+        self.context.issue_number
     }
 
     pub fn set_pending_issue_action(&mut self, issue_number: i64, action: PendingIssueAction) {
