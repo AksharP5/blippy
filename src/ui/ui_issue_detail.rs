@@ -136,9 +136,18 @@ pub(super) fn draw_issue_detail(
         if let Some(number) = issue_number {
             let link_line = body_lines.len();
             if is_pr {
-                let prefix = "linked issue ";
-                if let Some(linked_issue) = app.linked_issue_for_pull_request(number) {
-                    let open_label = format!("[ Issue #{} ]", linked_issue);
+                let linked_issues = app.linked_issues_for_pull_request(number);
+                if !linked_issues.is_empty() {
+                    let prefix = if linked_issues.len() == 1 {
+                        "linked issue "
+                    } else {
+                        "linked issues "
+                    };
+                    let open_label = if linked_issues.len() == 1 {
+                        format!("[ Issue #{} ]", linked_issues[0])
+                    } else {
+                        format!("[ choose {} issues ]", linked_issues.len())
+                    };
                     let web_label = "[ web ]";
                     body_lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),
@@ -169,9 +178,18 @@ pub(super) fn draw_issue_detail(
                     ));
                 }
             } else {
-                let prefix = "linked PR ";
-                if let Some(linked_pr) = app.linked_pull_request_for_issue(number) {
-                    let open_label = format!("[ PR #{} ]", linked_pr);
+                let linked_prs = app.linked_pull_requests_for_issue(number);
+                if !linked_prs.is_empty() {
+                    let prefix = if linked_prs.len() == 1 {
+                        "linked PR "
+                    } else {
+                        "linked PRs "
+                    };
+                    let open_label = if linked_prs.len() == 1 {
+                        format!("[ PR #{} ]", linked_prs[0])
+                    } else {
+                        format!("[ choose {} PRs ]", linked_prs.len())
+                    };
                     let web_label = "[ web ]";
                     body_lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme.text_muted)),

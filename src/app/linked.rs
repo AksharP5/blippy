@@ -162,6 +162,14 @@ impl App {
         self.linked_picker.selected = 0;
         self.linked_picker.target = Some(target);
         self.linked_picker.cancel_view = cancel_view;
+        self.linked_picker.origin = self.current_or_selected_issue().map(|issue| {
+            let mode = if issue.is_pr {
+                WorkItemMode::PullRequests
+            } else {
+                WorkItemMode::Issues
+            };
+            (issue.number, mode)
+        });
         self.set_view(View::LinkedPicker);
     }
 
@@ -200,6 +208,17 @@ impl App {
         self.linked_picker.cancel_view
     }
 
+    #[cfg(test)]
+    pub fn linked_picker_origin(&self) -> Option<(i64, WorkItemMode)> {
+        self.linked_picker.origin
+    }
+
+    pub fn apply_linked_picker_navigation_origin(&mut self) {
+        if let Some(origin) = self.linked_picker.origin {
+            self.linked.navigation_origin = Some(origin);
+        }
+    }
+
     pub fn set_selected_linked_picker_index(&mut self, index: usize) {
         if self.linked_picker.options.is_empty() {
             self.linked_picker.selected = 0;
@@ -212,6 +231,7 @@ impl App {
         self.linked_picker.options.clear();
         self.linked_picker.selected = 0;
         self.linked_picker.target = None;
+        self.linked_picker.origin = None;
     }
 
     pub fn cancel_linked_picker(&mut self) {

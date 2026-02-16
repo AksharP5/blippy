@@ -478,6 +478,7 @@ struct LinkedPickerState {
     selected: usize,
     target: Option<LinkedPickerTarget>,
     cancel_view: View,
+    origin: Option<(i64, WorkItemMode)>,
 }
 
 impl Default for LinkedPickerState {
@@ -487,6 +488,7 @@ impl Default for LinkedPickerState {
             selected: 0,
             target: None,
             cancel_view: View::Issues,
+            origin: None,
         }
     }
 }

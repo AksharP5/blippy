@@ -418,3 +418,85 @@ fn linked_picker_labels_include_cached_titles() {
 
     assert_eq!(app.linked_picker_labels(), vec!["#22  Fix flaky sync test"]);
 }
+
+#[test]
+fn linked_picker_captures_origin_from_selected_pull_request() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![IssueRow {
+        id: 5,
+        repo_id: 1,
+        number: 9,
+        state: "open".to_string(),
+        title: "PR source".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+
+    app.open_linked_picker(View::Issues, LinkedPickerTarget::IssueTui, vec![101, 102]);
+
+    assert_eq!(
+        app.linked_picker_origin(),
+        Some((9, WorkItemMode::PullRequests))
+    );
+}
+
+#[test]
+fn linked_picker_origin_restores_pull_request_context_on_back() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![
+        IssueRow {
+            id: 5,
+            repo_id: 1,
+            number: 9,
+            state: "open".to_string(),
+            title: "PR source".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: true,
+        },
+        IssueRow {
+            id: 6,
+            repo_id: 1,
+            number: 101,
+            state: "open".to_string(),
+            title: "Linked issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        },
+    ]);
+
+    app.open_linked_picker(View::Issues, LinkedPickerTarget::IssueTui, vec![101, 102]);
+    app.apply_linked_picker_navigation_origin();
+    app.clear_linked_picker_state();
+
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::Issues);
+    assert!(app.select_issue_by_number(101));
+    let (issue_id, issue_number) = app
+        .selected_issue_row()
+        .map(|issue| (issue.id, issue.number))
+        .expect("selected issue");
+    app.set_current_issue(issue_id, issue_number);
+    app.set_view(View::IssueDetail);
+
+    app.back_from_issue_detail();
+
+    assert_eq!(app.view(), View::Issues);
+    assert_eq!(app.work_item_mode(), WorkItemMode::PullRequests);
+    assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(9));
+}

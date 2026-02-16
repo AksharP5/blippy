@@ -286,11 +286,11 @@ pub(super) fn open_selected_linked_item(app: &mut App, conn: &rusqlite::Connecti
     };
 
     let cancel_view = app.linked_picker_cancel_view();
+    app.apply_linked_picker_navigation_origin();
     app.clear_linked_picker_state();
 
     match target {
         LinkedPickerTarget::PullRequestTui => {
-            app.capture_linked_navigation_origin();
             refresh_current_repo_issues(app, conn)?;
             if open_pull_request_in_tui(app, conn, number)? {
                 app.set_status(format!("Opened linked pull request #{} in TUI", number));
@@ -304,7 +304,6 @@ pub(super) fn open_selected_linked_item(app: &mut App, conn: &rusqlite::Connecti
             ));
         }
         LinkedPickerTarget::IssueTui => {
-            app.capture_linked_navigation_origin();
             refresh_current_repo_issues(app, conn)?;
             if open_issue_in_tui(app, conn, number)? {
                 app.set_status(format!("Opened linked issue #{} in TUI", number));
