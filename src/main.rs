@@ -93,6 +93,42 @@ fn setup_worker_with_db(token: &str) -> Result<WorkerContext, WorkerSetupError> 
     Ok(WorkerContext { conn, services })
 }
 
+fn spawn_with_services<F, E>(token: String, event_tx: Sender<AppEvent>, on_setup_error: E, work: F)
+where
+    F: FnOnce(WorkerServices, Sender<AppEvent>) + Send + 'static,
+    E: FnOnce(String) -> AppEvent + Send + 'static,
+{
+    thread::spawn(move || {
+        let services = match setup_worker_services(&token) {
+            Ok(services) => services,
+            Err(error) => {
+                let _ = event_tx.send(on_setup_error(error.into_message()));
+                return;
+            }
+        };
+
+        work(services, event_tx);
+    });
+}
+
+fn spawn_with_db<F, E>(token: String, event_tx: Sender<AppEvent>, on_setup_error: E, work: F)
+where
+    F: FnOnce(WorkerContext, Sender<AppEvent>) + Send + 'static,
+    E: FnOnce(String) -> AppEvent + Send + 'static,
+{
+    thread::spawn(move || {
+        let ctx = match setup_worker_with_db(&token) {
+            Ok(ctx) => ctx,
+            Err(error) => {
+                let _ = event_tx.send(on_setup_error(error.into_message()));
+                return;
+            }
+        };
+
+        work(ctx, event_tx);
+    });
+}
+
 const AUTH_DEBUG_ENV: &str = "BLIPPY_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -1752,48 +1788,45 @@ fn start_linked_pull_request_lookup(
     event_tx: Sender<AppEvent>,
     target: LinkedPullRequestTarget,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
-                    issue_number,
-                    message: error.into_message(),
-                    target,
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::LinkedPullRequestLookupFailed {
+            issue_number,
+            message,
+            target,
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .find_linked_pull_request(&owner, &repo, issue_number)
+                    .await
+            });
 
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .find_linked_pull_request(&owner, &repo, issue_number)
-                .await
-        });
-
-        match result {
-            Ok(linked) => {
-                let (pull_number, url) = match linked {
-                    Some((pull_number, url)) => (Some(pull_number), Some(url)),
-                    None => (None, None),
-                };
-                let _ = event_tx.send(AppEvent::LinkedPullRequestResolved {
-                    issue_number,
-                    pull_number,
-                    url,
-                    target,
-                });
+            match result {
+                Ok(linked) => {
+                    let (pull_number, url) = match linked {
+                        Some((pull_number, url)) => (Some(pull_number), Some(url)),
+                        None => (None, None),
+                    };
+                    let _ = event_tx.send(AppEvent::LinkedPullRequestResolved {
+                        issue_number,
+                        pull_number,
+                        url,
+                        target,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
+                        issue_number,
+                        message: error.to_string(),
+                        target,
+                    });
+                }
             }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
-                    issue_number,
-                    message: error.to_string(),
-                    target,
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_linked_issue_lookup(
@@ -1804,48 +1837,45 @@ fn start_linked_issue_lookup(
     event_tx: Sender<AppEvent>,
     target: LinkedIssueTarget,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
-                    pull_number,
-                    message: error.into_message(),
-                    target,
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::LinkedIssueLookupFailed {
+            pull_number,
+            message,
+            target,
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .find_linked_issue_for_pull_request(&owner, &repo, pull_number)
+                    .await
+            });
 
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .find_linked_issue_for_pull_request(&owner, &repo, pull_number)
-                .await
-        });
-
-        match result {
-            Ok(linked) => {
-                let (issue_number, url) = match linked {
-                    Some((issue_number, url)) => (Some(issue_number), Some(url)),
-                    None => (None, None),
-                };
-                let _ = event_tx.send(AppEvent::LinkedIssueResolved {
-                    pull_number,
-                    issue_number,
-                    url,
-                    target,
-                });
+            match result {
+                Ok(linked) => {
+                    let (issue_number, url) = match linked {
+                        Some((issue_number, url)) => (Some(issue_number), Some(url)),
+                        None => (None, None),
+                    };
+                    let _ = event_tx.send(AppEvent::LinkedIssueResolved {
+                        pull_number,
+                        issue_number,
+                        url,
+                        target,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
+                        pull_number,
+                        message: error.to_string(),
+                        target,
+                    });
+                }
             }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
-                    pull_number,
-                    message: error.to_string(),
-                    target,
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn open_url(url: &str) -> Result<()> {
@@ -2849,50 +2879,49 @@ fn maybe_start_pull_request_review_comments_sync(
 }
 
 fn start_repo_sync(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
-    thread::spawn(move || {
-        let ctx = match setup_worker_with_db(&token) {
-            Ok(ctx) => ctx,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::SyncFailed {
-                    owner: owner.clone(),
-                    repo: repo.clone(),
-                    message: error.into_message(),
-                });
-                return;
-            }
-        };
-
-        let progress_tx = event_tx.clone();
-        let result = ctx.services.runtime.block_on(async {
-            sync_repo_with_progress(
-                &ctx.services.client,
-                &ctx.conn,
-                &owner,
-                &repo,
-                |page, stats| {
-                    let _ = progress_tx.send(AppEvent::SyncProgress {
+    let error_owner = owner.clone();
+    let error_repo = repo.clone();
+    spawn_with_db(
+        token,
+        event_tx,
+        move |message| AppEvent::SyncFailed {
+            owner: error_owner,
+            repo: error_repo,
+            message,
+        },
+        move |ctx, event_tx| {
+            let progress_tx = event_tx.clone();
+            let result = ctx.services.runtime.block_on(async {
+                sync_repo_with_progress(
+                    &ctx.services.client,
+                    &ctx.conn,
+                    &owner,
+                    &repo,
+                    |page, stats| {
+                        let _ = progress_tx.send(AppEvent::SyncProgress {
+                            owner: owner.clone(),
+                            repo: repo.clone(),
+                            page,
+                            stats: stats.clone(),
+                        });
+                    },
+                )
+                .await
+            });
+            let stats = match result {
+                Ok(stats) => stats,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::SyncFailed {
                         owner: owner.clone(),
                         repo: repo.clone(),
-                        page,
-                        stats: stats.clone(),
+                        message: error.to_string(),
                     });
-                },
-            )
-            .await
-        });
-        let stats = match result {
-            Ok(stats) => stats,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::SyncFailed {
-                    owner: owner.clone(),
-                    repo: repo.clone(),
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-        let _ = event_tx.send(AppEvent::SyncFinished { owner, repo, stats });
-    });
+                    return;
+                }
+            };
+            let _ = event_tx.send(AppEvent::SyncFinished { owner, repo, stats });
+        },
+    );
 }
 
 fn refresh_current_repo_issues(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
@@ -2920,49 +2949,43 @@ fn start_comment_sync(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let ctx = match setup_worker_with_db(&token) {
-            Ok(ctx) => ctx,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::CommentsFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
+    spawn_with_db(
+        token,
+        event_tx,
+        move |message| AppEvent::CommentsFailed { issue_id, message },
+        move |ctx, event_tx| {
+            let result = ctx.services.runtime.block_on(async {
+                ctx.services
+                    .client
+                    .list_comments(&owner, &repo, issue_number)
+                    .await
+            });
+            let comments = match result {
+                Ok(comments) => comments,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::CommentsFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let now = comment_now_epoch();
+            let mut count = 0usize;
+            for comment in comments {
+                let mut row = crate::sync::map_comment_to_row(issue_id, &comment);
+                row.last_accessed_at = Some(now);
+                let _ = crate::store::upsert_comment(&ctx.conn, &row);
+                count += 1;
             }
-        };
+            let _ = update_issue_comments_count(&ctx.conn, issue_id, count as i64);
+            let _ = touch_comments_for_issue(&ctx.conn, issue_id, now);
+            let _ = prune_comments(&ctx.conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
 
-        let result = ctx.services.runtime.block_on(async {
-            ctx.services
-                .client
-                .list_comments(&owner, &repo, issue_number)
-                .await
-        });
-        let comments = match result {
-            Ok(comments) => comments,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::CommentsFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-
-        let now = comment_now_epoch();
-        let mut count = 0usize;
-        for comment in comments {
-            let mut row = crate::sync::map_comment_to_row(issue_id, &comment);
-            row.last_accessed_at = Some(now);
-            let _ = crate::store::upsert_comment(&ctx.conn, &row);
-            count += 1;
-        }
-        let _ = update_issue_comments_count(&ctx.conn, issue_id, count as i64);
-        let _ = touch_comments_for_issue(&ctx.conn, issue_id, now);
-        let _ = prune_comments(&ctx.conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
-
-        let _ = event_tx.send(AppEvent::CommentsUpdated { issue_id, count });
-    });
+            let _ = event_tx.send(AppEvent::CommentsUpdated { issue_id, count });
+        },
+    );
 }
 
 fn start_pull_request_files_sync(
@@ -2973,63 +2996,57 @@ fn start_pull_request_files_sync(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
-            }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .list_pull_request_files(&owner, &repo, issue_number)
-                .await
-        });
-
-        let files = match result {
-            Ok(files) => files,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-
-        let (pull_request_id, viewed_files) = services
-            .runtime
-            .block_on(async {
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestFilesFailed { issue_id, message },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
                 services
                     .client
-                    .pull_request_file_view_state(&owner, &repo, issue_number)
+                    .list_pull_request_files(&owner, &repo, issue_number)
                     .await
-            })
-            .unwrap_or((None, HashSet::new()));
+            });
 
-        let mapped = files
-            .into_iter()
-            .map(|file| PullRequestFile {
-                filename: file.filename,
-                status: file.status,
-                additions: file.additions,
-                deletions: file.deletions,
-                patch: file.patch,
-            })
-            .collect::<Vec<PullRequestFile>>();
-        let _ = event_tx.send(AppEvent::PullRequestFilesUpdated {
-            issue_id,
-            files: mapped,
-            pull_request_id,
-            viewed_files,
-        });
-    });
+            let files = match result {
+                Ok(files) => files,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let (pull_request_id, viewed_files) = services
+                .runtime
+                .block_on(async {
+                    services
+                        .client
+                        .pull_request_file_view_state(&owner, &repo, issue_number)
+                        .await
+                })
+                .unwrap_or((None, HashSet::new()));
+
+            let mapped = files
+                .into_iter()
+                .map(|file| PullRequestFile {
+                    filename: file.filename,
+                    status: file.status,
+                    additions: file.additions,
+                    deletions: file.deletions,
+                    patch: file.patch,
+                })
+                .collect::<Vec<PullRequestFile>>();
+            let _ = event_tx.send(AppEvent::PullRequestFilesUpdated {
+                issue_id,
+                files: mapped,
+                pull_request_id,
+                viewed_files,
+            });
+        },
+    );
 }
 
 fn start_pull_request_review_comments_sync(
@@ -3040,85 +3057,79 @@ fn start_pull_request_review_comments_sync(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
-            }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .list_pull_request_review_comments(&owner, &repo, pull_number)
-                .await
-        });
-
-        let comments = match result {
-            Ok(comments) => comments,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-                return;
-            }
-        };
-
-        let mut anchors = HashMap::new();
-        for comment in &comments {
-            let line = comment.line.or(comment.original_line);
-            let side = comment
-                .side
-                .as_ref()
-                .map(|value| {
-                    if value.eq_ignore_ascii_case("left") {
-                        ReviewSide::Left
-                    } else {
-                        ReviewSide::Right
-                    }
-                })
-                .unwrap_or(ReviewSide::Right);
-            if let Some(line) = line {
-                anchors.insert(comment.id, (line, side, comment.path.clone()));
-            }
-        }
-
-        let mut mapped = Vec::new();
-        for comment in comments {
-            let anchor = anchors.get(&comment.id).cloned().or_else(|| {
-                comment
-                    .in_reply_to_id
-                    .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestReviewCommentsFailed { issue_id, message },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .list_pull_request_review_comments(&owner, &repo, pull_number)
+                    .await
             });
-            let (line, side, path, anchored) = match anchor {
-                Some((line, side, path)) => (line, side, path, true),
-                None => (0, ReviewSide::Right, comment.path.clone(), false),
+
+            let comments = match result {
+                Ok(comments) => comments,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                    return;
+                }
             };
 
-            mapped.push(PullRequestReviewComment {
-                id: comment.id,
-                thread_id: comment.thread_id,
-                resolved: comment.is_resolved,
-                anchored,
-                path,
-                line,
-                side,
-                body: comment.body.unwrap_or_default(),
-                author: comment.user.login,
-                created_at: comment.created_at,
+            let mut anchors = HashMap::new();
+            for comment in &comments {
+                let line = comment.line.or(comment.original_line);
+                let side = comment
+                    .side
+                    .as_ref()
+                    .map(|value| {
+                        if value.eq_ignore_ascii_case("left") {
+                            ReviewSide::Left
+                        } else {
+                            ReviewSide::Right
+                        }
+                    })
+                    .unwrap_or(ReviewSide::Right);
+                if let Some(line) = line {
+                    anchors.insert(comment.id, (line, side, comment.path.clone()));
+                }
+            }
+
+            let mut mapped = Vec::new();
+            for comment in comments {
+                let anchor = anchors.get(&comment.id).cloned().or_else(|| {
+                    comment
+                        .in_reply_to_id
+                        .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
+                });
+                let (line, side, path, anchored) = match anchor {
+                    Some((line, side, path)) => (line, side, path, true),
+                    None => (0, ReviewSide::Right, comment.path.clone(), false),
+                };
+
+                mapped.push(PullRequestReviewComment {
+                    id: comment.id,
+                    thread_id: comment.thread_id,
+                    resolved: comment.is_resolved,
+                    anchored,
+                    path,
+                    line,
+                    side,
+                    body: comment.body.unwrap_or_default(),
+                    author: comment.user.login,
+                    created_at: comment.created_at,
+                });
+            }
+            let _ = event_tx.send(AppEvent::PullRequestReviewCommentsUpdated {
+                issue_id,
+                comments: mapped,
             });
-        }
-        let _ = event_tx.send(AppEvent::PullRequestReviewCommentsUpdated {
-            issue_id,
-            comments: mapped,
-        });
-    });
+        },
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3136,64 +3147,58 @@ fn start_create_pull_request_review_comment(
     body: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestReviewCommentCreateFailed { issue_id, message },
+        move |services, event_tx| {
+            let head_sha = services.runtime.block_on(async {
+                services
+                    .client
+                    .pull_request_head_sha(&owner, &repo, pull_number)
+                    .await
+            });
+            let head_sha = match head_sha {
+                Ok(head_sha) => head_sha,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
 
-        let head_sha = services.runtime.block_on(async {
-            services
-                .client
-                .pull_request_head_sha(&owner, &repo, pull_number)
-                .await
-        });
-        let head_sha = match head_sha {
-            Ok(head_sha) => head_sha,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-                return;
+            let created = services.runtime.block_on(async {
+                services
+                    .client
+                    .create_pull_request_review_comment(
+                        &owner,
+                        &repo,
+                        pull_number,
+                        head_sha.as_str(),
+                        path.as_str(),
+                        line,
+                        side.as_api_side(),
+                        start_line,
+                        start_side.map(ReviewSide::as_api_side),
+                        body.as_str(),
+                    )
+                    .await
+            });
+            match created {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreated { issue_id });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                }
             }
-        };
-
-        let created = services.runtime.block_on(async {
-            services
-                .client
-                .create_pull_request_review_comment(
-                    &owner,
-                    &repo,
-                    pull_number,
-                    head_sha.as_str(),
-                    path.as_str(),
-                    line,
-                    side.as_api_side(),
-                    start_line,
-                    start_side.map(ReviewSide::as_api_side),
-                    body.as_str(),
-                )
-                .await
-        });
-        match created {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreated { issue_id });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_update_pull_request_review_comment(
@@ -3205,40 +3210,34 @@ fn start_update_pull_request_review_comment(
     body: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdateFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestReviewCommentUpdateFailed { issue_id, message },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .update_pull_request_review_comment(&owner, &repo, comment_id, body.as_str())
+                    .await
+            });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdated {
+                        issue_id,
+                        comment_id,
+                        body,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdateFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                }
             }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .update_pull_request_review_comment(&owner, &repo, comment_id, body.as_str())
-                .await
-        });
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdated {
-                    issue_id,
-                    comment_id,
-                    body,
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdateFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_delete_pull_request_review_comment(
@@ -3249,39 +3248,33 @@ fn start_delete_pull_request_review_comment(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleteFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestReviewCommentDeleteFailed { issue_id, message },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .delete_pull_request_review_comment(&owner, &repo, comment_id)
+                    .await
+            });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleted {
+                        issue_id,
+                        comment_id,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleteFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                }
             }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .delete_pull_request_review_comment(&owner, &repo, comment_id)
-                .await
-        });
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleted {
-                    issue_id,
-                    comment_id,
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewCommentDeleteFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_toggle_pull_request_review_thread_resolution(
@@ -3293,39 +3286,38 @@ fn start_toggle_pull_request_review_thread_resolution(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
-                    issue_id,
-                    message: error.into_message(),
-                });
-                return;
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestReviewThreadResolutionFailed { issue_id, message },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .set_pull_request_review_thread_resolved(
+                        &owner,
+                        &repo,
+                        thread_id.as_str(),
+                        resolve,
+                    )
+                    .await
+            });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionUpdated {
+                        issue_id,
+                        resolved: resolve,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
+                        issue_id,
+                        message: error.to_string(),
+                    });
+                }
             }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .set_pull_request_review_thread_resolved(&owner, &repo, thread_id.as_str(), resolve)
-                .await
-        });
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionUpdated {
-                    issue_id,
-                    resolved: resolve,
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestReviewThreadResolutionFailed {
-                    issue_id,
-                    message: error.to_string(),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3337,44 +3329,42 @@ fn start_set_pull_request_file_viewed(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
+    let error_path = path.clone();
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::PullRequestFileViewedUpdateFailed {
+            issue_id,
+            path: error_path,
+            viewed,
+            message,
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .set_pull_request_file_viewed(pull_request_id.as_str(), path.as_str(), viewed)
+                    .await
+            });
+            if result.is_ok() {
+                let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdated {
                     issue_id,
                     path,
                     viewed,
-                    message: error.into_message(),
                 });
                 return;
             }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .set_pull_request_file_viewed(pull_request_id.as_str(), path.as_str(), viewed)
-                .await
-        });
-        if result.is_ok() {
-            let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdated {
+            let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
                 issue_id,
                 path,
                 viewed,
+                message: result
+                    .err()
+                    .map(|error| error.to_string())
+                    .unwrap_or_default(),
             });
-            return;
-        }
-        let _ = event_tx.send(AppEvent::PullRequestFileViewedUpdateFailed {
-            issue_id,
-            path,
-            viewed,
-            message: result
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_default(),
-        });
-    });
+        },
+    );
 }
 
 fn start_add_comment(
@@ -3385,40 +3375,37 @@ fn start_add_comment(
     body: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment failed: {}", error.into_message()),
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("comment failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .create_comment(&owner, &repo, issue_number, &body)
+                    .await
+            });
 
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .create_comment(&owner, &repo, issue_number, &body)
-                .await
-        });
-
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: "commented".to_string(),
-                });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: "commented".to_string(),
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("comment failed: {}", error),
+                    });
+                }
             }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_update_comment(
@@ -3430,45 +3417,45 @@ fn start_update_comment(
     body: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment update failed: {}", error.into_message()),
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("comment update failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .update_comment(&owner, &repo, comment_id, body.as_str())
+                    .await
+            });
 
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .update_comment(&owner, &repo, comment_id, body.as_str())
-                .await
-        });
-
-        match result {
-            Ok(()) => {
-                if let Ok(conn) = crate::store::open_db() {
-                    let _ =
-                        crate::store::update_comment_body_by_id(&conn, comment_id, body.as_str());
+            match result {
+                Ok(()) => {
+                    if let Ok(conn) = crate::store::open_db() {
+                        let _ = crate::store::update_comment_body_by_id(
+                            &conn,
+                            comment_id,
+                            body.as_str(),
+                        );
+                    }
+                    let _ = event_tx.send(AppEvent::IssueCommentUpdated {
+                        issue_number,
+                        comment_id,
+                        body,
+                    });
                 }
-                let _ = event_tx.send(AppEvent::IssueCommentUpdated {
-                    issue_number,
-                    comment_id,
-                    body,
-                });
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("comment update failed: {}", error),
+                    });
+                }
             }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment update failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_delete_comment(
@@ -3480,49 +3467,46 @@ fn start_delete_comment(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment delete failed: {}", error.into_message()),
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("comment delete failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .delete_comment(&owner, &repo, comment_id)
+                    .await
+            });
 
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .delete_comment(&owner, &repo, comment_id)
-                .await
-        });
-
-        match result {
-            Ok(()) => {
-                let mut count = 0usize;
-                if let Ok(conn) = crate::store::open_db() {
-                    let _ = crate::store::delete_comment_by_id(&conn, comment_id);
-                    let comments =
-                        crate::store::comments_for_issue(&conn, issue_id).unwrap_or_default();
-                    count = comments.len();
-                    let _ = update_issue_comments_count(&conn, issue_id, count as i64);
+            match result {
+                Ok(()) => {
+                    let mut count = 0usize;
+                    if let Ok(conn) = crate::store::open_db() {
+                        let _ = crate::store::delete_comment_by_id(&conn, comment_id);
+                        let comments =
+                            crate::store::comments_for_issue(&conn, issue_id).unwrap_or_default();
+                        count = comments.len();
+                        let _ = update_issue_comments_count(&conn, issue_id, count as i64);
+                    }
+                    let _ = event_tx.send(AppEvent::IssueCommentDeleted {
+                        issue_number,
+                        comment_id,
+                        count,
+                    });
                 }
-                let _ = event_tx.send(AppEvent::IssueCommentDeleted {
-                    issue_number,
-                    comment_id,
-                    count,
-                });
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("comment delete failed: {}", error),
+                    });
+                }
             }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("comment delete failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_update_labels(
@@ -3534,39 +3518,36 @@ fn start_update_labels(
     event_tx: Sender<AppEvent>,
     labels_display: String,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("label update failed: {}", error.into_message()),
-                });
-                return;
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("label update failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .update_issue_labels(&owner, &repo, issue_number, &labels)
+                    .await
+            });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::IssueLabelsUpdated {
+                        issue_number,
+                        labels: labels_display,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("label update failed: {}", error),
+                    });
+                }
             }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .update_issue_labels(&owner, &repo, issue_number, &labels)
-                .await
-        });
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::IssueLabelsUpdated {
-                    issue_number,
-                    labels: labels_display,
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("label update failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_update_assignees(
@@ -3578,94 +3559,89 @@ fn start_update_assignees(
     event_tx: Sender<AppEvent>,
     assignees_display: String,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("assignee update failed: {}", error.into_message()),
-                });
-                return;
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("assignee update failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .update_issue_assignees(&owner, &repo, issue_number, &assignees)
+                    .await
+            });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::IssueAssigneesUpdated {
+                        issue_number,
+                        assignees: assignees_display,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("assignee update failed: {}", error),
+                    });
+                }
             }
-        };
-
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .update_issue_assignees(&owner, &repo, issue_number, &assignees)
-                .await
-        });
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::IssueAssigneesUpdated {
-                    issue_number,
-                    assignees: assignees_display,
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("assignee update failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_fetch_labels(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(_) => {
-                let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
-                    owner,
-                    repo,
-                    labels: Vec::new(),
-                });
-                return;
-            }
-        };
-
-        let labels = services
-            .runtime
-            .block_on(async { services.client.list_labels(&owner, &repo).await });
-        let labels = labels
-            .unwrap_or_default()
-            .into_iter()
-            .map(|label| (label.name, label.color))
-            .collect::<Vec<(String, String)>>();
-        let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
-            owner,
-            repo,
-            labels,
-        });
-    });
+    let error_owner = owner.clone();
+    let error_repo = repo.clone();
+    spawn_with_services(
+        token,
+        event_tx,
+        move |_| AppEvent::RepoLabelsSuggested {
+            owner: error_owner,
+            repo: error_repo,
+            labels: Vec::new(),
+        },
+        move |services, event_tx| {
+            let labels = services
+                .runtime
+                .block_on(async { services.client.list_labels(&owner, &repo).await });
+            let labels = labels
+                .unwrap_or_default()
+                .into_iter()
+                .map(|label| (label.name, label.color))
+                .collect::<Vec<(String, String)>>();
+            let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
+                owner,
+                repo,
+                labels,
+            });
+        },
+    );
 }
 
 fn start_fetch_assignees(owner: String, repo: String, token: String, event_tx: Sender<AppEvent>) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(_) => {
-                let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
-                    owner,
-                    repo,
-                    assignees: Vec::new(),
-                });
-                return;
-            }
-        };
-
-        let assignees = services
-            .runtime
-            .block_on(async { services.client.list_assignees(&owner, &repo).await });
-        let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
-            owner,
-            repo,
-            assignees: assignees.unwrap_or_default(),
-        });
-    });
+    let error_owner = owner.clone();
+    let error_repo = repo.clone();
+    spawn_with_services(
+        token,
+        event_tx,
+        move |_| AppEvent::RepoAssigneesSuggested {
+            owner: error_owner,
+            repo: error_repo,
+            assignees: Vec::new(),
+        },
+        move |services, event_tx| {
+            let assignees = services
+                .runtime
+                .block_on(async { services.client.list_assignees(&owner, &repo).await });
+            let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
+                owner,
+                repo,
+                assignees: assignees.unwrap_or_default(),
+            });
+        },
+    );
 }
 
 fn start_fetch_repo_permissions(
@@ -3674,44 +3650,43 @@ fn start_fetch_repo_permissions(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
-                    owner,
-                    repo,
-                    message: error.into_message(),
-                });
-                return;
+    let error_owner = owner.clone();
+    let error_repo = repo.clone();
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::RepoPermissionsFailed {
+            owner: error_owner,
+            repo: error_repo,
+            message,
+        },
+        move |services, event_tx| {
+            let result = services
+                .runtime
+                .block_on(async { services.client.get_repo(&owner, &repo).await });
+            match result {
+                Ok(repo_info) => {
+                    let permissions = repo_info.permissions.unwrap_or_default();
+                    let can_edit_issue_metadata = permissions.push
+                        || permissions.triage
+                        || permissions.maintain
+                        || permissions.admin;
+                    let _ = event_tx.send(AppEvent::RepoPermissionsResolved {
+                        owner,
+                        repo,
+                        can_edit_issue_metadata,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
+                        owner,
+                        repo,
+                        message: error.to_string(),
+                    });
+                }
             }
-        };
-
-        let result = services
-            .runtime
-            .block_on(async { services.client.get_repo(&owner, &repo).await });
-        match result {
-            Ok(repo_info) => {
-                let permissions = repo_info.permissions.unwrap_or_default();
-                let can_edit_issue_metadata = permissions.push
-                    || permissions.triage
-                    || permissions.maintain
-                    || permissions.admin;
-                let _ = event_tx.send(AppEvent::RepoPermissionsResolved {
-                    owner,
-                    repo,
-                    can_edit_issue_metadata,
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
-                    owner,
-                    repo,
-                    message: error.to_string(),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_reopen_issue(
@@ -3721,40 +3696,37 @@ fn start_reopen_issue(
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("reopen failed: {}", error.into_message()),
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("reopen failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .reopen_issue(&owner, &repo, issue_number)
+                    .await
+            });
 
-        let result = services.runtime.block_on(async {
-            services
-                .client
-                .reopen_issue(&owner, &repo, issue_number)
-                .await
-        });
-
-        match result {
-            Ok(()) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: "reopened".to_string(),
-                });
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: "reopened".to_string(),
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("reopen failed: {}", error),
+                    });
+                }
             }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("reopen failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 fn start_close_issue(
@@ -3765,58 +3737,55 @@ fn start_close_issue(
     body: Option<String>,
     event_tx: Sender<AppEvent>,
 ) {
-    thread::spawn(move || {
-        let services = match setup_worker_services(&token) {
-            Ok(services) => services,
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("close failed: {}", error.into_message()),
-                });
-                return;
-            }
-        };
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number,
+            message: format!("close failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result: Result<Option<String>, anyhow::Error> = services.runtime.block_on(async {
+                let mut comment_error = None;
+                if let Some(body) = body
+                    && let Err(error) = services
+                        .client
+                        .create_comment(&owner, &repo, issue_number, &body)
+                        .await
+                {
+                    comment_error = Some(error.to_string());
+                }
 
-        let result: Result<Option<String>, anyhow::Error> = services.runtime.block_on(async {
-            let mut comment_error = None;
-            if let Some(body) = body
-                && let Err(error) = services
+                services
                     .client
-                    .create_comment(&owner, &repo, issue_number, &body)
-                    .await
-            {
-                comment_error = Some(error.to_string());
-            }
+                    .close_issue(&owner, &repo, issue_number)
+                    .await?;
 
-            services
-                .client
-                .close_issue(&owner, &repo, issue_number)
-                .await?;
+                Ok(comment_error)
+            });
 
-            Ok(comment_error)
-        });
-
-        match result {
-            Ok(Some(comment_error)) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("closed (comment failed: {})", comment_error),
-                });
+            match result {
+                Ok(Some(comment_error)) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("closed (comment failed: {})", comment_error),
+                    });
+                }
+                Ok(None) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: "closed".to_string(),
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number,
+                        message: format!("close failed: {}", error),
+                    });
+                }
             }
-            Ok(None) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: "closed".to_string(),
-                });
-            }
-            Err(error) => {
-                let _ = event_tx.send(AppEvent::IssueUpdated {
-                    issue_number,
-                    message: format!("close failed: {}", error),
-                });
-            }
-        }
-    });
+        },
+    );
 }
 
 struct TerminalGuard {
