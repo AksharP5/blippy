@@ -14,6 +14,7 @@ mod sync;
 mod theme;
 mod ui;
 
+mod main_action_utils;
 mod main_actions;
 mod main_linked_actions;
 
