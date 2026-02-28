@@ -178,15 +178,18 @@ impl App {
             {
                 self.interaction.action = Some(AppAction::AddIssueComment);
             }
-            KeyCode::Char('M')
-                if key.modifiers.contains(KeyModifiers::SHIFT)
+            KeyCode::Char(ch)
+                if ch.eq_ignore_ascii_case(&'m')
+                    && key.modifiers.contains(KeyModifiers::SHIFT)
                     && matches!(
                         self.view,
                         View::Issues
                             | View::IssueDetail
                             | View::IssueComments
                             | View::PullRequestFiles
-                    ) =>
+                    )
+                    && (self.view == View::PullRequestFiles
+                        || self.current_view_issue_is_pull_request()) =>
             {
                 self.interaction.action = Some(AppAction::MergePullRequest);
             }

@@ -34,16 +34,16 @@ pub(super) fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, them
             Style::default().fg(theme.text_primary),
         ));
     }
-    if !context.is_empty() {
-        spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
-        spans.push(Span::styled(context, Style::default().fg(theme.text_muted)));
-    }
     if !help_raw.is_empty() {
         spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
         spans.push(Span::styled(
             help_raw,
             Style::default().fg(theme.text_muted),
         ));
+    }
+    if !context.is_empty() {
+        spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
+        spans.push(Span::styled(context, Style::default().fg(theme.text_muted)));
     }
 
     let status_line = Line::from(spans);
@@ -401,27 +401,41 @@ fn primary_help_text(app: &App) -> String {
             if app.issue_search_mode() {
                 return "Search mode • Enter keep • Esc clear • ? help".to_string();
             }
+            let reviewing_pr = app.work_item_mode() == crate::app::WorkItemMode::PullRequests
+                || app.selected_issue_row().is_some_and(|issue| issue.is_pr);
+            if reviewing_pr {
+                return "j/k move • Enter open • Tab open/closed • Shift+N create • Shift+M merge • a assignee • Ctrl+a all • / search • ? help"
+                    .to_string();
+            }
             "j/k move • Enter open • Tab open/closed • Shift+N create • a assignee • Ctrl+a all • / search • ? help"
                 .to_string()
         }
         View::IssueDetail => {
             if app.focus() == Focus::IssueRecentComments {
                 if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
-                    return "j/k recent comments • Enter open review • Ctrl+h/l panes • b/Esc back • ? help"
+                    return "j/k recent comments • Enter open review • Shift+M merge • Ctrl+h/l panes • b/Esc back • ? help"
                         .to_string();
                 }
                 return "j/k recent comments • Enter open comments • Ctrl+h/l panes • b/Esc back • ? help"
+                    .to_string();
+            }
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                return "Ctrl+h/l panes • Enter open pane • c comments • Shift+M merge • Shift+N create • b/Esc back • ? help"
                     .to_string();
             }
             "Ctrl+h/l panes • Enter open pane • c comments • Shift+N create • b/Esc back • ? help"
                 .to_string()
         }
         View::IssueComments => {
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                return "j/k comments • e edit • x delete • Shift+M merge • Shift+N create • b/Esc back • ? help"
+                    .to_string();
+            }
             "j/k comments • e edit • x delete • Shift+N create • b/Esc back • ? help".to_string()
         }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
-                return "j/k files • Enter full diff • Ctrl+h/l panes • w viewed • b/Esc back • ? help"
+                return "j/k files • Enter full diff • Shift+M merge • Ctrl+h/l panes • w viewed • b/Esc back • ? help"
                     .to_string();
             }
             let toggle_hint = if app.pull_request_diff_expanded() {
@@ -430,7 +444,7 @@ fn primary_help_text(app: &App) -> String {
                 "Enter full diff"
             };
             format!(
-                "j/k diff • {} • c collapse hunk • m add • n/p thread • Shift+R resolve • ? help",
+                "j/k diff • {} • c collapse hunk • m add • n/p thread • Shift+R resolve • Shift+M merge • ? help",
                 toggle_hint
             )
         }
@@ -647,4 +661,63 @@ fn sync_state_color(sync: &str, theme: &ThemePalette) -> Color {
         return theme.accent_subtle;
     }
     theme.accent_success
+}
+
+#[cfg(test)]
+mod tests {
+    use super::primary_help_text;
+    use crate::app::{App, View, WorkItemMode};
+    use crate::config::Config;
+    use crate::store::IssueRow;
+
+    fn sample_issue(is_pr: bool) -> IssueRow {
+        IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 12,
+            state: "open".to_string(),
+            title: "Item".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr,
+        }
+    }
+
+    #[test]
+    fn primary_help_text_includes_merge_for_pr_detail() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueDetail);
+        app.set_issues(vec![sample_issue(true)]);
+        app.set_current_issue(1, 12);
+
+        let text = primary_help_text(&app);
+
+        assert!(text.contains("Shift+M merge"));
+    }
+
+    #[test]
+    fn primary_help_text_omits_merge_for_issue_detail() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueDetail);
+        app.set_issues(vec![sample_issue(false)]);
+        app.set_current_issue(1, 12);
+
+        let text = primary_help_text(&app);
+
+        assert!(!text.contains("Shift+M merge"));
+    }
+
+    #[test]
+    fn primary_help_text_includes_merge_in_pull_request_mode() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_work_item_mode(WorkItemMode::PullRequests);
+
+        let text = primary_help_text(&app);
+
+        assert!(text.contains("Shift+M merge"));
+    }
 }

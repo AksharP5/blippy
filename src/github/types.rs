@@ -64,6 +64,16 @@ pub struct ApiRepo {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct ApiRepoMergeSettings {
+    #[serde(default)]
+    pub allow_merge_commit: bool,
+    #[serde(default)]
+    pub allow_squash_merge: bool,
+    #[serde(default)]
+    pub allow_rebase_merge: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiPullRequestFile {
     pub filename: String,
     pub status: String,
@@ -80,16 +90,6 @@ pub struct ApiPullRequestHead {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiPullRequestSummary {
     pub head: ApiPullRequestHead,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ApiPullRequestDetails {
-    #[serde(default)]
-    pub merge_commit_allowed: bool,
-    #[serde(default)]
-    pub squash_merge_allowed: bool,
-    #[serde(default)]
-    pub rebase_merge_allowed: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]

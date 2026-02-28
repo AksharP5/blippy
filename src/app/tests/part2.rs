@@ -247,6 +247,39 @@ fn shift_m_triggers_merge_pull_request_action() {
 }
 
 #[test]
+fn shift_m_lowercase_with_shift_triggers_merge_pull_request_action() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::PullRequestFiles);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::SHIFT));
+
+    assert_eq!(app.take_action(), Some(AppAction::MergePullRequest));
+}
+
+#[test]
+fn shift_m_does_not_trigger_merge_for_non_pr_issue() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_issues(vec![IssueRow {
+        id: 1,
+        repo_id: 1,
+        number: 12,
+        state: "open".to_string(),
+        title: "Issue".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: false,
+    }]);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT));
+
+    assert_eq!(app.take_action(), None);
+}
+
+#[test]
 fn w_emits_toggle_pull_request_file_viewed_action() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);

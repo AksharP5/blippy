@@ -193,25 +193,18 @@ impl GitHubClient {
         repo: &str,
         pull_number: i64,
     ) -> Result<()> {
-        let details_url = format!(
-            "{}/repos/{}/{}/pulls/{}",
-            API_BASE, owner, repo, pull_number
-        );
-        let details = self
+        let repo_details = self
             .client
-            .get(details_url)
+            .get(format!("{}/repos/{}/{}", API_BASE, owner, repo))
             .bearer_auth(&self.token)
             .send()
             .await?
             .error_for_status()?
-            .json::<ApiPullRequestDetails>()
+            .json::<ApiRepoMergeSettings>()
             .await?;
-
-        let merge_methods = preferred_merge_methods(&details);
+        let mut merge_methods = preferred_merge_methods(&repo_details);
         if merge_methods.is_empty() {
-            return Err(anyhow::anyhow!(
-                "no merge methods are enabled in this repository"
-            ));
+            merge_methods = vec!["merge", "squash", "rebase"];
         }
 
         let merge_url = format!(
@@ -497,15 +490,15 @@ impl GitHubClient {
     }
 }
 
-fn preferred_merge_methods(details: &ApiPullRequestDetails) -> Vec<&'static str> {
+fn preferred_merge_methods(repo: &ApiRepoMergeSettings) -> Vec<&'static str> {
     let mut methods = Vec::new();
-    if details.merge_commit_allowed {
+    if repo.allow_merge_commit {
         methods.push("merge");
     }
-    if details.squash_merge_allowed {
+    if repo.allow_squash_merge {
         methods.push("squash");
     }
-    if details.rebase_merge_allowed {
+    if repo.allow_rebase_merge {
         methods.push("rebase");
     }
     methods
