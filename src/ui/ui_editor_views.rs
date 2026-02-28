@@ -103,11 +103,21 @@ pub(super) fn draw_comment_editor(
     } else {
         "Close Issue Comment"
     };
+    let add_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+        "Add Pull Request Comment"
+    } else {
+        "Add Issue Comment"
+    };
+    let edit_editor_title = if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+        "Edit Pull Request Comment"
+    } else {
+        "Edit Issue Comment"
+    };
     let title = match app.editor_mode() {
         EditorMode::CloseIssue => close_editor_title,
         EditorMode::CreateIssue => "Create Issue",
-        EditorMode::AddComment => "Add Issue Comment",
-        EditorMode::EditComment => "Edit Issue Comment",
+        EditorMode::AddComment => add_editor_title,
+        EditorMode::EditComment => edit_editor_title,
         EditorMode::AddPullRequestReviewComment => "Add Pull Request Review Comment",
         EditorMode::EditPullRequestReviewComment => "Edit Pull Request Review Comment",
         EditorMode::AddPreset => "Preset Body",
