@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6](https://github.com/AksharP5/blippy/compare/v0.1.5...v0.1.6) - 2026-02-28
+
+### Added
+
+- *(pr)* add permission-aware pull request merge flow
+- *(ui)* add transient browser-open status toast
+
+### Fixed
+
+- *(pr)* show merge shortcut in PR contexts
+- *(ui)* label PR comment editor titles correctly
+- *(ui)* clear stale terminal artifacts after browser launch
+
+### Other
+
+- merge main into feat/pr-merge
+
 ## [0.1.5](https://github.com/AksharP5/blippy/compare/v0.1.4...v0.1.5) - 2026-02-16
 
 ### Added
