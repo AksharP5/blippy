@@ -236,6 +236,7 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
 pub struct Keybinds {
     remap: HashMap<String, KeyEvent>,
     disabled_defaults: HashSet<String>,
+    action_bindings: HashMap<String, String>,
 }
 
 impl Keybinds {
@@ -243,6 +244,7 @@ impl Keybinds {
         let mut remap = HashMap::new();
         let mut default_usage = HashMap::new();
         let mut overridden_usage = HashMap::new();
+        let mut action_bindings = HashMap::new();
 
         for spec in BINDING_SPECS {
             let default_key = normalize_binding(spec.default).unwrap_or_default();
@@ -258,6 +260,10 @@ impl Keybinds {
             let override_key = overrides
                 .get(spec.action)
                 .and_then(|binding| normalize_binding(binding));
+            let selected_key = override_key
+                .as_ref()
+                .map_or(default_key.clone(), ToString::to_string);
+            action_bindings.insert(spec.action.to_string(), selected_key);
 
             if let Some(override_key) = override_key {
                 remap.insert(override_key.clone(), default_event);
@@ -286,6 +292,7 @@ impl Keybinds {
         Self {
             remap,
             disabled_defaults,
+            action_bindings,
         }
     }
 
@@ -299,6 +306,87 @@ impl Keybinds {
         }
         Some(key)
     }
+
+    pub fn binding_label(&self, action: &str) -> String {
+        let binding = match self.action_bindings.get(action) {
+            Some(binding) => binding,
+            None => return String::new(),
+        };
+        prettify_binding(binding)
+    }
+}
+
+fn prettify_binding(binding: &str) -> String {
+    let tokens = binding
+        .split('+')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<&str>>();
+    let has_modifiers = tokens.len() > 1;
+
+    tokens
+        .iter()
+        .map(|token| {
+            let lower = token.to_ascii_lowercase();
+            if lower == "ctrl" {
+                return "Ctrl".to_string();
+            }
+            if lower == "alt" {
+                return "Alt".to_string();
+            }
+            if lower == "shift" {
+                return "Shift".to_string();
+            }
+            if lower == "esc" {
+                return "Esc".to_string();
+            }
+            if lower == "enter" {
+                return "Enter".to_string();
+            }
+            if lower == "tab" {
+                return "Tab".to_string();
+            }
+            if lower == "space" {
+                return "Space".to_string();
+            }
+            if lower == "backspace" {
+                return "Backspace".to_string();
+            }
+            if lower == "up" {
+                return "Up".to_string();
+            }
+            if lower == "down" {
+                return "Down".to_string();
+            }
+            if lower == "left" {
+                return "Left".to_string();
+            }
+            if lower == "right" {
+                return "Right".to_string();
+            }
+            if lower == "home" {
+                return "Home".to_string();
+            }
+            if lower == "end" {
+                return "End".to_string();
+            }
+            if lower == "pageup" {
+                return "PageUp".to_string();
+            }
+            if lower == "pagedown" {
+                return "PageDown".to_string();
+            }
+            if token.chars().count() == 1 {
+                let ch = token.chars().next().unwrap_or_default();
+                if has_modifiers && ch.is_ascii_alphabetic() {
+                    return ch.to_ascii_uppercase().to_string();
+                }
+                return ch.to_string();
+            }
+            token.to_string()
+        })
+        .collect::<Vec<String>>()
+        .join("+")
 }
 
 pub fn parse_binding(binding: &str) -> Option<KeyEvent> {
@@ -413,7 +501,7 @@ pub fn normalize_event(event: KeyEvent) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Keybinds, normalize_binding, parse_binding};
+    use super::{Keybinds, normalize_binding, parse_binding, prettify_binding};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::collections::HashMap;
 
@@ -446,5 +534,21 @@ mod tests {
         let disabled_default =
             keybinds.remap_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(disabled_default.is_none());
+    }
+
+    #[test]
+    fn binding_label_uses_override() {
+        let mut overrides = HashMap::new();
+        overrides.insert("open_browser".to_string(), "ctrl+o".to_string());
+        let keybinds = Keybinds::from_overrides(&overrides);
+
+        assert_eq!(keybinds.binding_label("open_browser"), "Ctrl+O");
+    }
+
+    #[test]
+    fn prettify_binding_formats_known_tokens() {
+        assert_eq!(prettify_binding("ctrl+shift+n"), "Ctrl+Shift+N");
+        assert_eq!(prettify_binding("space"), "Space");
+        assert_eq!(prettify_binding("/"), "/");
     }
 }
