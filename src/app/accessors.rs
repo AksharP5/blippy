@@ -223,6 +223,10 @@ impl App {
         self.sync.repo_issue_metadata_editable
     }
 
+    pub fn repo_pull_request_mergeable(&self) -> Option<bool> {
+        self.sync.repo_pull_request_mergeable
+    }
+
     pub fn repo_label_color(&self, label: &str) -> Option<&str> {
         let key = label.trim().to_ascii_lowercase();
         self.repo_label_colors.get(&key).map(String::as_str)

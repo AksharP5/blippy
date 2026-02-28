@@ -311,6 +311,46 @@ pub(crate) fn start_reopen_issue(
     );
 }
 
+pub(crate) fn start_merge_pull_request(
+    owner: String,
+    repo: String,
+    pull_number: i64,
+    token: String,
+    event_tx: Sender<AppEvent>,
+) {
+    spawn_with_services(
+        token,
+        event_tx,
+        move |message| AppEvent::IssueUpdated {
+            issue_number: pull_number,
+            message: format!("merge failed: {}", message),
+        },
+        move |services, event_tx| {
+            let result = services.runtime.block_on(async {
+                services
+                    .client
+                    .merge_pull_request(&owner, &repo, pull_number)
+                    .await
+            });
+
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number: pull_number,
+                        message: "merged".to_string(),
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::IssueUpdated {
+                        issue_number: pull_number,
+                        message: format!("merge failed: {}", error),
+                    });
+                }
+            }
+        },
+    );
+}
+
 pub(crate) fn start_close_issue(
     owner: String,
     repo: String,

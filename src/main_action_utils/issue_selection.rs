@@ -18,6 +18,24 @@ pub(crate) fn ensure_can_edit_issue_metadata(app: &mut App) -> bool {
     false
 }
 
+pub(crate) fn ensure_can_merge_pull_request(app: &mut App) -> bool {
+    if app.repo_pull_request_mergeable() == Some(true) {
+        return true;
+    }
+    if app.repo_pull_request_mergeable() == Some(false) {
+        app.set_status("No permission to merge pull requests in this repo".to_string());
+        return false;
+    }
+
+    app.request_repo_permissions_sync();
+    if app.repo_permissions_syncing() {
+        app.set_status("Checking repo permissions".to_string());
+        return false;
+    }
+    app.set_status("Checking repo permissions, try again in a moment".to_string());
+    false
+}
+
 pub(crate) fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<String>)> {
     if app.view() == View::Issues {
         return app

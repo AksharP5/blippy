@@ -1,5 +1,5 @@
 use super::main_actions::issue_url;
-use crate::app::{EditorMode, View, WorkItemMode};
+use crate::app::{EditorMode, PendingIssueAction, View, WorkItemMode};
 use crate::config::Config;
 use crate::store::IssueRow;
 use std::sync::mpsc::channel;
@@ -199,6 +199,105 @@ fn reopen_issue_blocks_merged_pull_requests() {
 
     assert_eq!(app.status(), "Merged pull requests cannot be reopened");
     assert_eq!(app.pending_issue_badge(88), None);
+}
+
+#[test]
+fn merge_pull_request_blocks_non_pr_items() {
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_view(View::Issues);
+    app.set_issues(vec![IssueRow {
+        id: 31,
+        repo_id: 1,
+        number: 90,
+        state: "open".to_string(),
+        title: "Issue".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: false,
+    }]);
+
+    let (event_tx, _event_rx) = channel();
+    super::main_action_utils::merge_pull_request(&mut app, "token", event_tx)
+        .expect("merge helper");
+
+    assert_eq!(app.status(), "Selected item is not a pull request");
+    assert_eq!(app.pending_issue_badge(90), None);
+}
+
+#[test]
+fn merge_pull_request_checks_permissions() {
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_repo_pull_request_mergeable(Some(false));
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![IssueRow {
+        id: 32,
+        repo_id: 1,
+        number: 91,
+        state: "open".to_string(),
+        title: "PR".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+
+    let (event_tx, _event_rx) = channel();
+    super::main_action_utils::merge_pull_request(&mut app, "token", event_tx)
+        .expect("merge helper");
+
+    assert_eq!(
+        app.status(),
+        "No permission to merge pull requests in this repo"
+    );
+    assert_eq!(app.pending_issue_badge(91), None);
+}
+
+#[test]
+fn issue_updated_marks_pull_request_merged() {
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![IssueRow {
+        id: 33,
+        repo_id: 1,
+        number: 92,
+        state: "open".to_string(),
+        title: "PR".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+    app.set_pending_issue_action(92, PendingIssueAction::Merging);
+
+    let (event_tx, event_rx) = channel();
+    event_tx
+        .send(super::AppEvent::IssueUpdated {
+            issue_number: 92,
+            message: "merged".to_string(),
+        })
+        .expect("send event");
+    super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle events");
+
+    assert_eq!(app.pending_issue_badge(92), None);
+    let merged_state = app
+        .issues()
+        .iter()
+        .find(|issue| issue.number == 92)
+        .map(|issue| issue.state.as_str());
+    assert_eq!(merged_state, Some("merged"));
 }
 
 #[test]

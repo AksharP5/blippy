@@ -298,3 +298,53 @@ pub(crate) fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent
     app.set_status("Reopening issue".to_string());
     Ok(())
 }
+
+pub(crate) fn merge_pull_request(
+    app: &mut App,
+    token: &str,
+    event_tx: Sender<AppEvent>,
+) -> Result<()> {
+    let (issue_id, issue_number, issue_state, is_pr) = match app.current_or_selected_issue() {
+        Some(issue) => (issue.id, issue.number, issue.state.clone(), issue.is_pr),
+        None => {
+            app.set_status("No pull request selected".to_string());
+            return Ok(());
+        }
+    };
+    if !is_pr {
+        app.set_status("Selected item is not a pull request".to_string());
+        return Ok(());
+    }
+    if issue_state.eq_ignore_ascii_case("merged") {
+        app.set_status("Pull request is already merged".to_string());
+        return Ok(());
+    }
+    if issue_state.eq_ignore_ascii_case("closed") {
+        app.set_status("Closed pull requests cannot be merged".to_string());
+        return Ok(());
+    }
+    if !issue_state.eq_ignore_ascii_case("open") {
+        app.set_status(format!(
+            "Pull request cannot be merged from {} state",
+            issue_state
+        ));
+        return Ok(());
+    }
+    if !ensure_can_merge_pull_request(app) {
+        return Ok(());
+    }
+
+    app.set_current_issue(issue_id, issue_number);
+    let (owner, repo) = match (app.current_owner(), app.current_repo()) {
+        (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
+        _ => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
+
+    start_merge_pull_request(owner, repo, issue_number, token.to_string(), event_tx);
+    app.set_pending_issue_action(issue_number, PendingIssueAction::Merging);
+    app.set_status(format!("Merging pull request #{}", issue_number));
+    Ok(())
+}

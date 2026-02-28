@@ -165,24 +165,36 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Shift+N", "Create issue"),
             ("/", "Search with qualifiers"),
         ],
-        View::IssueDetail => vec![
-            ("Ctrl+h/l", "Switch panes"),
-            ("j / k", "Scroll focused pane"),
-            ("Enter", "Open focused pane"),
-            ("c", "Open comments"),
-            ("Shift+N", "Create issue"),
-            ("b or Esc", "Back"),
-            ("o", "Open in browser"),
-        ],
-        View::IssueComments => vec![
-            ("j / k", "Jump comments"),
-            ("e", "Edit selected comment"),
-            ("x", "Delete selected comment"),
-            ("m", "Add comment"),
-            ("Shift+N", "Create issue"),
-            ("b or Esc", "Back"),
-            ("o", "Open in browser"),
-        ],
+        View::IssueDetail => {
+            let mut rows = vec![
+                ("Ctrl+h/l", "Switch panes"),
+                ("j / k", "Scroll focused pane"),
+                ("Enter", "Open focused pane"),
+                ("c", "Open comments"),
+                ("Shift+N", "Create issue"),
+                ("b or Esc", "Back"),
+                ("o", "Open in browser"),
+            ];
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                rows.insert(5, ("Shift+M", "Merge pull request"));
+            }
+            rows
+        }
+        View::IssueComments => {
+            let mut rows = vec![
+                ("j / k", "Jump comments"),
+                ("e", "Edit selected comment"),
+                ("x", "Delete selected comment"),
+                ("m", "Add comment"),
+                ("Shift+N", "Create issue"),
+                ("b or Esc", "Back"),
+                ("o", "Open in browser"),
+            ];
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                rows.insert(5, ("Shift+M", "Merge pull request"));
+            }
+            rows
+        }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
                 return vec![
@@ -190,6 +202,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
                     ("j / k", "Move changed files"),
                     ("Enter", "Open full-width diff pane"),
                     ("w", "Toggle file viewed state"),
+                    ("Shift+M", "Merge pull request"),
                     ("b or Esc", "Back"),
                     ("o", "Open in browser"),
                 ];
@@ -205,6 +218,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
                     ("0", "Reset horizontal pan"),
                     ("m/e/x", "Add/edit/delete comment"),
                     ("Shift+R", "Resolve/reopen thread"),
+                    ("Shift+M", "Merge pull request"),
                 ];
             }
             vec![
@@ -216,6 +230,7 @@ fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("0", "Reset horizontal pan"),
                 ("m/e/x", "Add/edit/delete comment"),
                 ("Shift+R", "Resolve/reopen thread"),
+                ("Shift+M", "Merge pull request"),
             ]
         }
         View::LinkedPicker => vec![
@@ -477,8 +492,9 @@ fn help_text(app: &App) -> String {
                 parts.insert(10, "u reopen");
                 parts.insert(11, "dd close");
                 parts.insert(12, "v checkout");
-                parts.insert(13, "Shift+P linked issue (TUI)");
-                parts.insert(14, "Shift+O linked issue (web)");
+                parts.insert(13, "Shift+M merge");
+                parts.insert(14, "Shift+P linked issue (TUI)");
+                parts.insert(15, "Shift+O linked issue (web)");
             } else {
                 parts.insert(10, "u reopen");
                 parts.insert(11, "dd close");
@@ -497,7 +513,7 @@ fn help_text(app: &App) -> String {
                 } else {
                     "Shift+P find/open linked issue • Shift+O open linked issue (web)"
                 };
-                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • Shift+N create issue • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
+                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • Shift+N create issue • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+M merge • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
                     .replace(
                         "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
                         linked_hint,
@@ -518,7 +534,7 @@ fn help_text(app: &App) -> String {
                 } else {
                     "Shift+P find/open linked issue • Shift+O open linked issue (web)"
                 };
-                return "j/k comments • e edit • x delete • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
+                return "j/k comments • e edit • x delete • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+M merge • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
                     .replace(
                         "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
                         linked_hint,
@@ -533,7 +549,7 @@ fn help_text(app: &App) -> String {
         }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
-                return "Ctrl+h/l pane • j/k move file • Enter full diff • w viewed • r refresh • v checkout • Esc/back"
+                return "Ctrl+h/l pane • j/k move file • Enter full diff • w viewed • r refresh • v checkout • Shift+M merge • Esc/back"
                     .to_string();
             }
             let toggle_hint = if app.pull_request_diff_expanded() {
@@ -542,7 +558,7 @@ fn help_text(app: &App) -> String {
                 "Enter full diff"
             };
             format!(
-                "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Ctrl+C quit",
+                "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Shift+M merge • Ctrl+C quit",
                 toggle_hint
             )
         }

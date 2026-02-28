@@ -188,10 +188,13 @@ pub(crate) fn start_fetch_repo_permissions(
                         || permissions.triage
                         || permissions.maintain
                         || permissions.admin;
+                    let can_merge_pull_request =
+                        permissions.push || permissions.maintain || permissions.admin;
                     let _ = event_tx.send(AppEvent::RepoPermissionsResolved {
                         owner,
                         repo,
                         can_edit_issue_metadata,
+                        can_merge_pull_request,
                     });
                 }
                 Err(error) => {

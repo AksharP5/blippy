@@ -237,6 +237,16 @@ fn shift_r_triggers_resolve_review_comment_action() {
 }
 
 #[test]
+fn shift_m_triggers_merge_pull_request_action() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::PullRequestFiles);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT));
+
+    assert_eq!(app.take_action(), Some(AppAction::MergePullRequest));
+}
+
+#[test]
 fn w_emits_toggle_pull_request_file_viewed_action() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);

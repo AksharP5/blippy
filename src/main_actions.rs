@@ -92,6 +92,9 @@ pub(super) fn handle_actions(
         AppAction::CheckoutPullRequest => {
             checkout_pull_request(app)?;
         }
+        AppAction::MergePullRequest => {
+            merge_pull_request(app, token, event_tx.clone())?;
+        }
         AppAction::OpenLinkedPullRequestInBrowser => {
             if !super::main_linked_actions::try_open_cached_linked_pull_request(
                 app,

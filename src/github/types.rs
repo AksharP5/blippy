@@ -83,6 +83,24 @@ pub struct ApiPullRequestSummary {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct ApiPullRequestDetails {
+    #[serde(default)]
+    pub merge_commit_allowed: bool,
+    #[serde(default)]
+    pub squash_merge_allowed: bool,
+    #[serde(default)]
+    pub rebase_merge_allowed: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ApiPullRequestMergeResponse {
+    #[serde(default)]
+    pub merged: bool,
+    #[serde(default)]
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApiPullRequestReviewComment {
     pub id: i64,
     #[serde(default)]

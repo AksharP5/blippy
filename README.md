@@ -59,6 +59,7 @@ cargo install --git https://github.com/AksharP5/blippy
 - Browse and manage issues and pull requests
 - Open linked issues/PRs in TUI or browser
 - Review PR diffs with inline comments and thread resolution
+- Merge pull requests from the TUI when repository permissions allow
 - Edit labels and assignees (when repository permissions allow)
 - Customize themes, keybindings, and close-comment presets
 
