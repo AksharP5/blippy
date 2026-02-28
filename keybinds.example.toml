@@ -52,6 +52,7 @@ open_browser = "o"
 open_linked_pr_browser = "shift+o"
 open_linked_pr_tui = "shift+p"
 checkout_pr = "v"
+merge_pull_request = "shift+m"
 
 focus_left = "ctrl+h"
 focus_right = "ctrl+l"

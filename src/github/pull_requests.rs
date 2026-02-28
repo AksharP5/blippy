@@ -187,6 +187,72 @@ impl GitHubClient {
         Ok(pull.head.sha)
     }
 
+    pub async fn merge_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pull_number: i64,
+    ) -> Result<()> {
+        let repo_details = self
+            .client
+            .get(format!("{}/repos/{}/{}", API_BASE, owner, repo))
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ApiRepoMergeSettings>()
+            .await?;
+        let mut merge_methods = preferred_merge_methods(&repo_details);
+        if merge_methods.is_empty() {
+            merge_methods = vec!["merge", "squash", "rebase"];
+        }
+
+        let merge_url = format!(
+            "{}/repos/{}/{}/pulls/{}/merge",
+            API_BASE, owner, repo, pull_number
+        );
+        let mut last_error = String::new();
+        for merge_method in merge_methods {
+            let response = self
+                .client
+                .put(merge_url.as_str())
+                .bearer_auth(&self.token)
+                .json(&serde_json::json!({ "merge_method": merge_method }))
+                .send()
+                .await?;
+            let status = response.status();
+            let payload_text = response.text().await.unwrap_or_default();
+
+            if status.is_success() {
+                let payload =
+                    serde_json::from_str::<ApiPullRequestMergeResponse>(payload_text.as_str())
+                        .unwrap_or_default();
+                if payload.merged {
+                    return Ok(());
+                }
+                if !payload.message.is_empty() {
+                    last_error = payload.message;
+                    continue;
+                }
+                last_error = format!("GitHub merge endpoint returned {}", status);
+                continue;
+            }
+
+            let api_error = parse_api_error_message(payload_text.as_str())
+                .unwrap_or_else(|| payload_text.trim().to_string());
+            if !api_error.is_empty() {
+                last_error = api_error;
+            } else {
+                last_error = format!("GitHub merge endpoint returned {}", status);
+            }
+        }
+
+        if last_error.is_empty() {
+            return Err(anyhow::anyhow!("merge failed"));
+        }
+        Err(anyhow::anyhow!(last_error))
+    }
+
     pub async fn list_pull_request_review_comments(
         &self,
         owner: &str,
@@ -422,4 +488,26 @@ impl GitHubClient {
             .error_for_status()?;
         Ok(())
     }
+}
+
+fn preferred_merge_methods(repo: &ApiRepoMergeSettings) -> Vec<&'static str> {
+    let mut methods = Vec::new();
+    if repo.allow_merge_commit {
+        methods.push("merge");
+    }
+    if repo.allow_squash_merge {
+        methods.push("squash");
+    }
+    if repo.allow_rebase_merge {
+        methods.push("rebase");
+    }
+    methods
+}
+
+fn parse_api_error_message(payload: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    parsed
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
 }

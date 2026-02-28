@@ -59,10 +59,10 @@ use crate::sync::{SyncStats, sync_repo_with_progress};
 use crate::main_sync::{
     start_add_comment, start_close_issue, start_create_issue,
     start_create_pull_request_review_comment, start_delete_comment,
-    start_delete_pull_request_review_comment, start_fetch_assignees, start_reopen_issue,
-    start_set_pull_request_file_viewed, start_toggle_pull_request_review_thread_resolution,
-    start_update_assignees, start_update_comment, start_update_labels,
-    start_update_pull_request_review_comment,
+    start_delete_pull_request_review_comment, start_fetch_assignees, start_merge_pull_request,
+    start_reopen_issue, start_set_pull_request_file_viewed,
+    start_toggle_pull_request_review_thread_resolution, start_update_assignees,
+    start_update_comment, start_update_labels, start_update_pull_request_review_comment,
 };
 
 type TuiBackend = CrosstermBackend<Stdout>;
@@ -537,6 +537,7 @@ enum AppEvent {
         owner: String,
         repo: String,
         can_edit_issue_metadata: bool,
+        can_merge_pull_request: bool,
     },
     RepoPermissionsFailed {
         owner: String,

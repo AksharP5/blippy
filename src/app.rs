@@ -34,6 +34,7 @@ pub enum AppAction {
     PickIssue,
     OpenInBrowser,
     CheckoutPullRequest,
+    MergePullRequest,
     OpenLinkedPullRequestInBrowser,
     OpenLinkedPullRequestInTui,
     OpenLinkedIssueInBrowser,
@@ -217,6 +218,7 @@ pub enum AssigneeFilter {
 pub enum PendingIssueAction {
     Closing,
     Reopening,
+    Merging,
     UpdatingLabels,
     UpdatingAssignees,
 }
@@ -278,6 +280,7 @@ impl PendingIssueAction {
         match self {
             Self::Closing => "closing",
             Self::Reopening => "reopening",
+            Self::Merging => "merging",
             Self::UpdatingLabels => "updating labels",
             Self::UpdatingAssignees => "updating assignees",
         }
@@ -363,6 +366,7 @@ struct SyncState {
     repo_permissions_syncing: bool,
     repo_permissions_sync_requested: bool,
     repo_issue_metadata_editable: Option<bool>,
+    repo_pull_request_mergeable: Option<bool>,
     repo_labels_syncing: bool,
     repo_labels_sync_requested: bool,
     comment_syncing: bool,

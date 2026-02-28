@@ -169,6 +169,10 @@ impl App {
         self.sync.repo_issue_metadata_editable = editable;
     }
 
+    pub fn set_repo_pull_request_mergeable(&mut self, mergeable: Option<bool>) {
+        self.sync.repo_pull_request_mergeable = mergeable;
+    }
+
     pub fn set_comment_syncing(&mut self, syncing: bool) {
         self.sync.comment_syncing = syncing;
     }
@@ -250,6 +254,7 @@ impl App {
         self.sync.repo_permissions_syncing = false;
         self.sync.repo_permissions_sync_requested = true;
         self.sync.repo_issue_metadata_editable = None;
+        self.sync.repo_pull_request_mergeable = None;
         self.sync.repo_labels_syncing = false;
         self.sync.repo_labels_sync_requested = true;
         self.repo_label_colors.clear();

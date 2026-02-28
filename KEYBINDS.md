@@ -40,6 +40,7 @@ Search mode:
 - `Shift+A`: Edit assignees
 - `u`: Reopen selected closed item
 - `dd`: Close selected item via preset flow
+- `Shift+M`: Merge selected pull request
 - `o`: Open selected item in browser
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
@@ -61,6 +62,7 @@ Search mode:
 - `Shift+A`: Edit assignees
 - `u`: Reopen selected closed item
 - `dd`: Close selected item via preset flow
+- `Shift+M`: Merge pull request
 - `o`: Open in browser
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
@@ -78,6 +80,7 @@ Search mode:
 - `Shift+A`: Edit assignees
 - `u`: Reopen selected closed item
 - `dd`: Close selected item via preset flow
+- `Shift+M`: Merge pull request
 - `o`: Open in browser
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
@@ -92,6 +95,7 @@ Search mode:
 - `w`: Toggle file viewed/unviewed on GitHub
 - `r`: Refresh PR data
 - `v`: Checkout PR locally
+- `Shift+M`: Merge pull request
 - `b` or `Esc`: Back (or return to split diff if expanded)
 
 ## Pull Request Review View (`Diff`)
@@ -111,6 +115,7 @@ Search mode:
 - `n` / `p`: Cycle line comments on current diff row
 - `r`: Refresh PR data
 - `v`: Checkout PR locally
+- `Shift+M`: Merge pull request
 - `b` or `Esc`: Return to split diff (if expanded) or back
 
 ## Label / Assignee Pickers
@@ -189,6 +194,7 @@ All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or unde
 | `open_linked_pr_browser` | `shift+o` |
 | `open_linked_pr_tui` | `shift+p` |
 | `checkout_pr` | `v` |
+| `merge_pull_request` | `shift+m` |
 | `focus_left` | `ctrl+h` |
 | `focus_right` | `ctrl+l` |
 | `rescan_repos` | `ctrl+r` |

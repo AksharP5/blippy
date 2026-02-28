@@ -34,16 +34,16 @@ pub(super) fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, them
             Style::default().fg(theme.text_primary),
         ));
     }
-    if !context.is_empty() {
-        spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
-        spans.push(Span::styled(context, Style::default().fg(theme.text_muted)));
-    }
     if !help_raw.is_empty() {
         spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
         spans.push(Span::styled(
             help_raw,
             Style::default().fg(theme.text_muted),
         ));
+    }
+    if !context.is_empty() {
+        spans.push(Span::styled(" • ", Style::default().fg(theme.border_panel)));
+        spans.push(Span::styled(context, Style::default().fg(theme.text_muted)));
     }
 
     let status_line = Line::from(spans);
@@ -208,60 +208,98 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
             ),
             (bind(app, "quit"), "Quit".to_string()),
         ],
-        View::Issues => vec![
-            (move_keys, "Move issues".to_string()),
-            (bind(app, "submit"), "Open selected item".to_string()),
-            (
-                bind(app, "cycle_issue_filter"),
-                "Switch open/closed".to_string(),
-            ),
-            (
-                format!(
-                    "{} / {}",
-                    bind(app, "issue_filter_open"),
-                    bind(app, "issue_filter_closed")
+        View::Issues => {
+            let mut rows = vec![
+                (move_keys, "Move issues".to_string()),
+                (bind(app, "submit"), "Open selected item".to_string()),
+                (
+                    bind(app, "cycle_issue_filter"),
+                    "Switch open/closed".to_string(),
                 ),
-                "Jump to open/closed tab".to_string(),
-            ),
-            (
-                bind(app, "cycle_assignee_filter"),
-                "Cycle assignee filter".to_string(),
-            ),
-            ("Ctrl+a".to_string(), "Reset assignee to all".to_string()),
-            (
-                bind(app, "toggle_work_item_mode"),
-                "Toggle issues/PR mode".to_string(),
-            ),
-            (bind(app, "create_issue"), "Create issue".to_string()),
-            (
-                bind(app, "issue_search"),
-                "Search with qualifiers".to_string(),
-            ),
-        ],
-        View::IssueDetail => vec![
-            (pane_keys, "Switch panes".to_string()),
-            (move_keys, "Scroll focused pane".to_string()),
-            (bind(app, "submit"), "Open focused pane".to_string()),
-            (bind(app, "open_comments"), "Open comments".to_string()),
-            (bind(app, "create_issue"), "Create issue".to_string()),
-            (back_keys, "Back".to_string()),
-            (bind(app, "open_browser"), "Open in browser".to_string()),
-        ],
-        View::IssueComments => vec![
-            (move_keys, "Jump comments".to_string()),
-            (
-                bind(app, "edit_comment"),
-                "Edit selected comment".to_string(),
-            ),
-            (
-                bind(app, "delete_comment"),
-                "Delete selected comment".to_string(),
-            ),
-            (bind(app, "add_comment"), "Add comment".to_string()),
-            (bind(app, "create_issue"), "Create issue".to_string()),
-            (back_keys, "Back".to_string()),
-            (bind(app, "open_browser"), "Open in browser".to_string()),
-        ],
+                (
+                    format!(
+                        "{} / {}",
+                        bind(app, "issue_filter_open"),
+                        bind(app, "issue_filter_closed")
+                    ),
+                    "Jump to open/closed tab".to_string(),
+                ),
+                (
+                    bind(app, "cycle_assignee_filter"),
+                    "Cycle assignee filter".to_string(),
+                ),
+                ("Ctrl+a".to_string(), "Reset assignee to all".to_string()),
+                (
+                    bind(app, "toggle_work_item_mode"),
+                    "Toggle issues/PR mode".to_string(),
+                ),
+                (bind(app, "create_issue"), "Create issue".to_string()),
+                (
+                    bind(app, "issue_search"),
+                    "Search with qualifiers".to_string(),
+                ),
+            ];
+            let reviewing_pr = app.work_item_mode() == crate::app::WorkItemMode::PullRequests
+                || app.selected_issue_row().is_some_and(|issue| issue.is_pr);
+            if reviewing_pr {
+                rows.insert(
+                    8,
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                );
+            }
+            rows
+        }
+        View::IssueDetail => {
+            let mut rows = vec![
+                (pane_keys, "Switch panes".to_string()),
+                (move_keys, "Scroll focused pane".to_string()),
+                (bind(app, "submit"), "Open focused pane".to_string()),
+                (bind(app, "open_comments"), "Open comments".to_string()),
+                (bind(app, "create_issue"), "Create issue".to_string()),
+                (back_keys, "Back".to_string()),
+                (bind(app, "open_browser"), "Open in browser".to_string()),
+            ];
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                rows.insert(
+                    5,
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                );
+            }
+            rows
+        }
+        View::IssueComments => {
+            let mut rows = vec![
+                (move_keys, "Jump comments".to_string()),
+                (
+                    bind(app, "edit_comment"),
+                    "Edit selected comment".to_string(),
+                ),
+                (
+                    bind(app, "delete_comment"),
+                    "Delete selected comment".to_string(),
+                ),
+                (bind(app, "add_comment"), "Add comment".to_string()),
+                (bind(app, "create_issue"), "Create issue".to_string()),
+                (back_keys, "Back".to_string()),
+                (bind(app, "open_browser"), "Open in browser".to_string()),
+            ];
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                rows.insert(
+                    5,
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                );
+            }
+            rows
+        }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
                 return vec![
@@ -271,6 +309,10 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                     (
                         bind(app, "toggle_file_viewed"),
                         "Toggle file viewed state".to_string(),
+                    ),
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
                     ),
                     (back_keys, "Back".to_string()),
                     (bind(app, "open_browser"), "Open in browser".to_string()),
@@ -298,6 +340,10 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                         bind(app, "resolve_thread"),
                         "Resolve/reopen thread".to_string(),
                     ),
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
                 ];
             }
             vec![
@@ -317,6 +363,10 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                 (
                     bind(app, "resolve_thread"),
                     "Resolve/reopen thread".to_string(),
+                ),
+                (
+                    bind(app, "merge_pull_request"),
+                    "Merge pull request".to_string(),
                 ),
             ]
         }
@@ -534,6 +584,24 @@ fn primary_help_text(app: &App) -> String {
                     ),
                 );
             }
+            let reviewing_pr = app.work_item_mode() == crate::app::WorkItemMode::PullRequests
+                || app.selected_issue_row().is_some_and(|issue| issue.is_pr);
+            if reviewing_pr {
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} move • {} open • {} open/closed • {} create • {} merge • {} assignee • {} all • {} search",
+                        move_keys,
+                        submit,
+                        bind(app, "cycle_issue_filter"),
+                        bind(app, "create_issue"),
+                        bind(app, "merge_pull_request"),
+                        bind(app, "cycle_assignee_filter"),
+                        "Ctrl+a",
+                        bind(app, "issue_search")
+                    ),
+                );
+            }
             with_help_hint(
                 app,
                 format!(
@@ -554,8 +622,12 @@ fn primary_help_text(app: &App) -> String {
                     return with_help_hint(
                         app,
                         format!(
-                            "{} recent comments • {} open review • {} panes • {} back",
-                            move_keys, submit, pane_keys, back_keys
+                            "{} recent comments • {} open review • {} merge • {} panes • {} back",
+                            move_keys,
+                            submit,
+                            bind(app, "merge_pull_request"),
+                            pane_keys,
+                            back_keys
                         ),
                     );
                 }
@@ -564,6 +636,20 @@ fn primary_help_text(app: &App) -> String {
                     format!(
                         "{} recent comments • {} open comments • {} panes • {} back",
                         move_keys, submit, pane_keys, back_keys
+                    ),
+                );
+            }
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} panes • {} open pane • {} comments • {} merge • {} create • {} back",
+                        pane_keys,
+                        submit,
+                        bind(app, "open_comments"),
+                        bind(app, "merge_pull_request"),
+                        bind(app, "create_issue"),
+                        back_keys
                     ),
                 );
             }
@@ -579,25 +665,42 @@ fn primary_help_text(app: &App) -> String {
                 ),
             )
         }
-        View::IssueComments => with_help_hint(
-            app,
-            format!(
-                "{} comments • {} edit • {} delete • {} create • {} back",
-                move_keys,
-                bind(app, "edit_comment"),
-                bind(app, "delete_comment"),
-                bind(app, "create_issue"),
-                back_keys
-            ),
-        ),
+        View::IssueComments => {
+            if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} comments • {} edit • {} delete • {} merge • {} create • {} back",
+                        move_keys,
+                        bind(app, "edit_comment"),
+                        bind(app, "delete_comment"),
+                        bind(app, "merge_pull_request"),
+                        bind(app, "create_issue"),
+                        back_keys
+                    ),
+                );
+            }
+            with_help_hint(
+                app,
+                format!(
+                    "{} comments • {} edit • {} delete • {} create • {} back",
+                    move_keys,
+                    bind(app, "edit_comment"),
+                    bind(app, "delete_comment"),
+                    bind(app, "create_issue"),
+                    back_keys
+                ),
+            )
+        }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
                 return with_help_hint(
                     app,
                     format!(
-                        "{} files • {} full diff • {} panes • {} viewed • {} back",
+                        "{} files • {} full diff • {} merge • {} panes • {} viewed • {} back",
                         move_keys,
                         submit,
+                        bind(app, "merge_pull_request"),
                         pane_keys,
                         bind(app, "toggle_file_viewed"),
                         back_keys
@@ -615,13 +718,14 @@ fn primary_help_text(app: &App) -> String {
             with_help_hint(
                 app,
                 format!(
-                    "{} diff • {} • {} collapse hunk • {} add • {} thread • {} resolve",
+                    "{} diff • {} • {} collapse hunk • {} add • {} thread • {} resolve • {} merge",
                     move_keys,
                     toggle_hint,
                     bind(app, "collapse_hunk"),
                     bind(app, "add_comment"),
                     bind_any(app, &["next_line_comment", "prev_line_comment"], "/"),
-                    bind(app, "resolve_thread")
+                    bind(app, "resolve_thread"),
+                    bind(app, "merge_pull_request")
                 ),
             )
         }
@@ -741,12 +845,13 @@ fn help_text(app: &App) -> String {
                 parts.insert(10, format!("{} reopen", bind(app, "reopen_issue")));
                 parts.insert(11, "dd close".to_string());
                 parts.insert(12, format!("{} checkout", bind(app, "checkout_pr")));
+                parts.insert(14, format!("{} merge", bind(app, "merge_pull_request")));
                 parts.insert(
-                    13,
+                    15,
                     format!("{} linked issue (TUI)", bind(app, "open_linked_pr_tui")),
                 );
                 parts.insert(
-                    14,
+                    16,
                     format!("{} linked issue (web)", bind(app, "open_linked_pr_browser")),
                 );
             } else {
@@ -782,7 +887,7 @@ fn help_text(app: &App) -> String {
                     )
                 };
                 return format!(
-                    "{} pane • {} scroll • {} on description opens comments • {} on changes opens review • {} comments • {} create issue • {}/{} side in review • {} comment • {} labels • {} assignees • {} reopen • dd close • {} checkout • {} • {} refresh • {} back • {} quit",
+                    "{} pane • {} scroll • {} on description opens comments • {} on changes opens review • {} comments • {} create issue • {}/{} side in review • {} comment • {} labels • {} assignees • {} reopen • dd close • {} checkout • {} merge • {} • {} refresh • {} back • {} quit",
                     pane_keys,
                     move_keys,
                     submit,
@@ -796,6 +901,7 @@ fn help_text(app: &App) -> String {
                     bind(app, "edit_assignees"),
                     bind(app, "reopen_issue"),
                     bind(app, "checkout_pr"),
+                    bind(app, "merge_pull_request"),
                     linked_hint,
                     bind(app, "refresh"),
                     bind(app, "back_escape"),
@@ -854,7 +960,7 @@ fn help_text(app: &App) -> String {
                     )
                 };
                 return format!(
-                    "{} comments • {} edit • {} delete • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} checkout • {} • {} refresh • {} back • {} quit",
+                    "{} comments • {} edit • {} delete • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} checkout • {} merge • {} • {} refresh • {} back • {} quit",
                     move_keys,
                     bind(app, "edit_comment"),
                     bind(app, "delete_comment"),
@@ -864,6 +970,7 @@ fn help_text(app: &App) -> String {
                     bind(app, "edit_assignees"),
                     bind(app, "reopen_issue"),
                     bind(app, "checkout_pr"),
+                    bind(app, "merge_pull_request"),
                     linked_hint,
                     bind(app, "refresh"),
                     bind(app, "back_escape"),
@@ -906,13 +1013,14 @@ fn help_text(app: &App) -> String {
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
                 return format!(
-                    "{} pane • {} move file • {} full diff • {} viewed • {} refresh • {} checkout • {}",
+                    "{} pane • {} move file • {} full diff • {} viewed • {} refresh • {} checkout • {} merge • {}",
                     pane_keys,
                     move_keys,
                     submit,
                     bind(app, "toggle_file_viewed"),
                     bind(app, "refresh"),
                     bind(app, "checkout_pr"),
+                    bind(app, "merge_pull_request"),
                     back_keys
                 );
             }
@@ -925,7 +1033,7 @@ fn help_text(app: &App) -> String {
                 format!("{} full diff", submit)
             };
             format!(
-                "{} pane • {} move line • {} • {} collapse hunk • {}/{} pan diff • {} reset pan • {}/{} old/new side • {} visual range • {} add • {} edit • {} delete • {} resolve/reopen • {}/{} cycle line comments • {} refresh • {} checkout • {} quit",
+                "{} pane • {} move line • {} • {} collapse hunk • {}/{} pan diff • {} reset pan • {}/{} old/new side • {} visual range • {} add • {} edit • {} delete • {} resolve/reopen • {}/{} cycle line comments • {} refresh • {} checkout • {} merge • {} quit",
                 pane_keys,
                 move_keys,
                 toggle_hint,
@@ -944,6 +1052,7 @@ fn help_text(app: &App) -> String {
                 bind(app, "prev_line_comment"),
                 bind(app, "refresh"),
                 bind(app, "checkout_pr"),
+                bind(app, "merge_pull_request"),
                 bind(app, "quit")
             )
         }
@@ -1067,4 +1176,63 @@ fn sync_state_color(sync: &str, theme: &ThemePalette) -> Color {
         return theme.accent_subtle;
     }
     theme.accent_success
+}
+
+#[cfg(test)]
+mod tests {
+    use super::primary_help_text;
+    use crate::app::{App, View, WorkItemMode};
+    use crate::config::Config;
+    use crate::store::IssueRow;
+
+    fn sample_issue(is_pr: bool) -> IssueRow {
+        IssueRow {
+            id: 1,
+            repo_id: 1,
+            number: 12,
+            state: "open".to_string(),
+            title: "Item".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr,
+        }
+    }
+
+    #[test]
+    fn primary_help_text_includes_merge_for_pr_detail() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueDetail);
+        app.set_issues(vec![sample_issue(true)]);
+        app.set_current_issue(1, 12);
+
+        let text = primary_help_text(&app);
+
+        assert!(text.contains("Shift+M merge"));
+    }
+
+    #[test]
+    fn primary_help_text_omits_merge_for_issue_detail() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueDetail);
+        app.set_issues(vec![sample_issue(false)]);
+        app.set_current_issue(1, 12);
+
+        let text = primary_help_text(&app);
+
+        assert!(!text.contains("Shift+M merge"));
+    }
+
+    #[test]
+    fn primary_help_text_includes_merge_in_pull_request_mode() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_work_item_mode(WorkItemMode::PullRequests);
+
+        let text = primary_help_text(&app);
+
+        assert!(text.contains("Shift+M merge"));
+    }
 }

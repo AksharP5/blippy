@@ -90,6 +90,8 @@ pub(super) fn handle_events(
                     || message.starts_with("close failed")
                     || message.starts_with("reopened")
                     || message.starts_with("reopen failed")
+                    || message.starts_with("merged")
+                    || message.starts_with("merge failed")
                     || message.starts_with("label update failed")
                     || message.starts_with("assignee update failed")
                 {
@@ -100,6 +102,9 @@ pub(super) fn handle_events(
                 }
                 if message.starts_with("reopened") {
                     app.update_issue_state_by_number(issue_number, "open");
+                }
+                if message.starts_with("merged") {
+                    app.update_issue_state_by_number(issue_number, "merged");
                 }
                 app.set_status(format!("#{} {}", issue_number, message));
                 app.request_sync();
@@ -548,12 +553,14 @@ pub(super) fn handle_events(
                 owner,
                 repo,
                 can_edit_issue_metadata,
+                can_merge_pull_request,
             } => {
                 if app.current_owner() == Some(owner.as_str())
                     && app.current_repo() == Some(repo.as_str())
                 {
                     app.set_repo_permissions_syncing(false);
                     app.set_repo_issue_metadata_editable(Some(can_edit_issue_metadata));
+                    app.set_repo_pull_request_mergeable(Some(can_merge_pull_request));
                     if !can_edit_issue_metadata {
                         app.set_status(
                             "No permission to edit labels/assignees in this repo".to_string(),
@@ -571,6 +578,7 @@ pub(super) fn handle_events(
                 {
                     app.set_repo_permissions_syncing(false);
                     app.set_repo_issue_metadata_editable(None);
+                    app.set_repo_pull_request_mergeable(None);
                     app.set_status(format!("Repo permission check failed: {}", message));
                 }
             }

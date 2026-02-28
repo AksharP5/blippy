@@ -8,7 +8,8 @@ mod review_actions;
 
 pub(super) use issue_actions::{
     start_add_comment, start_close_issue, start_create_issue, start_delete_comment,
-    start_reopen_issue, start_update_assignees, start_update_comment, start_update_labels,
+    start_merge_pull_request, start_reopen_issue, start_update_assignees, start_update_comment,
+    start_update_labels,
 };
 pub(super) use poll::{
     maybe_start_comment_poll, maybe_start_issue_poll, maybe_start_pull_request_files_sync,

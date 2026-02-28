@@ -28,6 +28,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 ## Pull Request Review Workspace
 
 - View changed files and diff, with option for checkout
+- Merge pull requests directly from the review/detail flow
 - Split or expanded diff review modes
 - Horizontal diff panning for long lines
 - Mark files viewed/unviewed
@@ -43,6 +44,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 ## Metadata Editing and Permission Awareness
 
 - Edit labels and assignees for issues/PRs from the TUI
+- Merge actions are permission-aware and only enabled for authorized repos
 - Label and assignee pickers with inline filtering
 - Editing is permission-aware and checks repo capabilities
 

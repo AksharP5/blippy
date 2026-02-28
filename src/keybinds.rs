@@ -201,6 +201,11 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         description: "Checkout selected pull request",
     },
     BindingSpec {
+        action: "merge_pull_request",
+        default: "shift+m",
+        description: "Merge selected pull request",
+    },
+    BindingSpec {
         action: "focus_left",
         default: "ctrl+h",
         description: "Move pane focus left",
