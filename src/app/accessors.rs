@@ -195,6 +195,10 @@ impl App {
         &self.status
     }
 
+    pub fn keybind_label(&self, action: &str) -> String {
+        self.keybinds.binding_label(action)
+    }
+
     pub fn current_owner(&self) -> Option<&str> {
         self.context.owner.as_deref()
     }

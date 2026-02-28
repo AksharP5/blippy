@@ -99,7 +99,7 @@ pub(super) fn draw_help_overlay(
 
     for (key, action) in help_rows(app) {
         lines.push(Line::from(vec![
-            key_cap(key, theme),
+            key_cap(key.as_str(), theme),
             Span::raw(" "),
             Span::styled(action, Style::default().fg(theme.text_primary)),
         ]));
@@ -122,7 +122,7 @@ pub(super) fn draw_help_overlay(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Press ? or Esc to close",
+        format!("Press ? or {} to close", bind(app, "back_escape")),
         Style::default()
             .fg(theme.accent_success)
             .add_modifier(Modifier::BOLD),
@@ -144,148 +144,292 @@ fn key_cap(key: &str, theme: &ThemePalette) -> Span<'static> {
     )
 }
 
-fn help_rows(app: &App) -> Vec<(&'static str, &'static str)> {
+fn bind(app: &App, action: &str) -> String {
+    app.keybind_label(action)
+}
+
+fn bind_any(app: &App, actions: &[&str], separator: &str) -> String {
+    let mut labels = Vec::new();
+    for action in actions {
+        let label = bind(app, action);
+        if label.is_empty() {
+            continue;
+        }
+        if labels
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(label.as_str()))
+        {
+            continue;
+        }
+        labels.push(label);
+    }
+    labels.join(separator)
+}
+
+fn help_toggle_available(app: &App) -> bool {
+    if matches!(app.view(), View::CommentPresetName | View::CommentEditor) {
+        return false;
+    }
+    if app.view() == View::RepoPicker && app.repo_search_mode() {
+        return false;
+    }
+    if app.view() == View::Issues && app.issue_search_mode() {
+        return false;
+    }
+    if matches!(app.view(), View::LabelPicker | View::AssigneePicker) {
+        return false;
+    }
+    true
+}
+
+fn with_help_hint(app: &App, text: String) -> String {
+    if !help_toggle_available(app) {
+        return text;
+    }
+    format!("{} • ? help", text)
+}
+
+fn help_rows(app: &App) -> Vec<(String, String)> {
+    let move_keys = bind_any(app, &["move_down", "move_up"], " / ");
+    let back_keys = bind_any(app, &["back", "back_escape"], " / ");
+    let pane_keys = bind_any(app, &["focus_left", "focus_right"], "/");
+    let comment_keys = bind_any(app, &["add_comment", "edit_comment", "delete_comment"], "/");
+    let diff_pan_keys = bind_any(app, &["diff_scroll_left", "diff_scroll_right"], " / ");
+
     match app.view() {
         View::RepoPicker => vec![
-            ("j / k", "Move repositories"),
-            ("/", "Search repositories"),
-            ("Enter", "Open selected repository"),
-            ("Ctrl+R", "Rescan repositories"),
-            ("Ctrl+G", "Open repository picker"),
-            ("Ctrl+C", "Quit"),
+            (move_keys, "Move repositories".to_string()),
+            (bind(app, "repo_search"), "Search repositories".to_string()),
+            (bind(app, "submit"), "Open selected repository".to_string()),
+            (bind(app, "rescan_repos"), "Rescan repositories".to_string()),
+            (
+                bind(app, "clear_and_repo_picker"),
+                "Open repository picker".to_string(),
+            ),
+            (bind(app, "quit"), "Quit".to_string()),
         ],
-        View::Issues => vec![
-            ("j / k", "Move issues"),
-            ("Enter", "Open selected item"),
-            ("Tab", "Switch open/closed"),
-            ("1 / 2", "Jump to open/closed tab"),
-            ("a", "Cycle assignee filter"),
-            ("Ctrl+a", "Reset assignee to all"),
-            ("p", "Toggle issues/PR mode"),
-            ("Shift+N", "Create issue"),
-            ("/", "Search with qualifiers"),
-        ],
+        View::Issues => {
+            let mut rows = vec![
+                (move_keys, "Move issues".to_string()),
+                (bind(app, "submit"), "Open selected item".to_string()),
+                (
+                    bind(app, "cycle_issue_filter"),
+                    "Switch open/closed".to_string(),
+                ),
+                (
+                    format!(
+                        "{} / {}",
+                        bind(app, "issue_filter_open"),
+                        bind(app, "issue_filter_closed")
+                    ),
+                    "Jump to open/closed tab".to_string(),
+                ),
+                (
+                    bind(app, "cycle_assignee_filter"),
+                    "Cycle assignee filter".to_string(),
+                ),
+                ("Ctrl+a".to_string(), "Reset assignee to all".to_string()),
+                (
+                    bind(app, "toggle_work_item_mode"),
+                    "Toggle issues/PR mode".to_string(),
+                ),
+                (bind(app, "create_issue"), "Create issue".to_string()),
+                (
+                    bind(app, "issue_search"),
+                    "Search with qualifiers".to_string(),
+                ),
+            ];
+            let reviewing_pr = app.work_item_mode() == crate::app::WorkItemMode::PullRequests
+                || app.selected_issue_row().is_some_and(|issue| issue.is_pr);
+            if reviewing_pr {
+                rows.insert(
+                    8,
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                );
+            }
+            rows
+        }
         View::IssueDetail => {
             let mut rows = vec![
-                ("Ctrl+h/l", "Switch panes"),
-                ("j / k", "Scroll focused pane"),
-                ("Enter", "Open focused pane"),
-                ("c", "Open comments"),
-                ("Shift+N", "Create issue"),
-                ("b or Esc", "Back"),
-                ("o", "Open in browser"),
+                (pane_keys, "Switch panes".to_string()),
+                (move_keys, "Scroll focused pane".to_string()),
+                (bind(app, "submit"), "Open focused pane".to_string()),
+                (bind(app, "open_comments"), "Open comments".to_string()),
+                (bind(app, "create_issue"), "Create issue".to_string()),
+                (back_keys, "Back".to_string()),
+                (bind(app, "open_browser"), "Open in browser".to_string()),
             ];
             if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
-                rows.insert(5, ("Shift+M", "Merge pull request"));
+                rows.insert(
+                    5,
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                );
             }
             rows
         }
         View::IssueComments => {
             let mut rows = vec![
-                ("j / k", "Jump comments"),
-                ("e", "Edit selected comment"),
-                ("x", "Delete selected comment"),
-                ("m", "Add comment"),
-                ("Shift+N", "Create issue"),
-                ("b or Esc", "Back"),
-                ("o", "Open in browser"),
+                (move_keys, "Jump comments".to_string()),
+                (
+                    bind(app, "edit_comment"),
+                    "Edit selected comment".to_string(),
+                ),
+                (
+                    bind(app, "delete_comment"),
+                    "Delete selected comment".to_string(),
+                ),
+                (bind(app, "add_comment"), "Add comment".to_string()),
+                (bind(app, "create_issue"), "Create issue".to_string()),
+                (back_keys, "Back".to_string()),
+                (bind(app, "open_browser"), "Open in browser".to_string()),
             ];
             if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
-                rows.insert(5, ("Shift+M", "Merge pull request"));
+                rows.insert(
+                    5,
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                );
             }
             rows
         }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
                 return vec![
-                    ("Ctrl+h/l", "Switch files/diff pane"),
-                    ("j / k", "Move changed files"),
-                    ("Enter", "Open full-width diff pane"),
-                    ("w", "Toggle file viewed state"),
-                    ("Shift+M", "Merge pull request"),
-                    ("b or Esc", "Back"),
-                    ("o", "Open in browser"),
+                    (pane_keys, "Switch files/diff pane".to_string()),
+                    (move_keys, "Move changed files".to_string()),
+                    (bind(app, "submit"), "Open full-width diff pane".to_string()),
+                    (
+                        bind(app, "toggle_file_viewed"),
+                        "Toggle file viewed state".to_string(),
+                    ),
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
+                    (back_keys, "Back".to_string()),
+                    (bind(app, "open_browser"), "Open in browser".to_string()),
                 ];
             }
             if app.pull_request_diff_expanded() {
                 return vec![
-                    ("Ctrl+h/l", "Switch files/diff pane"),
-                    ("j / k", "Move diff lines"),
-                    ("Enter", "Return to split files+diff"),
-                    ("b or Esc", "Return to split files+diff"),
-                    ("c", "Collapse/expand selected hunk"),
-                    ("[ / ]", "Pan horizontal diff"),
-                    ("0", "Reset horizontal pan"),
-                    ("m/e/x", "Add/edit/delete comment"),
-                    ("Shift+R", "Resolve/reopen thread"),
-                    ("Shift+M", "Merge pull request"),
+                    (pane_keys, "Switch files/diff pane".to_string()),
+                    (move_keys, "Move diff lines".to_string()),
+                    (
+                        bind_any(app, &["submit", "back", "back_escape"], " / "),
+                        "Return to split files+diff".to_string(),
+                    ),
+                    (
+                        bind(app, "collapse_hunk"),
+                        "Collapse/expand selected hunk".to_string(),
+                    ),
+                    (diff_pan_keys, "Pan horizontal diff".to_string()),
+                    (
+                        bind(app, "diff_scroll_reset"),
+                        "Reset horizontal pan".to_string(),
+                    ),
+                    (comment_keys, "Add/edit/delete comment".to_string()),
+                    (
+                        bind(app, "resolve_thread"),
+                        "Resolve/reopen thread".to_string(),
+                    ),
+                    (
+                        bind(app, "merge_pull_request"),
+                        "Merge pull request".to_string(),
+                    ),
                 ];
             }
             vec![
-                ("Ctrl+h/l", "Switch files/diff pane"),
-                ("j / k", "Move diff lines"),
-                ("Enter", "Expand diff to full width"),
-                ("c", "Collapse/expand selected hunk"),
-                ("[ / ]", "Pan horizontal diff"),
-                ("0", "Reset horizontal pan"),
-                ("m/e/x", "Add/edit/delete comment"),
-                ("Shift+R", "Resolve/reopen thread"),
-                ("Shift+M", "Merge pull request"),
+                (pane_keys, "Switch files/diff pane".to_string()),
+                (move_keys, "Move diff lines".to_string()),
+                (bind(app, "submit"), "Expand diff to full width".to_string()),
+                (
+                    bind(app, "collapse_hunk"),
+                    "Collapse/expand selected hunk".to_string(),
+                ),
+                (diff_pan_keys, "Pan horizontal diff".to_string()),
+                (
+                    bind(app, "diff_scroll_reset"),
+                    "Reset horizontal pan".to_string(),
+                ),
+                (comment_keys, "Add/edit/delete comment".to_string()),
+                (
+                    bind(app, "resolve_thread"),
+                    "Resolve/reopen thread".to_string(),
+                ),
+                (
+                    bind(app, "merge_pull_request"),
+                    "Merge pull request".to_string(),
+                ),
             ]
         }
         View::LinkedPicker => vec![
-            ("j / k", "Move linked items"),
-            ("Enter", "Open selected linked item"),
-            ("b or Esc", "Cancel"),
-            ("Ctrl+C", "Quit"),
-            ("?", "Toggle help"),
+            (move_keys, "Move linked items".to_string()),
+            (bind(app, "submit"), "Open selected linked item".to_string()),
+            (back_keys, "Cancel".to_string()),
+            (bind(app, "quit"), "Quit".to_string()),
+            ("?".to_string(), "Toggle help".to_string()),
         ],
         View::LabelPicker | View::AssigneePicker => vec![
-            ("Type", "Filter options"),
-            ("j / k", "Move options"),
-            ("Space", "Toggle option"),
-            ("Enter", "Apply selection"),
-            ("Esc", "Cancel"),
+            ("Type".to_string(), "Filter options".to_string()),
+            (move_keys, "Move options".to_string()),
+            (bind(app, "popup_toggle"), "Toggle option".to_string()),
+            (bind(app, "submit"), "Apply selection".to_string()),
+            (bind(app, "back_escape"), "Cancel".to_string()),
         ],
         View::CommentPresetPicker => vec![
-            ("j / k", "Move presets"),
-            ("Enter", "Select preset"),
-            ("Esc", "Cancel"),
-            ("Ctrl+C", "Quit"),
-            ("?", "Toggle help"),
+            (move_keys, "Move presets".to_string()),
+            (bind(app, "submit"), "Select preset".to_string()),
+            (bind(app, "back_escape"), "Cancel".to_string()),
+            (bind(app, "quit"), "Quit".to_string()),
+            ("?".to_string(), "Toggle help".to_string()),
         ],
         View::CommentPresetName => vec![
-            ("Type", "Preset name"),
-            ("Enter", "Continue"),
-            ("Esc", "Cancel"),
-            ("?", "Toggle help"),
-            ("Ctrl+C", "Quit"),
+            ("Type".to_string(), "Preset name".to_string()),
+            (bind(app, "submit"), "Continue".to_string()),
+            (bind(app, "back_escape"), "Cancel".to_string()),
+            (bind(app, "quit"), "Quit".to_string()),
         ],
         View::CommentEditor => {
             if app.editor_mode() == EditorMode::CreateIssue {
                 return vec![
-                    ("Type", "Edit title/body"),
-                    ("Ctrl+j / Ctrl+k", "Jump body/title"),
-                    ("Tab / Shift+Tab", "Toggle cancel/create"),
-                    ("Enter", "Open/confirm create"),
-                    ("Shift+Enter", "Insert newline in body"),
-                    ("Esc", "Cancel"),
+                    ("Type".to_string(), "Edit title/body".to_string()),
+                    ("Ctrl+j / Ctrl+k".to_string(), "Jump body/title".to_string()),
+                    (
+                        "Tab / Shift+Tab".to_string(),
+                        "Toggle cancel/create".to_string(),
+                    ),
+                    (bind(app, "submit"), "Open/confirm create".to_string()),
+                    (
+                        "Shift+Enter".to_string(),
+                        "Insert newline in body".to_string(),
+                    ),
+                    (bind(app, "back_escape"), "Cancel".to_string()),
                 ];
             }
             vec![
-                ("Type", "Edit body"),
-                ("Enter", "Submit"),
-                ("Shift+Enter", "Insert newline"),
-                ("Esc", "Cancel"),
-                ("?", "Toggle help"),
+                ("Type".to_string(), "Edit body".to_string()),
+                (bind(app, "submit"), "Submit".to_string()),
+                ("Shift+Enter".to_string(), "Insert newline".to_string()),
+                (bind(app, "back_escape"), "Cancel".to_string()),
             ]
         }
         View::RemoteChooser => vec![
-            ("j / k", "Move remotes"),
-            ("Enter", "Select remote"),
-            ("Ctrl+G", "Back to repos"),
-            ("Ctrl+C", "Quit"),
-            ("?", "Toggle help"),
+            (move_keys, "Move remotes".to_string()),
+            (bind(app, "submit"), "Select remote".to_string()),
+            (
+                bind(app, "clear_and_repo_picker"),
+                "Back to repos".to_string(),
+            ),
+            (bind(app, "quit"), "Quit".to_string()),
+            ("?".to_string(), "Toggle help".to_string()),
         ],
     }
 }
@@ -392,129 +536,336 @@ pub(super) fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect 
 }
 
 fn primary_help_text(app: &App) -> String {
+    let move_keys = bind_any(app, &["move_down", "move_up"], "/");
+    let submit = bind(app, "submit");
+    let back_keys = bind_any(app, &["back", "back_escape"], "/");
+    let pane_keys = bind_any(app, &["focus_left", "focus_right"], "/");
+
     match app.view() {
         View::RepoPicker => {
-            "j/k move • / search • Enter select • Ctrl+R rescan • ? help".to_string()
+            if app.repo_search_mode() {
+                return with_help_hint(
+                    app,
+                    format!(
+                        "Search mode • {} keep • {} clear",
+                        submit,
+                        bind(app, "back_escape")
+                    ),
+                );
+            }
+            with_help_hint(
+                app,
+                format!(
+                    "{} move • {} search • {} select • {} rescan",
+                    move_keys,
+                    bind(app, "repo_search"),
+                    submit,
+                    bind(app, "rescan_repos")
+                ),
+            )
         }
-        View::RemoteChooser => "j/k move • Enter select • b/Esc back • ? help".to_string(),
+        View::RemoteChooser => with_help_hint(
+            app,
+            format!(
+                "{} move • {} select • {} repos",
+                move_keys,
+                submit,
+                bind(app, "clear_and_repo_picker")
+            ),
+        ),
         View::Issues => {
             if app.issue_search_mode() {
-                return "Search mode • Enter keep • Esc clear • ? help".to_string();
+                return with_help_hint(
+                    app,
+                    format!(
+                        "Search mode • {} keep • {} clear",
+                        submit,
+                        bind(app, "back_escape")
+                    ),
+                );
             }
             let reviewing_pr = app.work_item_mode() == crate::app::WorkItemMode::PullRequests
                 || app.selected_issue_row().is_some_and(|issue| issue.is_pr);
             if reviewing_pr {
-                return "j/k move • Enter open • Tab open/closed • Shift+N create • Shift+M merge • a assignee • Ctrl+a all • / search • ? help"
-                    .to_string();
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} move • {} open • {} open/closed • {} create • {} merge • {} assignee • {} all • {} search",
+                        move_keys,
+                        submit,
+                        bind(app, "cycle_issue_filter"),
+                        bind(app, "create_issue"),
+                        bind(app, "merge_pull_request"),
+                        bind(app, "cycle_assignee_filter"),
+                        "Ctrl+a",
+                        bind(app, "issue_search")
+                    ),
+                );
             }
-            "j/k move • Enter open • Tab open/closed • Shift+N create • a assignee • Ctrl+a all • / search • ? help"
-                .to_string()
+            with_help_hint(
+                app,
+                format!(
+                    "{} move • {} open • {} open/closed • {} create • {} assignee • {} all • {} search",
+                    move_keys,
+                    submit,
+                    bind(app, "cycle_issue_filter"),
+                    bind(app, "create_issue"),
+                    bind(app, "cycle_assignee_filter"),
+                    "Ctrl+a",
+                    bind(app, "issue_search")
+                ),
+            )
         }
         View::IssueDetail => {
             if app.focus() == Focus::IssueRecentComments {
                 if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
-                    return "j/k recent comments • Enter open review • Shift+M merge • Ctrl+h/l panes • b/Esc back • ? help"
-                        .to_string();
+                    return with_help_hint(
+                        app,
+                        format!(
+                            "{} recent comments • {} open review • {} merge • {} panes • {} back",
+                            move_keys,
+                            submit,
+                            bind(app, "merge_pull_request"),
+                            pane_keys,
+                            back_keys
+                        ),
+                    );
                 }
-                return "j/k recent comments • Enter open comments • Ctrl+h/l panes • b/Esc back • ? help"
-                    .to_string();
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} recent comments • {} open comments • {} panes • {} back",
+                        move_keys, submit, pane_keys, back_keys
+                    ),
+                );
             }
             if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
-                return "Ctrl+h/l panes • Enter open pane • c comments • Shift+M merge • Shift+N create • b/Esc back • ? help"
-                    .to_string();
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} panes • {} open pane • {} comments • {} merge • {} create • {} back",
+                        pane_keys,
+                        submit,
+                        bind(app, "open_comments"),
+                        bind(app, "merge_pull_request"),
+                        bind(app, "create_issue"),
+                        back_keys
+                    ),
+                );
             }
-            "Ctrl+h/l panes • Enter open pane • c comments • Shift+N create • b/Esc back • ? help"
-                .to_string()
+            with_help_hint(
+                app,
+                format!(
+                    "{} panes • {} open pane • {} comments • {} create • {} back",
+                    pane_keys,
+                    submit,
+                    bind(app, "open_comments"),
+                    bind(app, "create_issue"),
+                    back_keys
+                ),
+            )
         }
         View::IssueComments => {
             if app.current_issue_row().is_some_and(|issue| issue.is_pr) {
-                return "j/k comments • e edit • x delete • Shift+M merge • Shift+N create • b/Esc back • ? help"
-                    .to_string();
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} comments • {} edit • {} delete • {} merge • {} create • {} back",
+                        move_keys,
+                        bind(app, "edit_comment"),
+                        bind(app, "delete_comment"),
+                        bind(app, "merge_pull_request"),
+                        bind(app, "create_issue"),
+                        back_keys
+                    ),
+                );
             }
-            "j/k comments • e edit • x delete • Shift+N create • b/Esc back • ? help".to_string()
+            with_help_hint(
+                app,
+                format!(
+                    "{} comments • {} edit • {} delete • {} create • {} back",
+                    move_keys,
+                    bind(app, "edit_comment"),
+                    bind(app, "delete_comment"),
+                    bind(app, "create_issue"),
+                    back_keys
+                ),
+            )
         }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
-                return "j/k files • Enter full diff • Shift+M merge • Ctrl+h/l panes • w viewed • b/Esc back • ? help"
-                    .to_string();
+                return with_help_hint(
+                    app,
+                    format!(
+                        "{} files • {} full diff • {} merge • {} panes • {} viewed • {} back",
+                        move_keys,
+                        submit,
+                        bind(app, "merge_pull_request"),
+                        pane_keys,
+                        bind(app, "toggle_file_viewed"),
+                        back_keys
+                    ),
+                );
             }
             let toggle_hint = if app.pull_request_diff_expanded() {
-                "b/Esc split diff"
+                format!(
+                    "{} split diff",
+                    bind_any(app, &["submit", "back", "back_escape"], "/")
+                )
             } else {
-                "Enter full diff"
+                format!("{} full diff", submit)
             };
-            format!(
-                "j/k diff • {} • c collapse hunk • m add • n/p thread • Shift+R resolve • Shift+M merge • ? help",
-                toggle_hint
+            with_help_hint(
+                app,
+                format!(
+                    "{} diff • {} • {} collapse hunk • {} add • {} thread • {} resolve • {} merge",
+                    move_keys,
+                    toggle_hint,
+                    bind(app, "collapse_hunk"),
+                    bind(app, "add_comment"),
+                    bind_any(app, &["next_line_comment", "prev_line_comment"], "/"),
+                    bind(app, "resolve_thread"),
+                    bind(app, "merge_pull_request")
+                ),
             )
         }
-        View::LinkedPicker => "j/k move • Enter open • Esc cancel • ? help".to_string(),
-        View::LabelPicker | View::AssigneePicker => {
-            "Type filter • j/k move • Space toggle • Enter apply • Esc cancel • ? help".to_string()
-        }
-        View::CommentPresetPicker => "j/k move • Enter select • Esc cancel • ? help".to_string(),
-        View::CommentPresetName => "Type name • Enter next • Esc cancel • ? help".to_string(),
+        View::LinkedPicker => with_help_hint(
+            app,
+            format!(
+                "{} move • {} open • {} cancel",
+                move_keys,
+                submit,
+                bind(app, "back_escape")
+            ),
+        ),
+        View::LabelPicker | View::AssigneePicker => format!(
+            "Type filter • {} move • {} toggle • {} apply • {} cancel",
+            move_keys,
+            bind(app, "popup_toggle"),
+            submit,
+            bind(app, "back_escape")
+        ),
+        View::CommentPresetPicker => with_help_hint(
+            app,
+            format!(
+                "{} move • {} select • {} cancel",
+                move_keys,
+                submit,
+                bind(app, "back_escape")
+            ),
+        ),
+        View::CommentPresetName => format!(
+            "Type name • {} next • {} cancel",
+            submit,
+            bind(app, "back_escape")
+        ),
         View::CommentEditor => {
             if app.editor_mode() == EditorMode::CreateIssue {
-                return "Type title/body • Ctrl+j/k jump fields • Tab switch cancel/create • Enter open/confirm • Shift+Enter newline body • Esc cancel • ? help"
-                    .to_string();
+                return format!(
+                    "Type title/body • Ctrl+j/k jump fields • Tab switch cancel/create • {} open/confirm • Shift+Enter newline body • {} cancel",
+                    submit,
+                    bind(app, "back_escape")
+                );
             }
-            "Type text • Enter submit • Shift+Enter newline • Esc cancel • ? help".to_string()
+            format!(
+                "Type text • {} submit • Shift+Enter newline • {} cancel",
+                submit,
+                bind(app, "back_escape")
+            )
         }
     }
 }
 
 fn help_text(app: &App) -> String {
+    let move_keys = bind_any(app, &["move_down", "move_up"], "/");
+    let pane_keys = bind_any(app, &["focus_left", "focus_right"], "/");
+    let submit = bind(app, "submit");
+    let back_keys = bind_any(app, &["back", "back_escape"], "/");
+
     match app.view() {
         View::RepoPicker => {
             if app.repo_search_mode() {
-                return "Search repos: type query • Enter keep • Esc clear • Ctrl+u clear"
-                    .to_string();
+                return format!(
+                    "Search repos: type query • {} keep • {} clear • Ctrl+u clear",
+                    submit,
+                    bind(app, "back_escape")
+                );
             }
-            "Ctrl+R rescan • j/k move • gg/G top/bottom • / search • Enter select • Ctrl+C quit"
-                .to_string()
+            format!(
+                "{} rescan • {} move • gg/G top/bottom • {} search • {} select • {} quit",
+                bind(app, "rescan_repos"),
+                move_keys,
+                bind(app, "repo_search"),
+                submit,
+                bind(app, "quit")
+            )
         }
         View::RemoteChooser => {
-            "j/k move • gg/G top/bottom • Enter select • Ctrl+G repos • Ctrl+C quit".to_string()
+            format!(
+                "{} move • gg/G top/bottom • {} select • {} repos • {} quit",
+                move_keys,
+                submit,
+                bind(app, "clear_and_repo_picker"),
+                bind(app, "quit")
+            )
         }
         View::Issues => {
             if app.issue_search_mode() {
-                return "Search: type terms/qualifiers (is:, label:, assignee:, #num) • Enter keep • Esc clear • Ctrl+u clear"
-                    .to_string();
+                return format!(
+                    "Search: type terms/qualifiers (is:, label:, assignee:, #num) • {} keep • {} clear • Ctrl+u clear",
+                    submit,
+                    bind(app, "back_escape")
+                );
             }
             let selected_is_pr = app.selected_issue_row().is_some_and(|issue| issue.is_pr);
             let reviewing_pr =
                 selected_is_pr || app.work_item_mode() == crate::app::WorkItemMode::PullRequests;
             let mut parts = vec![
-                "j/k move",
-                "Enter open",
-                "/ search",
-                "p issues/prs",
-                "1/2 tabs",
-                "Tab open/closed",
-                "Shift+N create issue",
-                "a assignee",
-                "Ctrl+a all assignees",
-                "l labels",
-                "Shift+A assignees",
-                "m comment",
-                "r refresh",
-                "o browser",
-                "Ctrl+C quit",
+                format!("{} move", move_keys),
+                format!("{} open", submit),
+                format!("{} search", bind(app, "issue_search")),
+                format!("{} issues/prs", bind(app, "toggle_work_item_mode")),
+                format!(
+                    "{}/{} tabs",
+                    bind(app, "issue_filter_open"),
+                    bind(app, "issue_filter_closed")
+                ),
+                format!("{} open/closed", bind(app, "cycle_issue_filter")),
+                format!("{} create issue", bind(app, "create_issue")),
+                format!("{} assignee", bind(app, "cycle_assignee_filter")),
+                "Ctrl+a all assignees".to_string(),
+                format!("{} labels", bind(app, "edit_labels")),
+                format!("{} assignees", bind(app, "edit_assignees")),
+                format!("{} comment", bind(app, "add_comment")),
+                format!("{} refresh", bind(app, "refresh")),
+                format!("{} browser", bind(app, "open_browser")),
+                format!("{} quit", bind(app, "quit")),
             ];
             if reviewing_pr {
-                parts.insert(10, "u reopen");
-                parts.insert(11, "dd close");
-                parts.insert(12, "v checkout");
-                parts.insert(13, "Shift+M merge");
-                parts.insert(14, "Shift+P linked issue (TUI)");
-                parts.insert(15, "Shift+O linked issue (web)");
+                parts.insert(10, format!("{} reopen", bind(app, "reopen_issue")));
+                parts.insert(11, "dd close".to_string());
+                parts.insert(12, format!("{} checkout", bind(app, "checkout_pr")));
+                parts.insert(14, format!("{} merge", bind(app, "merge_pull_request")));
+                parts.insert(
+                    15,
+                    format!("{} linked issue (TUI)", bind(app, "open_linked_pr_tui")),
+                );
+                parts.insert(
+                    16,
+                    format!("{} linked issue (web)", bind(app, "open_linked_pr_browser")),
+                );
             } else {
-                parts.insert(10, "u reopen");
-                parts.insert(11, "dd close");
+                parts.insert(10, format!("{} reopen", bind(app, "reopen_issue")));
+                parts.insert(11, "dd close".to_string());
                 if app.selected_issue_has_known_linked_pr() {
-                    parts.insert(12, "Shift+P linked PR (TUI)");
-                    parts.insert(13, "Shift+O linked PR (web)");
+                    parts.insert(
+                        12,
+                        format!("{} linked PR (TUI)", bind(app, "open_linked_pr_tui")),
+                    );
+                    parts.insert(
+                        13,
+                        format!("{} linked PR (web)", bind(app, "open_linked_pr_browser")),
+                    );
                 }
             }
             parts.join(" • ")
@@ -523,85 +874,249 @@ fn help_text(app: &App) -> String {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
                 let linked_hint = if app.selected_pull_request_has_known_linked_issue() {
-                    "Shift+P linked issue (TUI) • Shift+O linked issue (web)"
+                    format!(
+                        "{} linked issue (TUI) • {} linked issue (web)",
+                        bind(app, "open_linked_pr_tui"),
+                        bind(app, "open_linked_pr_browser")
+                    )
                 } else {
-                    "Shift+P find/open linked issue • Shift+O open linked issue (web)"
+                    format!(
+                        "{} find/open linked issue • {} open linked issue (web)",
+                        bind(app, "open_linked_pr_tui"),
+                        bind(app, "open_linked_pr_browser")
+                    )
                 };
-                return "Ctrl+h/l pane • j/k scroll • Enter on description opens comments • Enter on changes opens review • c comments • Shift+N create issue • h/l side in review • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+M merge • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
-                    .replace(
-                        "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
-                        linked_hint,
-                    );
+                return format!(
+                    "{} pane • {} scroll • {} on description opens comments • {} on changes opens review • {} comments • {} create issue • {}/{} side in review • {} comment • {} labels • {} assignees • {} reopen • dd close • {} checkout • {} merge • {} • {} refresh • {} back • {} quit",
+                    pane_keys,
+                    move_keys,
+                    submit,
+                    submit,
+                    bind(app, "open_comments"),
+                    bind(app, "create_issue"),
+                    bind(app, "review_side_left"),
+                    bind(app, "review_side_right"),
+                    bind(app, "add_comment"),
+                    bind(app, "edit_labels"),
+                    bind(app, "edit_assignees"),
+                    bind(app, "reopen_issue"),
+                    bind(app, "checkout_pr"),
+                    bind(app, "merge_pull_request"),
+                    linked_hint,
+                    bind(app, "refresh"),
+                    bind(app, "back_escape"),
+                    bind(app, "quit")
+                );
             }
             if app.selected_issue_has_known_linked_pr() {
-                return "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • Ctrl+C quit"
-                    .to_string();
+                return format!(
+                    "{} pane • {} scroll • {} on right pane opens comments • {} comments • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} linked PR (TUI) • {} linked PR (web) • {} refresh • {} back • {} quit",
+                    pane_keys,
+                    move_keys,
+                    submit,
+                    bind(app, "open_comments"),
+                    bind(app, "create_issue"),
+                    bind(app, "add_comment"),
+                    bind(app, "edit_labels"),
+                    bind(app, "edit_assignees"),
+                    bind(app, "reopen_issue"),
+                    bind(app, "open_linked_pr_tui"),
+                    bind(app, "open_linked_pr_browser"),
+                    bind(app, "refresh"),
+                    bind(app, "back_escape"),
+                    bind(app, "quit")
+                );
             }
-            "Ctrl+h/l pane • j/k scroll • Enter on right pane opens comments • c comments • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • Ctrl+C quit"
-                .to_string()
+            format!(
+                "{} pane • {} scroll • {} on right pane opens comments • {} comments • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} refresh • {} back • {} quit",
+                pane_keys,
+                move_keys,
+                submit,
+                bind(app, "open_comments"),
+                bind(app, "create_issue"),
+                bind(app, "add_comment"),
+                bind(app, "edit_labels"),
+                bind(app, "edit_assignees"),
+                bind(app, "reopen_issue"),
+                bind(app, "refresh"),
+                bind(app, "back_escape"),
+                bind(app, "quit")
+            )
         }
         View::IssueComments => {
             let is_pr = app.current_issue_row().is_some_and(|issue| issue.is_pr);
             if is_pr {
                 let linked_hint = if app.selected_pull_request_has_known_linked_issue() {
-                    "Shift+P linked issue (TUI) • Shift+O linked issue (web)"
+                    format!(
+                        "{} linked issue (TUI) • {} linked issue (web)",
+                        bind(app, "open_linked_pr_tui"),
+                        bind(app, "open_linked_pr_browser")
+                    )
                 } else {
-                    "Shift+P find/open linked issue • Shift+O open linked issue (web)"
+                    format!(
+                        "{} find/open linked issue • {} open linked issue (web)",
+                        bind(app, "open_linked_pr_tui"),
+                        bind(app, "open_linked_pr_browser")
+                    )
                 };
-                return "j/k comments • e edit • x delete • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • v checkout • Shift+M merge • Shift+P linked issue (TUI) • Shift+O linked issue (web) • r refresh • Esc back • Ctrl+C quit"
-                    .replace(
-                        "Shift+P linked issue (TUI) • Shift+O linked issue (web)",
-                        linked_hint,
-                    );
+                return format!(
+                    "{} comments • {} edit • {} delete • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} checkout • {} merge • {} • {} refresh • {} back • {} quit",
+                    move_keys,
+                    bind(app, "edit_comment"),
+                    bind(app, "delete_comment"),
+                    bind(app, "create_issue"),
+                    bind(app, "add_comment"),
+                    bind(app, "edit_labels"),
+                    bind(app, "edit_assignees"),
+                    bind(app, "reopen_issue"),
+                    bind(app, "checkout_pr"),
+                    bind(app, "merge_pull_request"),
+                    linked_hint,
+                    bind(app, "refresh"),
+                    bind(app, "back_escape"),
+                    bind(app, "quit")
+                );
             }
             if app.selected_issue_has_known_linked_pr() {
-                return "j/k comments • e edit • x delete • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • Shift+P linked PR (TUI) • Shift+O linked PR (web) • r refresh • Esc back • Ctrl+C quit"
-                    .to_string();
+                return format!(
+                    "{} comments • {} edit • {} delete • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} linked PR (TUI) • {} linked PR (web) • {} refresh • {} back • {} quit",
+                    move_keys,
+                    bind(app, "edit_comment"),
+                    bind(app, "delete_comment"),
+                    bind(app, "create_issue"),
+                    bind(app, "add_comment"),
+                    bind(app, "edit_labels"),
+                    bind(app, "edit_assignees"),
+                    bind(app, "reopen_issue"),
+                    bind(app, "open_linked_pr_tui"),
+                    bind(app, "open_linked_pr_browser"),
+                    bind(app, "refresh"),
+                    bind(app, "back_escape"),
+                    bind(app, "quit")
+                );
             }
-            "j/k comments • e edit • x delete • Shift+N create issue • m comment • l labels • Shift+A assignees • u reopen • dd close • r refresh • Esc back • Ctrl+C quit"
-                .to_string()
+            format!(
+                "{} comments • {} edit • {} delete • {} create issue • {} comment • {} labels • {} assignees • {} reopen • dd close • {} refresh • {} back • {} quit",
+                move_keys,
+                bind(app, "edit_comment"),
+                bind(app, "delete_comment"),
+                bind(app, "create_issue"),
+                bind(app, "add_comment"),
+                bind(app, "edit_labels"),
+                bind(app, "edit_assignees"),
+                bind(app, "reopen_issue"),
+                bind(app, "refresh"),
+                bind(app, "back_escape"),
+                bind(app, "quit")
+            )
         }
         View::PullRequestFiles => {
             if app.pull_request_review_focus() == PullRequestReviewFocus::Files {
-                return "Ctrl+h/l pane • j/k move file • Enter full diff • w viewed • r refresh • v checkout • Shift+M merge • Esc/back"
-                    .to_string();
+                return format!(
+                    "{} pane • {} move file • {} full diff • {} viewed • {} refresh • {} checkout • {} merge • {}",
+                    pane_keys,
+                    move_keys,
+                    submit,
+                    bind(app, "toggle_file_viewed"),
+                    bind(app, "refresh"),
+                    bind(app, "checkout_pr"),
+                    bind(app, "merge_pull_request"),
+                    back_keys
+                );
             }
             let toggle_hint = if app.pull_request_diff_expanded() {
-                "Enter/b/Esc split diff"
+                format!(
+                    "{} split diff",
+                    bind_any(app, &["submit", "back", "back_escape"], "/")
+                )
             } else {
-                "Enter full diff"
+                format!("{} full diff", submit)
             };
             format!(
-                "Ctrl+h/l pane • j/k move line • {} • c collapse hunk • [/ ] pan diff • 0 reset pan • h/l old/new side • Shift+V visual range • m add • e edit • x delete • Shift+R resolve/reopen • n/p cycle line comments • r refresh • v checkout • Shift+M merge • Ctrl+C quit",
-                toggle_hint
+                "{} pane • {} move line • {} • {} collapse hunk • {}/{} pan diff • {} reset pan • {}/{} old/new side • {} visual range • {} add • {} edit • {} delete • {} resolve/reopen • {}/{} cycle line comments • {} refresh • {} checkout • {} merge • {} quit",
+                pane_keys,
+                move_keys,
+                toggle_hint,
+                bind(app, "collapse_hunk"),
+                bind(app, "diff_scroll_left"),
+                bind(app, "diff_scroll_right"),
+                bind(app, "diff_scroll_reset"),
+                bind(app, "review_side_left"),
+                bind(app, "review_side_right"),
+                bind(app, "visual_mode"),
+                bind(app, "add_comment"),
+                bind(app, "edit_comment"),
+                bind(app, "delete_comment"),
+                bind(app, "resolve_thread"),
+                bind(app, "next_line_comment"),
+                bind(app, "prev_line_comment"),
+                bind(app, "refresh"),
+                bind(app, "checkout_pr"),
+                bind(app, "merge_pull_request"),
+                bind(app, "quit")
             )
         }
         View::LinkedPicker => {
-            "j/k move • Enter open linked item • b/Esc cancel • Ctrl+C quit".to_string()
+            format!(
+                "{} move • {} open linked item • {} cancel • {} quit",
+                move_keys,
+                submit,
+                back_keys,
+                bind(app, "quit")
+            )
         }
         View::LabelPicker => {
-            "Type to filter • j/k move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
-                .to_string()
+            format!(
+                "Type to filter • {} move • {} toggle • {} apply • Ctrl+u clear • {} cancel",
+                move_keys,
+                bind(app, "popup_toggle"),
+                submit,
+                bind(app, "back_escape")
+            )
         }
         View::AssigneePicker => {
-            "Type to filter • j/k move • space toggle • Enter apply • Ctrl+u clear • Esc cancel"
-                .to_string()
+            format!(
+                "Type to filter • {} move • {} toggle • {} apply • Ctrl+u clear • {} cancel",
+                move_keys,
+                bind(app, "popup_toggle"),
+                submit,
+                bind(app, "back_escape")
+            )
         }
         View::CommentPresetPicker => {
-            "j/k move • gg/G top/bottom • Enter select • Esc cancel • Ctrl+C quit".to_string()
+            format!(
+                "{} move • gg/G top/bottom • {} select • {} cancel • {} quit",
+                move_keys,
+                submit,
+                bind(app, "back_escape"),
+                bind(app, "quit")
+            )
         }
-        View::CommentPresetName => "Type name • Enter next • Esc cancel".to_string(),
+        View::CommentPresetName => format!(
+            "Type name • {} next • {} cancel",
+            submit,
+            bind(app, "back_escape")
+        ),
         View::CommentEditor => {
             if app.editor_mode() == EditorMode::CreateIssue {
-                return "Type title/body • Ctrl+j/k jump fields • Tab switch cancel/create • Enter open/confirm • Shift+Enter newline (body) • Esc cancel"
-                    .to_string();
+                return format!(
+                    "Type title/body • Ctrl+j/k jump fields • Tab switch cancel/create • {} open/confirm • Shift+Enter newline (body) • {} cancel",
+                    submit,
+                    bind(app, "back_escape")
+                );
             }
             if app.editor_mode() == EditorMode::AddPreset {
-                return "Type preset body • Enter save • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
-                    .to_string();
+                return format!(
+                    "Type preset body • {} save • Shift+Enter newline (Ctrl+j fallback) • {} cancel",
+                    submit,
+                    bind(app, "back_escape")
+                );
             }
-            "Type message • Enter submit • Shift+Enter newline (Ctrl+j fallback) • Esc cancel"
-                .to_string()
+            format!(
+                "Type message • {} submit • Shift+Enter newline (Ctrl+j fallback) • {} cancel",
+                submit,
+                bind(app, "back_escape")
+            )
         }
     }
 }
