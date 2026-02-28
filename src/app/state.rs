@@ -1,4 +1,5 @@
 use super::*;
+use std::time::{Duration, Instant};
 
 impl App {
     pub fn should_quit(&self) -> bool {
@@ -120,6 +121,32 @@ impl App {
 
     pub fn set_status(&mut self, status: impl Into<String>) {
         self.status = status.into();
+        self.status_expires_at = None;
+    }
+
+    pub fn set_transient_status(&mut self, status: impl Into<String>, duration: Duration) {
+        self.status = status.into();
+        if self.status.is_empty() {
+            self.status_expires_at = None;
+            return;
+        }
+        self.status_expires_at = Some(Instant::now() + duration);
+    }
+
+    pub fn clear_status_if_expired(&mut self) {
+        self.clear_status_if_expired_at(Instant::now());
+    }
+
+    pub fn clear_status_if_expired_at(&mut self, now: Instant) {
+        let expires_at = match self.status_expires_at {
+            Some(expires_at) => expires_at,
+            None => return,
+        };
+        if now < expires_at {
+            return;
+        }
+        self.status.clear();
+        self.status_expires_at = None;
     }
 
     pub fn set_scanning(&mut self, scanning: bool) {

@@ -1,5 +1,6 @@
 use super::main_action_utils::*;
 use super::*;
+use std::time::Duration;
 
 pub(super) use super::main_action_utils::issue_url;
 
@@ -81,7 +82,9 @@ pub(super) fn handle_actions(
             if let Some(url) = issue_url(app) {
                 if let Err(error) = super::main_linked_actions::open_url(&url) {
                     app.set_status(format!("Open failed: {}", error));
+                    return Ok(());
                 }
+                app.set_transient_status("Opened in browser".to_string(), Duration::from_secs(2));
             } else {
                 app.set_status("No issue selected".to_string());
             }

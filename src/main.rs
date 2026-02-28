@@ -292,6 +292,7 @@ fn run_app(
             &mut last_issue_poll,
             &mut last_comment_poll,
         )?;
+        app.clear_status_if_expired();
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if app.should_quit() {

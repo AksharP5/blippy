@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -563,6 +564,7 @@ pub struct App {
     assignee_filter: AssigneeFilter,
     search: SearchState,
     status: String,
+    status_expires_at: Option<Instant>,
     sync: SyncState,
     repo_label_colors: HashMap<String, String>,
     interaction: InteractionState,
@@ -595,6 +597,7 @@ impl App {
             assignee_filter: AssigneeFilter::All,
             search: SearchState::default(),
             status: String::new(),
+            status_expires_at: None,
             sync: SyncState::default(),
             repo_label_colors: HashMap::new(),
             interaction: InteractionState::default(),

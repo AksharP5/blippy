@@ -500,3 +500,27 @@ fn linked_picker_origin_restores_pull_request_context_on_back() {
     assert_eq!(app.work_item_mode(), WorkItemMode::PullRequests);
     assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(9));
 }
+
+#[test]
+fn transient_status_clears_after_expiry() {
+    let mut app = App::new(Config::default());
+
+    app.set_transient_status(
+        "Opened in browser".to_string(),
+        std::time::Duration::from_millis(0),
+    );
+    assert_eq!(app.status(), "Opened in browser");
+
+    app.clear_status_if_expired();
+    assert_eq!(app.status(), "");
+}
+
+#[test]
+fn persistent_status_does_not_clear_from_expiry_check() {
+    let mut app = App::new(Config::default());
+
+    app.set_status("Sync failed".to_string());
+    app.clear_status_if_expired();
+
+    assert_eq!(app.status(), "Sync failed");
+}
