@@ -1,6 +1,8 @@
 use super::*;
 
 pub(super) fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, theme: &ThemePalette) {
+    frame.render_widget(Clear, area);
+
     let (mode, mode_color) = mode_meta(app, theme);
     let sync = sync_state_label(app);
     let status = app.status();

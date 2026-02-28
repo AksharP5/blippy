@@ -98,6 +98,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
     app.clear_mouse_regions();
 
+    frame.render_widget(Clear, area);
+
     // Clear background
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.bg_app)),

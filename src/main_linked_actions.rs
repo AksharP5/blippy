@@ -519,6 +519,7 @@ pub(super) fn open_url(url: &str) -> Result<()> {
 
 pub(super) fn run_silent_command(command: &mut std::process::Command) -> Result<()> {
     let status = command
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()?;
