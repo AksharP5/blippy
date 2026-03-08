@@ -195,10 +195,12 @@ impl App {
             }
             KeyCode::Char('N')
                 if key.modifiers.contains(KeyModifiers::SHIFT)
-                    && matches!(
-                        self.view,
-                        View::Issues | View::IssueDetail | View::IssueComments
-                    ) =>
+                    && ((self.view == View::Issues
+                        && self.work_item_mode == WorkItemMode::Issues)
+                        || (self.view == View::IssueDetail
+                            && self.current_issue_row().is_some_and(|issue| !issue.is_pr))
+                        || (self.view == View::IssueComments
+                            && self.current_issue_row().is_some_and(|issue| !issue.is_pr))) =>
             {
                 self.interaction.action = Some(AppAction::CreateIssue);
             }

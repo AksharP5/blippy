@@ -328,6 +328,62 @@ fn shift_n_triggers_create_issue_action() {
 }
 
 #[test]
+fn uppercase_n_without_shift_modifier_still_triggers_create_issue_action() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::NONE));
+
+    assert_eq!(app.take_action(), Some(AppAction::CreateIssue));
+}
+
+#[test]
+fn shift_n_does_not_trigger_create_issue_action_in_pull_request_list_mode() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+
+    assert_eq!(app.take_action(), None);
+}
+
+#[test]
+fn uppercase_n_without_shift_does_not_trigger_create_issue_action_in_pull_request_list_mode() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::NONE));
+
+    assert_eq!(app.take_action(), None);
+}
+
+#[test]
+fn shift_n_does_not_trigger_create_issue_action_in_pull_request_detail_view() {
+    let mut app = App::new(Config::default());
+    app.set_issues(vec![IssueRow {
+        id: 8,
+        repo_id: 1,
+        number: 88,
+        state: "open".to_string(),
+        title: "PR".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+    app.set_current_issue(8, 88);
+    app.set_view(View::IssueDetail);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+
+    assert_eq!(app.take_action(), None);
+}
+
+#[test]
 fn diff_horizontal_scroll_uses_keyboard_and_mouse() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);

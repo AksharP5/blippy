@@ -15,8 +15,15 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 - Toggle between issues and pull requests from the same list view
 - Open/closed tabs and assignee filtering
+- Distinguishes merged pull requests from closed pull requests
 - Fast list navigation with keyboard-first controls
 - Issue and PR detail views with context-aware panes
+
+## Issue Creation in TUI
+
+- Create issues directly in the terminal from issue contexts
+- Title/body editor with confirmation dialog before submission
+- Automatically navigates to the newly created issue after success
 
 ## Linked Issue/PR Navigation
 
@@ -53,7 +60,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Repository search by owner/repo/path/remote
 - Issue/PR search with GitHub-style qualifiers
 - Supported qualifiers include:
-  - `is:open`, `is:closed`
+  - `is:open`, `is:closed`, `is:merged`
   - `label:<name>`
   - `assignee:<user>`, `assignee:none`
   - `#<number>`

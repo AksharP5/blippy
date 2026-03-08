@@ -32,10 +32,9 @@ Search mode:
 - `a`: Cycle assignee filter
 - `Ctrl+a`: Reset assignee filter to all
 - `/`: Start issue/PR search
-- `Shift+N`: Create issue
+- `Shift+N`: Create issue (Issues mode only)
 - `r`: Refresh list
 - `m`: Add comment
-- `Shift+N`: Create issue
 - `l`: Edit labels
 - `Shift+A`: Edit assignees
 - `u`: Reopen selected closed item
@@ -57,6 +56,7 @@ Search mode:
 - `Ctrl+h` / `Ctrl+l`: Switch focus between description and recent comments
 - `Enter`: Open focused pane action (comments or PR review when applicable)
 - `c`: Open full comments view
+- `Shift+N`: Create issue (issue detail only)
 - `m`: Add comment
 - `l`: Edit labels
 - `Shift+A`: Edit assignees
@@ -73,7 +73,7 @@ Search mode:
 
 - `j` / `k`: Move between comments
 - `m`: Add comment
-- `Shift+N`: Create issue
+- `Shift+N`: Create issue (issue comments only)
 - `e`: Edit selected comment
 - `x`: Delete selected comment
 - `l`: Edit labels
@@ -135,7 +135,7 @@ Search mode:
 
 ## Text Editors (comment body / preset body)
 
-- `Enter`: Submit
+- `Enter`: Submit (or open/confirm create-issue dialog)
 - `Ctrl+j` / `Ctrl+k`: Switch body/title field (create issue)
 - `Tab` / `Shift+Tab`: Switch cancel/create in create-issue confirmation
 - `Shift+Enter` or `Alt+Enter`: Insert newline
@@ -144,7 +144,7 @@ Search mode:
 
 ## Search Qualifiers
 
-- `is:open`, `is:closed`
+- `is:open`, `is:closed`, `is:merged`
 - `label:<name>`
 - `assignee:<user>`
 - `assignee:none`

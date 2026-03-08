@@ -302,6 +302,16 @@ impl Keybinds {
     }
 
     pub fn remap_key(&self, key: KeyEvent) -> Option<KeyEvent> {
+        if key.modifiers.is_empty()
+            && let KeyCode::Char(ch) = key.code
+            && ch.is_ascii_uppercase()
+        {
+            let shifted = format!("shift+{}", ch.to_ascii_lowercase());
+            if let Some(mapped) = self.remap.get(shifted.as_str()) {
+                return Some(KeyEvent::new(mapped.code, mapped.modifiers));
+            }
+        }
+
         let normalized = normalize_event(key);
         if let Some(mapped) = self.remap.get(normalized.as_str()) {
             return Some(KeyEvent::new(mapped.code, mapped.modifiers));
@@ -548,6 +558,18 @@ mod tests {
         let keybinds = Keybinds::from_overrides(&overrides);
 
         assert_eq!(keybinds.binding_label("open_browser"), "Ctrl+O");
+    }
+
+    #[test]
+    fn remap_key_treats_uppercase_letter_without_shift_as_shift_binding() {
+        let keybinds = Keybinds::from_overrides(&HashMap::new());
+
+        let remapped = keybinds
+            .remap_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::NONE))
+            .expect("remapped key");
+
+        assert_eq!(remapped.code, KeyCode::Char('N'));
+        assert_eq!(remapped.modifiers, KeyModifiers::SHIFT);
     }
 
     #[test]
