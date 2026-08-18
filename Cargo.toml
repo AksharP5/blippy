@@ -14,7 +14,7 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 keyring = "4.1"
 rpassword = "7.5"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0"
 tokio = { version = "1.39", features = ["rt-multi-thread", "macros", "time"] }
