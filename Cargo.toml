@@ -7,13 +7,13 @@ homepage = "https://github.com/AksharP5/blippy"
 repository = "https://github.com/AksharP5/blippy"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = "1.0.103"
 crossterm = "0.29"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
-keyring = "2.3"
-rpassword = "7.3"
+keyring = "4.1"
+rpassword = "7.5"
 rusqlite = { version = "0.31", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0"
