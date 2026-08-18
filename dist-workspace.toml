@@ -15,9 +15,9 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msv
 install-path = "CARGO_HOME"
 # Where to host releases
 hosting = "github"
-# The generated npm job in release.yml uses npm trusted publishing.
-# Regenerating release.yml requires restoring that OIDC customization.
-publish-jobs = ["homebrew", "npm"]
+# Use a custom npm job because the built-in publisher requires NPM_TOKEN.
+publish-jobs = ["homebrew", "./publish-npm"]
+github-custom-job-permissions = { "publish-npm" = { contents = "read", "id-token" = "write" } }
 # Homebrew tap to push formula updates to
 tap = "AksharP5/homebrew-tap"
 # Archive formats for generated bundles
