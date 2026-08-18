@@ -4,8 +4,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    versioning-strategy: lockfile-only
     groups:
       compatible-updates:
+        patterns:
+          - "*"
         update-types:
           - minor
           - patch
