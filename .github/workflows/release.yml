@@ -327,6 +327,9 @@ jobs:
       - plan
       - host
     runs-on: "ubuntu-22.04"
+    permissions:
+      contents: read
+      id-token: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PLAN: ${{ needs.plan.outputs.val }}
@@ -338,17 +341,16 @@ jobs:
           pattern: artifacts-*
           path: npm/
           merge-multiple: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '20.x'
+          node-version: '24.x'
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
       - run: |
           for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith("-npm-package.tar.gz")] | any)'); do
             pkg=$(echo "$release" | jq '.artifacts[] | select(endswith("-npm-package.tar.gz"))' --raw-output)
             npm publish --access public "./npm/${pkg}"
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   announce:
     needs:
