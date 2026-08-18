@@ -298,6 +298,7 @@ impl App {
                     return true;
                 }
             }
+            KeyCode::Char(' ') => return false,
             KeyCode::Char(ch)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
             {

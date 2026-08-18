@@ -243,6 +243,40 @@ fn assignee_picker_enter_removes_highlighted_when_already_selected() {
 }
 
 #[test]
+fn label_picker_space_toggles_highlighted_option() {
+    let mut app = App::new(Config::default());
+    app.open_label_picker(
+        View::Issues,
+        vec!["bug".to_string(), "docs".to_string()],
+        "",
+    );
+
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+    assert_eq!(app.label_query(), "");
+    assert_eq!(app.selected_label_option(), 1);
+    assert_eq!(app.selected_labels(), vec!["docs".to_string()]);
+}
+
+#[test]
+fn assignee_picker_space_toggles_highlighted_option() {
+    let mut app = App::new(Config::default());
+    app.open_assignee_picker(
+        View::Issues,
+        vec!["alex".to_string(), "sam".to_string()],
+        "",
+    );
+
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+    assert_eq!(app.assignee_query(), "");
+    assert_eq!(app.selected_assignee_option(), 1);
+    assert_eq!(app.selected_assignees(), vec!["sam".to_string()]);
+}
+
+#[test]
 fn label_picker_type_filter_can_match_c_prefix() {
     let mut app = App::new(Config::default());
     app.open_label_picker(
