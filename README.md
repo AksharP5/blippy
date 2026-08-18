@@ -57,6 +57,7 @@ cargo install --git https://github.com/AksharP5/blippy
 ## What You Can Do
 
 - Browse and manage issues and pull requests
+- Copy repository, issue, and pull request URLs to the system clipboard
 - Create issues from the TUI with a confirmation step
 - Open linked issues/PRs in TUI or browser
 - Review PR diffs with inline comments and thread resolution

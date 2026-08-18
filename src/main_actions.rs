@@ -6,6 +6,7 @@ pub(super) use super::main_action_utils::issue_url;
 
 pub(super) fn handle_actions(
     app: &mut App,
+    clipboard: &mut crate::clipboard::SystemClipboard,
     conn: &rusqlite::Connection,
     token: &str,
     event_tx: Sender<AppEvent>,
@@ -88,6 +89,9 @@ pub(super) fn handle_actions(
             } else {
                 app.set_status("No issue selected".to_string());
             }
+        }
+        AppAction::CopyUrl => {
+            copy_selected_url(app, |url| clipboard.set_text(url));
         }
         AppAction::CheckoutPullRequest => {
             checkout_pull_request(app)?;
@@ -307,4 +311,21 @@ pub(super) fn handle_actions(
         }
     }
     Ok(())
+}
+
+pub(super) fn copy_selected_url(app: &mut App, set_text: impl FnOnce(&str) -> Result<()>) {
+    let url = match selected_url(app) {
+        Some(url) => url,
+        None => {
+            app.set_status("No URL available".to_string());
+            return;
+        }
+    };
+
+    if let Err(error) = set_text(&url) {
+        app.set_status(format!("Copy failed: {}", error));
+        return;
+    }
+
+    app.set_transient_status("URL copied".to_string(), Duration::from_secs(2));
 }

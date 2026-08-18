@@ -186,6 +186,11 @@ pub const BINDING_SPECS: &[BindingSpec] = &[
         description: "Open issue/PR in browser",
     },
     BindingSpec {
+        action: "copy_url",
+        default: "y",
+        description: "Copy repository, issue, or PR URL",
+    },
+    BindingSpec {
         action: "open_linked_pr_browser",
         default: "shift+o",
         description: "Open linked PR in browser",

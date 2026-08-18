@@ -15,6 +15,7 @@ blippy is keyboard-first. Mouse/trackpad support exists, but it can be finicky a
 
 - `/`: Start repository search
 - `Enter`: Open selected repository
+- `y`: Copy selected repository URL
 - `Ctrl+r`: Rescan repositories
 
 Search mode:
@@ -41,6 +42,7 @@ Search mode:
 - `dd`: Close selected item via preset flow
 - `Shift+M`: Merge selected pull request
 - `o`: Open selected item in browser
+- `y`: Copy selected item URL
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
 - `v`: Checkout selected PR locally (`gh pr checkout`)
@@ -64,6 +66,7 @@ Search mode:
 - `dd`: Close selected item via preset flow
 - `Shift+M`: Merge pull request
 - `o`: Open in browser
+- `y`: Copy issue/PR URL
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
 - `r`: Refresh issue/comments
@@ -82,6 +85,7 @@ Search mode:
 - `dd`: Close selected item via preset flow
 - `Shift+M`: Merge pull request
 - `o`: Open in browser
+- `y`: Copy issue/PR URL
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
 - `r`: Refresh issue/comments
@@ -96,6 +100,7 @@ Search mode:
 - `r`: Refresh PR data
 - `v`: Checkout PR locally
 - `Shift+M`: Merge pull request
+- `y`: Copy pull request URL
 - `b` or `Esc`: Back (or return to split diff if expanded)
 
 ## Pull Request Review View (`Diff`)
@@ -116,6 +121,7 @@ Search mode:
 - `r`: Refresh PR data
 - `v`: Checkout PR locally
 - `Shift+M`: Merge pull request
+- `y`: Copy pull request URL
 - `b` or `Esc`: Return to split diff (if expanded) or back
 
 ## Label / Assignee Pickers
@@ -191,6 +197,7 @@ All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or unde
 | `move_up` | `k` |
 | `move_down` | `j` |
 | `open_browser` | `o` |
+| `copy_url` | `y` |
 | `open_linked_pr_browser` | `shift+o` |
 | `open_linked_pr_tui` | `shift+p` |
 | `checkout_pr` | `v` |

@@ -33,6 +33,7 @@ pub enum AppAction {
     PickRemote,
     PickIssue,
     OpenInBrowser,
+    CopyUrl,
     CheckoutPullRequest,
     MergePullRequest,
     OpenLinkedPullRequestInBrowser,

@@ -8,6 +8,7 @@ repository = "https://github.com/AksharP5/blippy"
 
 [dependencies]
 anyhow = "1.0.103"
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 crossterm = "0.29"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 serde = { version = "1.0", features = ["derive"] }

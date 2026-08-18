@@ -1,6 +1,16 @@
 use super::*;
 
 #[test]
+fn y_triggers_copy_url_action() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::Issues);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+
+    assert_eq!(app.take_action(), Some(AppAction::CopyUrl));
+}
+
+#[test]
 fn dd_triggers_close_issue_action() {
     let mut app = App::new(Config::default());
     app.set_view(View::Issues);

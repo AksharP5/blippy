@@ -330,6 +330,19 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
             KeyCode::Enter => self.activate_selection(),
+            KeyCode::Char('y')
+                if matches!(
+                    self.view,
+                    View::RepoPicker
+                        | View::RemoteChooser
+                        | View::Issues
+                        | View::IssueDetail
+                        | View::IssueComments
+                        | View::PullRequestFiles
+                ) =>
+            {
+                self.interaction.action = Some(AppAction::CopyUrl);
+            }
             KeyCode::Char('o')
                 if matches!(
                     self.view,

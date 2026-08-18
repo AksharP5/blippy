@@ -18,6 +18,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Distinguishes merged pull requests from closed pull requests
 - Fast list navigation with keyboard-first controls
 - Issue and PR detail views with context-aware panes
+- Copy repository, issue, and pull request URLs to the system clipboard
 
 ## Issue Creation in TUI
 
