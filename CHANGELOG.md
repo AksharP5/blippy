@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8](https://github.com/AksharP5/blippy/compare/v0.1.7...v0.1.8) - 2026-08-18
+
+### Fixed
+
+- let space toggle metadata picker items ([#23](https://github.com/AksharP5/blippy/pull/23))
+
+### Other
+
+- *(ci)* update release actions ([#22](https://github.com/AksharP5/blippy/pull/22))
+
 ## [0.1.7](https://github.com/AksharP5/blippy/compare/v0.1.6...v0.1.7) - 2026-03-08
 
 ### Fixed
