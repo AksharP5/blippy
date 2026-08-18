@@ -82,16 +82,24 @@ pub(crate) fn start_comment_sync(
             };
 
             let now = comment_now_epoch();
-            let mut count = 0usize;
-            for comment in comments {
-                let mut row = crate::sync::map_comment_to_row(issue_id, &comment);
-                row.last_accessed_at = Some(now);
-                let _ = crate::store::upsert_comment(&ctx.conn, &row);
-                count += 1;
+            let rows = comments
+                .iter()
+                .map(|comment| {
+                    let mut row = crate::sync::map_comment_to_row(issue_id, comment);
+                    row.last_accessed_at = Some(now);
+                    row
+                })
+                .collect::<Vec<_>>();
+            let count = rows.len();
+            let result = replace_comments_for_issue(&ctx.conn, issue_id, &rows)
+                .and_then(|()| prune_comments(&ctx.conn, COMMENT_TTL_SECONDS, COMMENT_CAP));
+            if let Err(error) = result {
+                let _ = event_tx.send(AppEvent::CommentsFailed {
+                    issue_id,
+                    message: error.to_string(),
+                });
+                return;
             }
-            let _ = update_issue_comments_count(&ctx.conn, issue_id, count as i64);
-            let _ = touch_comments_for_issue(&ctx.conn, issue_id, now);
-            let _ = prune_comments(&ctx.conn, COMMENT_TTL_SECONDS, COMMENT_CAP);
 
             let _ = event_tx.send(AppEvent::CommentsUpdated { issue_id, count });
         },

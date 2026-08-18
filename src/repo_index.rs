@@ -1,18 +1,33 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
+use crate::discovery::is_git_repo;
 use crate::git::{RemoteInfo, list_github_remotes_at};
-use crate::store::{LocalRepoRow, upsert_local_repo};
+use crate::store::{
+    LocalRepoRow, delete_local_repos_at_path, list_local_repos, replace_local_repos_for_path,
+};
 
 pub fn index_repo_path(conn: &rusqlite::Connection, path: &Path) -> Result<usize> {
     let remotes = list_github_remotes_at(path)?;
     let rows = build_local_repo_rows(path, remotes);
-    for row in &rows {
-        upsert_local_repo(conn, row)?;
-    }
+    replace_local_repos_for_path(conn, path.to_string_lossy().as_ref(), &rows)?;
     Ok(rows.len())
+}
+
+pub fn prune_missing_local_repos(conn: &rusqlite::Connection) -> Result<usize> {
+    let mut removed = 0usize;
+    let mut checked_paths = HashSet::new();
+    for repo in list_local_repos(conn)? {
+        if !checked_paths.insert(repo.path.clone()) || is_git_repo(Path::new(&repo.path)) {
+            continue;
+        }
+        delete_local_repos_at_path(conn, &repo.path)?;
+        removed += 1;
+    }
+    Ok(removed)
 }
 
 fn build_local_repo_rows(path: &Path, remotes: Vec<RemoteInfo>) -> Vec<LocalRepoRow> {
@@ -41,7 +56,7 @@ fn now_epoch() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_local_repo_rows, index_repo_path};
+    use super::{build_local_repo_rows, index_repo_path, prune_missing_local_repos};
     use crate::git::{RemoteInfo, RepoSlug};
     use crate::store::{list_local_repos, open_db_at};
     use std::fs;
@@ -93,6 +108,61 @@ mod tests {
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].path, repo_path.to_string_lossy().to_string());
 
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reindexing_replaces_removed_remotes() {
+        let dir = unique_temp_dir("replace");
+        let repo_path = dir.join("repo");
+        fs::create_dir_all(&repo_path).expect("create repo");
+        init_git_repo(&repo_path);
+        run_git(
+            &repo_path,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/blippy.git",
+            ],
+        );
+        let db_path = dir.join("blippy.db");
+        let conn = open_db_at(&db_path).expect("open db");
+        index_repo_path(&conn, &repo_path).expect("initial index");
+
+        run_git(&repo_path, &["remote", "remove", "origin"]);
+        index_repo_path(&conn, &repo_path).expect("reindex");
+
+        assert!(list_local_repos(&conn).expect("list repos").is_empty());
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pruning_removes_deleted_repository_paths() {
+        let dir = unique_temp_dir("prune");
+        let repo_path = dir.join("repo");
+        fs::create_dir_all(&repo_path).expect("create repo");
+        init_git_repo(&repo_path);
+        run_git(
+            &repo_path,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/blippy.git",
+            ],
+        );
+        let db_path = dir.join("blippy.db");
+        let conn = open_db_at(&db_path).expect("open db");
+        index_repo_path(&conn, &repo_path).expect("index");
+        fs::remove_dir_all(&repo_path).expect("remove repo");
+
+        let removed = prune_missing_local_repos(&conn).expect("prune");
+
+        assert_eq!(removed, 1);
+        assert!(list_local_repos(&conn).expect("list repos").is_empty());
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
     }

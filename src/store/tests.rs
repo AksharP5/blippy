@@ -1,7 +1,7 @@
 use super::{
     CommentRow, IssueRow, LocalRepoRow, RepoRow, comments_for_issue, delete_db_at,
-    get_repo_by_slug, list_issues, list_local_repos, open_db_at, upsert_comment, upsert_issue,
-    upsert_local_repo, upsert_repo,
+    get_repo_by_slug, list_issues, list_local_repos, open_db_at, replace_comments_for_issue,
+    replace_local_repos_for_path, upsert_comment, upsert_issue, upsert_local_repo, upsert_repo,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -52,7 +52,25 @@ fn open_db_creates_tables() {
     assert!(table_exists(&conn, "repos"));
     assert!(table_exists(&conn, "issues"));
     assert!(table_exists(&conn, "comments"));
-    assert!(table_exists(&conn, "fts_content"));
+    assert!(!table_exists(&conn, "fts_content"));
+    drop(conn);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn open_db_removes_legacy_search_index() {
+    let dir = unique_temp_dir("legacy-search-index");
+    let db_path = dir.join("blippy.db");
+    let conn = rusqlite::Connection::open(&db_path).expect("open raw db");
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE fts_content USING fts5(issue_id, comment_id, title, body, author);",
+    )
+    .expect("create legacy index");
+    drop(conn);
+
+    let conn = open_db_at(&db_path).expect("open db");
+
+    assert!(!table_exists(&conn, "fts_content"));
     drop(conn);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -216,6 +234,54 @@ fn comments_are_ordered_oldest_first() {
 }
 
 #[test]
+fn replace_comments_for_issue_removes_comments_missing_from_snapshot() {
+    let dir = unique_temp_dir("comment-snapshot");
+    let db_path = dir.join("blippy.db");
+    let conn = open_db_at(&db_path).expect("open db");
+    seed_issue(&conn, 20);
+
+    let old_comment = test_comment(300, 20, "old");
+    let kept_comment = test_comment(301, 20, "before");
+    upsert_comment(&conn, &old_comment).expect("insert old comment");
+    upsert_comment(&conn, &kept_comment).expect("insert kept comment");
+
+    let refreshed = CommentRow {
+        body: "after".to_string(),
+        ..kept_comment
+    };
+    replace_comments_for_issue(&conn, 20, &[refreshed]).expect("replace comments");
+
+    let comments = comments_for_issue(&conn, 20).expect("list comments");
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0].id, 301);
+    assert_eq!(comments[0].body, "after");
+
+    drop(conn);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn replace_comments_for_issue_rejects_another_issues_comments() {
+    let dir = unique_temp_dir("comment-snapshot-mismatch");
+    let db_path = dir.join("blippy.db");
+    let conn = open_db_at(&db_path).expect("open db");
+    seed_issue(&conn, 20);
+    let old_comment = test_comment(300, 20, "old");
+    upsert_comment(&conn, &old_comment).expect("insert old comment");
+    let wrong_comment = test_comment(301, 21, "wrong issue");
+
+    let result = replace_comments_for_issue(&conn, 20, &[wrong_comment]);
+
+    assert!(result.is_err());
+    assert_eq!(
+        comments_for_issue(&conn, 20).expect("list comments"),
+        vec![old_comment]
+    );
+    drop(conn);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn issues_are_ordered_newest_number_first() {
     let dir = unique_temp_dir("issue-order");
     let db_path = dir.join("blippy.db");
@@ -301,6 +367,26 @@ fn upsert_local_repo_inserts_and_updates() {
 }
 
 #[test]
+fn replace_local_repos_for_path_removes_missing_remotes() {
+    let dir = unique_temp_dir("local-repo-snapshot");
+    let db_path = dir.join("blippy.db");
+    let conn = open_db_at(&db_path).expect("open db");
+    let origin = test_local_repo("/tmp/repo", "origin");
+    let upstream = test_local_repo("/tmp/repo", "upstream");
+    upsert_local_repo(&conn, &origin).expect("insert origin");
+    upsert_local_repo(&conn, &upstream).expect("insert upstream");
+
+    replace_local_repos_for_path(&conn, "/tmp/repo", &[origin]).expect("replace remotes");
+
+    let repos = list_local_repos(&conn).expect("list repos");
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].remote_name, "origin");
+
+    drop(conn);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn get_repo_by_slug_returns_repo() {
     let dir = unique_temp_dir("repo-slug");
     let db_path = dir.join("blippy.db");
@@ -363,6 +449,60 @@ fn unique_temp_dir(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("blippy-test-{}-{}", label, nanos));
     fs::create_dir_all(&dir).expect("create temp dir");
     dir
+}
+
+fn seed_issue(conn: &rusqlite::Connection, issue_id: i64) {
+    upsert_repo(
+        conn,
+        &RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "blippy".to_string(),
+            updated_at: None,
+            etag: None,
+        },
+    )
+    .expect("insert repo");
+    upsert_issue(
+        conn,
+        &IssueRow {
+            id: issue_id,
+            repo_id: 1,
+            number: 1,
+            state: "open".to_string(),
+            title: "Issue".to_string(),
+            body: String::new(),
+            labels: String::new(),
+            assignees: String::new(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr: false,
+        },
+    )
+    .expect("insert issue");
+}
+
+fn test_comment(id: i64, issue_id: i64, body: &str) -> CommentRow {
+    CommentRow {
+        id,
+        issue_id,
+        author: "dev".to_string(),
+        body: body.to_string(),
+        created_at: Some("2024-01-02T01:00:00Z".to_string()),
+        last_accessed_at: Some(1),
+    }
+}
+
+fn test_local_repo(path: &str, remote_name: &str) -> LocalRepoRow {
+    LocalRepoRow {
+        path: path.to_string(),
+        remote_name: remote_name.to_string(),
+        owner: "acme".to_string(),
+        repo: "blippy".to_string(),
+        url: format!("https://github.com/acme/blippy-{}.git", remote_name),
+        last_seen: Some("2024-01-05T00:00:00Z".to_string()),
+        last_scanned: Some("2024-01-05T00:00:00Z".to_string()),
+    }
 }
 
 fn table_exists(conn: &rusqlite::Connection, name: &str) -> bool {

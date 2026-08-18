@@ -126,6 +126,22 @@ fn slash_search_matches_issue_number() {
 }
 
 #[test]
+fn custom_plain_keybinding_does_not_rewrite_search_text() {
+    let mut config = Config::default();
+    config
+        .keybinds
+        .insert("refresh".to_string(), "x".to_string());
+    let mut app = App::new(config);
+    app.set_view(View::Issues);
+    app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+    app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+    assert_eq!(app.issue_query(), "xr");
+}
+
+#[test]
 fn reopen_action_for_closed_issue() {
     let mut app = App::new(Config::default());
     app.set_view(View::Issues);

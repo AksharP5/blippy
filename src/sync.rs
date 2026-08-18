@@ -9,6 +9,7 @@ pub struct SyncStats {
     pub issues: usize,
     pub comments: usize,
     pub not_modified: bool,
+    pub incomplete_reason: Option<String>,
 }
 
 #[async_trait]
@@ -136,10 +137,8 @@ where
     let mut stats = SyncStats::default();
     let mut page = 1u32;
     let mut fetched_any_page = false;
-    let mut sync_completed = true;
     let mut latest_seen_updated_at = previous_cursor.clone();
     let mut first_page_etag = None;
-    const PROGRESS_BATCH: usize = 10;
     loop {
         let if_none_match = if page == 1 {
             previous_etag.as_deref()
@@ -166,7 +165,7 @@ where
             }
             Err(error) => {
                 if fetched_any_page {
-                    sync_completed = false;
+                    stats.incomplete_reason = Some(error.to_string());
                     break;
                 }
                 return Err(error);
@@ -178,8 +177,7 @@ where
         if issues.is_empty() {
             break;
         }
-        let mut persisted_since_update = 0usize;
-        let mut emitted_for_page = false;
+        let mut rows = Vec::new();
         let mut reached_previous_cursor = false;
         for issue in issues {
             if let (Some(cursor), Some(issue_updated_at)) =
@@ -204,25 +202,23 @@ where
                 }
             }
 
-            crate::store::upsert_issue(_conn, &row)?;
+            rows.push(row);
+        }
+
+        let transaction = _conn.unchecked_transaction()?;
+        for row in &rows {
+            crate::store::upsert_issue(&transaction, row)?;
             stats.issues += 1;
-            persisted_since_update += 1;
-            if persisted_since_update >= PROGRESS_BATCH {
-                _on_progress(page, &stats);
-                emitted_for_page = true;
-                persisted_since_update = 0;
-            }
         }
-        if persisted_since_update > 0 || !emitted_for_page {
-            _on_progress(page, &stats);
-        }
+        transaction.commit()?;
+        _on_progress(page, &stats);
         if reached_previous_cursor {
             break;
         }
         page += 1;
     }
 
-    if sync_completed {
+    if stats.incomplete_reason.is_none() {
         let next_cursor = latest_seen_updated_at
             .as_deref()
             .or(previous_cursor.as_deref());

@@ -698,6 +698,38 @@ fn create_issue_editor_supports_title_and_body_entry() {
 }
 
 #[test]
+fn custom_plain_keybinding_does_not_rewrite_editor_text() {
+    let mut config = Config::default();
+    config
+        .keybinds
+        .insert("refresh".to_string(), "x".to_string());
+    let mut app = App::new(config);
+    app.open_issue_comment_editor(View::Issues);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+    assert_eq!(app.editor().text(), "xr");
+}
+
+#[test]
+fn custom_modified_submit_key_still_works_in_editor() {
+    let mut config = Config::default();
+    config
+        .keybinds
+        .insert("submit".to_string(), "ctrl+s".to_string());
+    let mut app = App::new(config);
+    app.open_issue_comment_editor(View::Issues);
+
+    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.take_action(), None);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    assert_eq!(app.take_action(), Some(AppAction::SubmitIssueComment));
+}
+
+#[test]
 fn create_issue_confirm_cancel_keeps_editor_open() {
     let mut app = App::new(Config::default());
     app.open_create_issue_editor(View::Issues);

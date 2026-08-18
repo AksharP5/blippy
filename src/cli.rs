@@ -1,38 +1,28 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
+
+pub const USAGE: &str = "Usage: blippy [COMMAND]\n\nCommands:\n  sync         Scan local repos and cache GitHub remotes\n  auth reset   Remove the stored auth token\n  cache reset  Remove the local cache\n  -h, --help   Show this help\n  -V, --version\n               Show version information";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliCommand {
     AuthReset,
     CacheReset,
+    Help,
     Sync,
     Version,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Option<CliCommand>> {
-    if args.len() <= 1 {
-        return Ok(None);
-    }
-
-    let command = args.get(1).map(String::as_str);
-    let subcommand = args.get(2).map(String::as_str);
-
-    if command == Some("--version") || command == Some("-V") {
-        return Ok(Some(CliCommand::Version));
-    }
-
-    if command == Some("auth") && subcommand == Some("reset") {
-        return Ok(Some(CliCommand::AuthReset));
-    }
-
-    if command == Some("cache") && subcommand == Some("reset") {
-        return Ok(Some(CliCommand::CacheReset));
-    }
-
-    if command == Some("sync") {
-        return Ok(Some(CliCommand::Sync));
-    }
-
-    Ok(None)
+    let command = args.iter().skip(1).map(String::as_str).collect::<Vec<_>>();
+    let parsed = match command.as_slice() {
+        [] => None,
+        ["--version"] | ["-V"] => Some(CliCommand::Version),
+        ["--help"] | ["-h"] | ["help"] => Some(CliCommand::Help),
+        ["auth", "reset"] => Some(CliCommand::AuthReset),
+        ["cache", "reset"] => Some(CliCommand::CacheReset),
+        ["sync"] => Some(CliCommand::Sync),
+        _ => bail!("Unknown command: {}\n\n{}", command.join(" "), USAGE),
+    };
+    Ok(parsed)
 }
 
 #[cfg(test)]
@@ -89,5 +79,30 @@ mod tests {
         let args = vec!["blippy".to_string(), "-V".to_string()];
         let parsed = parse_args(&args).expect("parse succeeds");
         assert_eq!(parsed, Some(CliCommand::Version));
+    }
+
+    #[test]
+    fn parse_args_returns_help() {
+        let args = vec!["blippy".to_string(), "--help".to_string()];
+        let parsed = parse_args(&args).expect("parse succeeds");
+        assert_eq!(parsed, Some(CliCommand::Help));
+    }
+
+    #[test]
+    fn parse_args_rejects_unknown_commands() {
+        let args = vec!["blippy".to_string(), "typo".to_string()];
+        let error = parse_args(&args).expect_err("unknown command fails");
+        assert!(error.to_string().contains("Unknown command: typo"));
+    }
+
+    #[test]
+    fn parse_args_rejects_extra_arguments() {
+        let args = vec![
+            "blippy".to_string(),
+            "cache".to_string(),
+            "reset".to_string(),
+            "extra".to_string(),
+        ];
+        assert!(parse_args(&args).is_err());
     }
 }

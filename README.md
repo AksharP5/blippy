@@ -50,6 +50,7 @@ cargo install --git https://github.com/AksharP5/blippy
 
 - `blippy`: launch the TUI
 - `blippy --version`: show version information
+- `blippy --help`: show command help
 - `blippy sync`: scan local repos and cache GitHub remotes
 - `blippy auth reset`: remove stored auth token from keychain
 - `blippy cache reset`: remove local cache database

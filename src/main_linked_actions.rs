@@ -425,10 +425,13 @@ pub(super) fn start_linked_pull_request_lookup(
     event_tx: Sender<AppEvent>,
     target: LinkedPullRequestTarget,
 ) {
+    let event_repo = RepoIdentity::new(&owner, &repo);
+    let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
         event_tx,
         move |message| AppEvent::LinkedPullRequestLookupFailed {
+            repo: setup_repo,
             issue_number,
             message,
             target,
@@ -444,6 +447,7 @@ pub(super) fn start_linked_pull_request_lookup(
             match result {
                 Ok(pull_requests) => {
                     let _ = event_tx.send(AppEvent::LinkedPullRequestResolved {
+                        repo: event_repo.clone(),
                         issue_number,
                         pull_requests,
                         target,
@@ -451,6 +455,7 @@ pub(super) fn start_linked_pull_request_lookup(
                 }
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::LinkedPullRequestLookupFailed {
+                        repo: event_repo.clone(),
                         issue_number,
                         message: error.to_string(),
                         target,
@@ -469,10 +474,13 @@ pub(super) fn start_linked_issue_lookup(
     event_tx: Sender<AppEvent>,
     target: LinkedIssueTarget,
 ) {
+    let event_repo = RepoIdentity::new(&owner, &repo);
+    let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
         event_tx,
         move |message| AppEvent::LinkedIssueLookupFailed {
+            repo: setup_repo,
             pull_number,
             message,
             target,
@@ -488,6 +496,7 @@ pub(super) fn start_linked_issue_lookup(
             match result {
                 Ok(issues) => {
                     let _ = event_tx.send(AppEvent::LinkedIssueResolved {
+                        repo: event_repo.clone(),
                         pull_number,
                         issues,
                         target,
@@ -495,6 +504,7 @@ pub(super) fn start_linked_issue_lookup(
                 }
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::LinkedIssueLookupFailed {
+                        repo: event_repo.clone(),
                         pull_number,
                         message: error.to_string(),
                         target,

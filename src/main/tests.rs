@@ -310,6 +310,7 @@ fn issue_updated_marks_pull_request_merged() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::IssueUpdated {
+            repo: super::RepoIdentity::new("acme", "blippy"),
             issue_number: 92,
             message: "merged".to_string(),
         })
@@ -323,6 +324,40 @@ fn issue_updated_marks_pull_request_merged() {
         .find(|issue| issue.number == 92)
         .map(|issue| issue.state.as_str());
     assert_eq!(merged_state, Some("merged"));
+}
+
+#[test]
+fn issue_events_from_another_repo_do_not_change_current_repo() {
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "current", None);
+    app.set_view(View::Issues);
+    app.set_issues(vec![IssueRow {
+        id: 34,
+        repo_id: 2,
+        number: 92,
+        state: "open".to_string(),
+        title: "Current repo issue".to_string(),
+        body: String::new(),
+        labels: String::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: false,
+    }]);
+
+    let (event_tx, event_rx) = channel();
+    event_tx
+        .send(super::AppEvent::IssueUpdated {
+            repo: super::RepoIdentity::new("acme", "previous"),
+            issue_number: 92,
+            message: "closed".to_string(),
+        })
+        .expect("send event");
+    super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle events");
+
+    assert_eq!(app.issues()[0].state, "open");
+    assert_ne!(app.status(), "#92 closed");
 }
 
 #[test]
