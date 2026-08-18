@@ -11,7 +11,7 @@ anyhow = "1.0.103"
 crossterm = "0.29"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
 keyring = "4.1"
 rpassword = "7.5"
 rusqlite = { version = "0.31", features = ["bundled"] }
