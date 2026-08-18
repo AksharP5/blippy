@@ -1,6 +1,7 @@
 mod app;
 mod auth;
 mod cli;
+mod clipboard;
 mod config;
 mod discovery;
 mod git;
@@ -44,6 +45,7 @@ use crate::app::{
 };
 use crate::auth::{SystemAuth, clear_auth_token, resolve_auth_token};
 use crate::cli::{CliCommand, parse_args};
+use crate::clipboard::SystemClipboard;
 use crate::config::Config;
 use crate::discovery::{home_dir, quick_scan};
 use crate::git::list_github_remotes_at;
@@ -178,6 +180,7 @@ fn main() -> Result<()> {
     let config = Config::load()?;
     let conn = crate::store::open_db()?;
     let mut app = App::new(config);
+    let mut clipboard = SystemClipboard::default();
     main_data::initialize_app(&mut app, &conn)?;
 
     let (event_tx, event_rx) = mpsc::channel();
@@ -190,6 +193,7 @@ fn main() -> Result<()> {
     run_app(
         terminal_guard.terminal_mut(),
         &mut app,
+        &mut clipboard,
         &conn,
         &token,
         event_rx,
@@ -257,6 +261,7 @@ fn handle_sync() -> Result<()> {
 fn run_app(
     terminal: &mut Tui,
     app: &mut App,
+    clipboard: &mut SystemClipboard,
     conn: &rusqlite::Connection,
     token: &str,
     event_rx: Receiver<AppEvent>,
@@ -313,7 +318,7 @@ fn run_app(
             _ => {}
         }
 
-        main_actions::handle_actions(app, conn, token, event_tx.clone())?;
+        main_actions::handle_actions(app, clipboard, conn, token, event_tx.clone())?;
         drive_background_tasks(
             app,
             conn,

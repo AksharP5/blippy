@@ -1,7 +1,7 @@
 use super::main_actions::issue_url;
 use crate::app::{EditorMode, PendingIssueAction, View, WorkItemMode};
 use crate::config::Config;
-use crate::store::IssueRow;
+use crate::store::{IssueRow, LocalRepoRow};
 use std::sync::mpsc::channel;
 
 fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
@@ -89,6 +89,29 @@ fn issue_url_uses_issue_route_for_issues() {
 }
 
 #[test]
+fn copy_selected_url_copies_repo_from_picker() {
+    let mut app = crate::app::App::new(Config::default());
+    app.set_repos(vec![LocalRepoRow {
+        path: "/tmp/blippy".to_string(),
+        remote_name: "origin".to_string(),
+        owner: "acme".to_string(),
+        repo: "blippy".to_string(),
+        url: "git@github.com:acme/blippy.git".to_string(),
+        last_seen: None,
+        last_scanned: None,
+    }]);
+    let mut copied = String::new();
+
+    super::main_actions::copy_selected_url(&mut app, |url| {
+        copied = url.to_string();
+        Ok(())
+    });
+
+    assert_eq!(copied, "https://github.com/acme/blippy");
+    assert_eq!(app.status(), "URL copied");
+}
+
+#[test]
 fn linked_pull_request_action_opens_picker_when_multiple_cached() {
     let conn = rusqlite::Connection::open_in_memory().expect("conn");
     let mut app = crate::app::App::new(Config::default());
@@ -133,7 +156,9 @@ fn create_issue_action_opens_create_issue_editor() {
     ));
 
     let (event_tx, _event_rx) = channel();
-    super::main_actions::handle_actions(&mut app, &conn, "token", event_tx).expect("handled");
+    let mut clipboard = crate::clipboard::SystemClipboard::default();
+    super::main_actions::handle_actions(&mut app, &mut clipboard, &conn, "token", event_tx)
+        .expect("handled");
 
     assert_eq!(app.view(), View::CommentEditor);
     assert_eq!(app.editor_mode(), EditorMode::CreateIssue);
@@ -312,7 +337,9 @@ fn submit_created_issue_requires_non_empty_title() {
     ));
 
     let (event_tx, _event_rx) = channel();
-    super::main_actions::handle_actions(&mut app, &conn, "token", event_tx).expect("handled");
+    let mut clipboard = crate::clipboard::SystemClipboard::default();
+    super::main_actions::handle_actions(&mut app, &mut clipboard, &conn, "token", event_tx)
+        .expect("handled");
 
     assert_eq!(app.status(), "Issue title required");
     assert_eq!(app.view(), View::CommentEditor);

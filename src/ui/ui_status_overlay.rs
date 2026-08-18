@@ -201,6 +201,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
             (move_keys, "Move repositories".to_string()),
             (bind(app, "repo_search"), "Search repositories".to_string()),
             (bind(app, "submit"), "Open selected repository".to_string()),
+            (bind(app, "copy_url"), "Copy repository URL".to_string()),
             (bind(app, "rescan_repos"), "Rescan repositories".to_string()),
             (
                 bind(app, "clear_and_repo_picker"),
@@ -252,6 +253,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                     ),
                 );
             }
+            rows.push((bind(app, "copy_url"), "Copy selected URL".to_string()));
             rows
         }
         View::IssueDetail => {
@@ -263,6 +265,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                 (bind(app, "open_comments"), "Open comments".to_string()),
                 (back_keys, "Back".to_string()),
                 (bind(app, "open_browser"), "Open in browser".to_string()),
+                (bind(app, "copy_url"), "Copy URL".to_string()),
             ];
             if !is_pr {
                 rows.insert(4, (bind(app, "create_issue"), "Create issue".to_string()));
@@ -293,6 +296,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                 (bind(app, "add_comment"), "Add comment".to_string()),
                 (back_keys, "Back".to_string()),
                 (bind(app, "open_browser"), "Open in browser".to_string()),
+                (bind(app, "copy_url"), "Copy URL".to_string()),
             ];
             if !is_pr {
                 rows.insert(4, (bind(app, "create_issue"), "Create issue".to_string()));
@@ -324,6 +328,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                     ),
                     (back_keys, "Back".to_string()),
                     (bind(app, "open_browser"), "Open in browser".to_string()),
+                    (bind(app, "copy_url"), "Copy PR URL".to_string()),
                 ];
             }
             if app.pull_request_diff_expanded() {
@@ -352,6 +357,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                         bind(app, "merge_pull_request"),
                         "Merge pull request".to_string(),
                     ),
+                    (bind(app, "copy_url"), "Copy PR URL".to_string()),
                 ];
             }
             vec![
@@ -376,6 +382,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
                     bind(app, "merge_pull_request"),
                     "Merge pull request".to_string(),
                 ),
+                (bind(app, "copy_url"), "Copy PR URL".to_string()),
             ]
         }
         View::LinkedPicker => vec![
@@ -432,6 +439,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
         View::RemoteChooser => vec![
             (move_keys, "Move remotes".to_string()),
             (bind(app, "submit"), "Select remote".to_string()),
+            (bind(app, "copy_url"), "Copy repository URL".to_string()),
             (
                 bind(app, "clear_and_repo_picker"),
                 "Back to repos".to_string(),

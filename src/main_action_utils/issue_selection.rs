@@ -144,3 +144,21 @@ pub(crate) fn issue_url(app: &App) -> Option<String> {
         owner, repo, route, issue_number
     ))
 }
+
+pub(crate) fn selected_url(app: &App) -> Option<String> {
+    if app.view() == View::RepoPicker {
+        let (owner, repo, _) = app.selected_repo_target()?;
+        return Some(repo_url(&owner, &repo));
+    }
+
+    if app.view() == View::RemoteChooser {
+        let remote = app.remotes().get(app.selected_remote())?;
+        return Some(repo_url(&remote.slug.owner, &remote.slug.repo));
+    }
+
+    issue_url(app).or_else(|| Some(repo_url(app.current_owner()?, app.current_repo()?)))
+}
+
+fn repo_url(owner: &str, repo: &str) -> String {
+    format!("https://github.com/{}/{}", owner, repo)
+}

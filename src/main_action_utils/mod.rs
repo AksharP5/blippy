@@ -15,7 +15,7 @@ pub(super) use issue_actions::{
 pub(super) use issue_selection::{
     assignee_options_for_repo, ensure_can_edit_issue_metadata, ensure_can_merge_pull_request,
     issue_number, issue_url, label_options_for_repo, selected_issue_assignees,
-    selected_issue_for_action, selected_issue_labels,
+    selected_issue_for_action, selected_issue_labels, selected_url,
 };
 pub(super) use pr_review_actions::{
     delete_pull_request_review_comment, resolve_pull_request_review_comment,
