@@ -413,6 +413,11 @@ pub(crate) fn start_close_issue(
         },
         move |services, event_tx| {
             let result: Result<Option<String>, anyhow::Error> = services.runtime.block_on(async {
+                services
+                    .client
+                    .close_issue(&owner, &repo, issue_number)
+                    .await?;
+
                 let mut comment_error = None;
                 if let Some(body) = body
                     && let Err(error) = services
@@ -422,11 +427,6 @@ pub(crate) fn start_close_issue(
                 {
                     comment_error = Some(error.to_string());
                 }
-
-                services
-                    .client
-                    .close_issue(&owner, &repo, issue_number)
-                    .await?;
 
                 Ok(comment_error)
             });

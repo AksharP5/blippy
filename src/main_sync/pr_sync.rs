@@ -31,15 +31,16 @@ pub(crate) fn start_pull_request_files_sync(
                 }
             };
 
-            let (pull_request_id, viewed_files) = services
-                .runtime
-                .block_on(async {
-                    services
-                        .client
-                        .pull_request_file_view_state(&owner, &repo, issue_number)
-                        .await
-                })
-                .unwrap_or((None, HashSet::new()));
+            let view_state = services.runtime.block_on(async {
+                services
+                    .client
+                    .pull_request_file_view_state(&owner, &repo, issue_number)
+                    .await
+            });
+            let (pull_request_id, viewed_files, view_state_error) = match view_state {
+                Ok((pull_request_id, viewed_files)) => (pull_request_id, viewed_files, None),
+                Err(error) => (None, HashSet::new(), Some(error.to_string())),
+            };
 
             let mapped = files
                 .into_iter()
@@ -56,6 +57,7 @@ pub(crate) fn start_pull_request_files_sync(
                 files: mapped,
                 pull_request_id,
                 viewed_files,
+                view_state_error,
             });
         },
     );

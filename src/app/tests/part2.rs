@@ -626,6 +626,9 @@ fn selected_pull_request_file_view_toggle_flips_current_state() {
             patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
         }],
     );
+    assert!(app.selected_pull_request_file_view_toggle().is_none());
+
+    app.set_pull_request_view_state(Some("PR_id".to_string()), std::collections::HashSet::new());
 
     let (path, viewed) = app
         .selected_pull_request_file_view_toggle()

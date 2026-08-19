@@ -453,6 +453,7 @@ enum AppEvent {
         files: Vec<PullRequestFile>,
         pull_request_id: Option<String>,
         viewed_files: HashSet<String>,
+        view_state_error: Option<String>,
     },
     PullRequestFilesFailed {
         issue_id: i64,

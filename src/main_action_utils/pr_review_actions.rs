@@ -205,6 +205,11 @@ pub(crate) fn toggle_pull_request_file_viewed(
     token: &str,
     event_tx: Sender<AppEvent>,
 ) -> Result<()> {
+    if !app.pull_request_view_state_loaded() {
+        app.request_pull_request_files_sync();
+        app.set_status("Loading pull request view state".to_string());
+        return Ok(());
+    }
     let (path, viewed) = match app.selected_pull_request_file_view_toggle() {
         Some(toggle) => toggle,
         None => {

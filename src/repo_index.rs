@@ -58,7 +58,7 @@ fn now_epoch() -> String {
 mod tests {
     use super::{build_local_repo_rows, index_repo_path, prune_missing_local_repos};
     use crate::git::{RemoteInfo, RepoSlug};
-    use crate::store::{list_local_repos, open_db_at};
+    use crate::store::{LocalRepoRow, list_local_repos, open_db_at, upsert_local_repo};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -135,6 +135,36 @@ mod tests {
         index_repo_path(&conn, &repo_path).expect("reindex");
 
         assert!(list_local_repos(&conn).expect("list repos").is_empty());
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_reindex_preserves_cached_remotes() {
+        let dir = unique_temp_dir("failed-reindex");
+        let repo_path = dir.join("repo");
+        fs::create_dir_all(&repo_path).expect("create repo");
+        fs::write(
+            repo_path.join(".git"),
+            "gitdir: /definitely/missing/blippy\n",
+        )
+        .expect("write broken git file");
+        let db_path = dir.join("blippy.db");
+        let conn = open_db_at(&db_path).expect("open db");
+        let cached = LocalRepoRow {
+            path: repo_path.to_string_lossy().to_string(),
+            remote_name: "origin".to_string(),
+            owner: "acme".to_string(),
+            repo: "blippy".to_string(),
+            url: "https://github.com/acme/blippy.git".to_string(),
+            last_seen: None,
+            last_scanned: None,
+        };
+        upsert_local_repo(&conn, &cached).expect("cache remote");
+
+        assert!(index_repo_path(&conn, &repo_path).is_err());
+        assert_eq!(list_local_repos(&conn).expect("list repos"), vec![cached]);
+
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
     }

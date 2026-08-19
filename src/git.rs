@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSlug {
@@ -110,20 +110,20 @@ pub fn list_github_remotes_at(path: &std::path::Path) -> Result<Vec<RemoteInfo>>
         .arg("-C")
         .arg(path)
         .args(["remote", "-v"])
-        .output();
-
-    let output = match output {
-        Ok(output) => output,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return Ok(Vec::new());
-            }
-            return Err(error.into());
-        }
-    };
+        .output()
+        .with_context(|| format!("failed to inspect Git remotes at {}", path.display()))?;
 
     if !output.status.success() {
-        return Ok(Vec::new());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        if message.is_empty() {
+            bail!(
+                "git remote -v failed at {} with {}",
+                path.display(),
+                output.status
+            );
+        }
+        bail!("git remote -v failed at {}: {}", path.display(), message);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -246,6 +246,18 @@ mod tests {
         assert_eq!(remotes.len(), 1);
         assert_eq!(remotes[0].name, "origin");
         assert_eq!(remotes[0].slug.owner, "acme");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_github_remotes_reports_broken_git_metadata() {
+        let dir = unique_temp_dir("broken-git-remote");
+        fs::write(dir.join(".git"), "gitdir: /definitely/missing/blippy\n")
+            .expect("write broken git file");
+
+        let error = super::list_github_remotes_at(&dir).expect_err("broken repo must fail");
+        assert!(error.to_string().contains("git remote -v failed"));
 
         let _ = fs::remove_dir_all(&dir);
     }

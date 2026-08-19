@@ -183,11 +183,19 @@ pub(super) fn handle_events(
                 files,
                 pull_request_id,
                 viewed_files,
+                view_state_error,
             } => {
                 if app.current_issue_id() == Some(issue_id) {
                     app.set_pull_request_files_syncing(false);
                     let count = files.len();
                     app.set_pull_request_files(issue_id, files);
+                    if let Some(message) = view_state_error {
+                        app.set_status(format!(
+                            "Loaded {} changed files; view state unavailable: {}",
+                            count, message
+                        ));
+                        continue;
+                    }
                     app.set_pull_request_view_state(pull_request_id, viewed_files);
                     app.set_status(format!("Loaded {} changed files", count));
                 }
@@ -409,7 +417,7 @@ pub(super) fn handle_events(
                 if !repo.is_current(app) {
                     continue;
                 }
-                app.end_linked_pull_request_lookup(issue_number);
+                app.set_linked_pull_requests(issue_number, Vec::new());
                 if target == LinkedPullRequestTarget::Probe {
                     continue;
                 }
@@ -528,7 +536,7 @@ pub(super) fn handle_events(
                 if !repo.is_current(app) {
                     continue;
                 }
-                app.end_linked_issue_lookup(pull_number);
+                app.set_linked_issues_for_pull_request(pull_number, Vec::new());
                 if target == LinkedIssueTarget::Probe {
                     continue;
                 }
