@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use rusqlite::Connection;
 
 const DB_FILE_NAME: &str = "blippy.db";
@@ -135,7 +135,6 @@ pub fn upsert_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
         ),
     )?;
 
-    index_issue(conn, issue)?;
     Ok(())
 }
 
@@ -161,7 +160,25 @@ pub fn upsert_comment(conn: &Connection, comment: &CommentRow) -> Result<()> {
         ),
     )?;
 
-    index_comment(conn, comment)?;
+    Ok(())
+}
+
+pub fn replace_comments_for_issue(
+    conn: &Connection,
+    issue_id: i64,
+    comments: &[CommentRow],
+) -> Result<()> {
+    ensure!(
+        comments.iter().all(|comment| comment.issue_id == issue_id),
+        "comment snapshot contains another issue"
+    );
+    let transaction = conn.unchecked_transaction()?;
+    transaction.execute("DELETE FROM comments WHERE issue_id = ?1", [issue_id])?;
+    for comment in comments {
+        upsert_comment(&transaction, comment)?;
+    }
+    update_issue_comments_count(&transaction, issue_id, comments.len() as i64)?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -170,19 +187,11 @@ pub fn update_comment_body_by_id(conn: &Connection, comment_id: i64, body: &str)
         "UPDATE comments SET body = ?1 WHERE id = ?2",
         (body, comment_id),
     )?;
-    conn.execute(
-        "UPDATE fts_content SET body = ?1 WHERE comment_id = ?2",
-        (body, comment_id),
-    )?;
     Ok(())
 }
 
 pub fn delete_comment_by_id(conn: &Connection, comment_id: i64) -> Result<()> {
     conn.execute("DELETE FROM comments WHERE id = ?1", [comment_id])?;
-    conn.execute(
-        "DELETE FROM fts_content WHERE comment_id = ?1",
-        [comment_id],
-    )?;
     Ok(())
 }
 
@@ -302,6 +311,29 @@ pub fn list_local_repos(conn: &Connection) -> Result<Vec<LocalRepoRow>> {
     Ok(repos)
 }
 
+pub fn replace_local_repos_for_path(
+    conn: &Connection,
+    path: &str,
+    repos: &[LocalRepoRow],
+) -> Result<()> {
+    ensure!(
+        repos.iter().all(|repo| repo.path == path),
+        "repository snapshot contains another path"
+    );
+    let transaction = conn.unchecked_transaction()?;
+    transaction.execute("DELETE FROM local_repos WHERE path = ?1", [path])?;
+    for repo in repos {
+        upsert_local_repo(&transaction, repo)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn delete_local_repos_at_path(conn: &Connection, path: &str) -> Result<()> {
+    conn.execute("DELETE FROM local_repos WHERE path = ?1", [path])?;
+    Ok(())
+}
+
 pub fn get_repo_by_slug(conn: &Connection, owner: &str, repo: &str) -> Result<Option<RepoRow>> {
     let mut statement = conn.prepare(
         "
@@ -375,41 +407,6 @@ pub fn comment_now_epoch() -> i64 {
         .unwrap_or_default()
         .as_secs();
     now as i64
-}
-
-fn index_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
-    conn.execute(
-        "DELETE FROM fts_content WHERE issue_id = ?1 AND comment_id IS NULL",
-        [issue.id],
-    )?;
-    conn.execute(
-        "
-        INSERT INTO fts_content (issue_id, comment_id, title, body, author)
-        VALUES (?1, NULL, ?2, ?3, NULL)
-        ",
-        (issue.id, issue.title.as_str(), issue.body.as_str()),
-    )?;
-    Ok(())
-}
-
-fn index_comment(conn: &Connection, comment: &CommentRow) -> Result<()> {
-    conn.execute(
-        "DELETE FROM fts_content WHERE comment_id = ?1",
-        [comment.id],
-    )?;
-    conn.execute(
-        "
-        INSERT INTO fts_content (issue_id, comment_id, title, body, author)
-        VALUES (?1, ?2, NULL, ?3, ?4)
-        ",
-        (
-            comment.issue_id,
-            comment.id,
-            comment.body.as_str(),
-            comment.author.as_str(),
-        ),
-    )?;
-    Ok(())
 }
 
 fn data_dir() -> PathBuf {
@@ -512,14 +509,6 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
             FOREIGN KEY(issue_id) REFERENCES issues(id) ON DELETE CASCADE
         );
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS fts_content USING fts5(
-            issue_id UNINDEXED,
-            comment_id UNINDEXED,
-            title,
-            body,
-            author
-        );
-
         CREATE TABLE IF NOT EXISTS local_repos (
             path TEXT NOT NULL,
             remote_name TEXT NOT NULL,
@@ -530,6 +519,8 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
             last_scanned TEXT,
             PRIMARY KEY (path, remote_name)
         );
+
+        DROP TABLE IF EXISTS fts_content;
         ",
     )?;
     add_comment_accessed_column(conn)?;

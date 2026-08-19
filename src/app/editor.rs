@@ -230,7 +230,9 @@ impl App {
                         self.comment_editor.backspace_text();
                     }
                 }
-                KeyCode::Char(ch) => {
+                KeyCode::Char(ch)
+                    if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+                {
                     if self.comment_editor.create_issue_confirm_visible() {
                         return;
                     }

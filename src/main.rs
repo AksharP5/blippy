@@ -44,17 +44,18 @@ use crate::app::{
     PullRequestFile, PullRequestReviewComment, ReviewSide, View, WorkItemMode,
 };
 use crate::auth::{SystemAuth, clear_auth_token, resolve_auth_token};
-use crate::cli::{CliCommand, parse_args};
+use crate::cli::{CliCommand, USAGE, parse_args};
 use crate::clipboard::SystemClipboard;
 use crate::config::Config;
 use crate::discovery::{home_dir, quick_scan};
 use crate::git::list_github_remotes_at;
 use crate::github::GitHubClient;
-use crate::repo_index::index_repo_path;
+use crate::repo_index::{index_repo_path, prune_missing_local_repos};
 use crate::store::delete_db;
 use crate::store::{
     comment_now_epoch, comments_for_issue, get_repo_by_slug, list_issues, list_local_repos,
-    prune_comments, touch_comments_for_issue, update_issue_comments_count,
+    prune_comments, replace_comments_for_issue, touch_comments_for_issue,
+    update_issue_comments_count,
 };
 use crate::sync::{SyncStats, sync_repo_with_progress};
 
@@ -206,6 +207,10 @@ fn handle_command(command: CliCommand) -> Result<()> {
     match command {
         CliCommand::AuthReset => handle_auth_reset(),
         CliCommand::CacheReset => handle_cache_reset(),
+        CliCommand::Help => {
+            println!("{}", USAGE);
+            Ok(())
+        }
         CliCommand::Sync => handle_sync(),
         CliCommand::Version => {
             println!("blippy {}", env!("CARGO_PKG_VERSION"));
@@ -247,6 +252,7 @@ fn handle_sync() -> Result<()> {
     for repo in &repos {
         indexed += index_repo_path(&conn, &repo.path)?;
     }
+    prune_missing_local_repos(&conn)?;
 
     let duration = start.elapsed();
     println!(
@@ -371,6 +377,26 @@ enum LinkedIssueTarget {
     Probe,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepoIdentity {
+    owner: String,
+    repo: String,
+}
+
+impl RepoIdentity {
+    fn new(owner: &str, repo: &str) -> Self {
+        Self {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+        }
+    }
+
+    fn is_current(&self, app: &App) -> bool {
+        app.current_owner() == Some(self.owner.as_str())
+            && app.current_repo() == Some(self.repo.as_str())
+    }
+}
+
 fn load_comments_for_issue(
     app: &mut App,
     conn: &rusqlite::Connection,
@@ -395,6 +421,9 @@ enum ScanMode {
 enum AppEvent {
     ReposUpdated,
     ScanFinished,
+    ScanFailed {
+        message: String,
+    },
     SyncProgress {
         owner: String,
         repo: String,
@@ -424,6 +453,7 @@ enum AppEvent {
         files: Vec<PullRequestFile>,
         pull_request_id: Option<String>,
         viewed_files: HashSet<String>,
+        view_state_error: Option<String>,
     },
     PullRequestFilesFailed {
         issue_id: i64,
@@ -481,49 +511,60 @@ enum AppEvent {
         message: String,
     },
     LinkedPullRequestResolved {
+        repo: RepoIdentity,
         issue_number: i64,
         pull_requests: Vec<(i64, String)>,
         target: LinkedPullRequestTarget,
     },
     LinkedPullRequestLookupFailed {
+        repo: RepoIdentity,
         issue_number: i64,
         message: String,
         target: LinkedPullRequestTarget,
     },
     LinkedIssueResolved {
+        repo: RepoIdentity,
         pull_number: i64,
         issues: Vec<(i64, String)>,
         target: LinkedIssueTarget,
     },
     LinkedIssueLookupFailed {
+        repo: RepoIdentity,
         pull_number: i64,
         message: String,
         target: LinkedIssueTarget,
     },
     IssueUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         message: String,
     },
     IssueCreated {
+        repo: RepoIdentity,
         issue_number: i64,
     },
     IssueCreateFailed {
+        repo: RepoIdentity,
         message: String,
     },
     IssueLabelsUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         labels: String,
     },
     IssueAssigneesUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         assignees: String,
     },
     IssueCommentUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         comment_id: i64,
         body: String,
     },
     IssueCommentDeleted {
+        repo: RepoIdentity,
         issue_number: i64,
         comment_id: i64,
         count: usize,
@@ -576,10 +617,21 @@ impl TerminalGuard {
     fn init() -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        if let Err(error) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+            let _ = disable_raw_mode();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+            return Err(error.into());
+        }
 
         let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                let _ = disable_raw_mode();
+                let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+                return Err(error.into());
+            }
+        };
 
         Ok(Self { terminal })
     }

@@ -2,31 +2,41 @@ use super::*;
 
 impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
+        if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
+            let Some(key) = self.keybinds.remap_text_key(key) else {
+                return;
+            };
+            self.handle_editor_key(key);
+            return;
+        }
+        if self.view == View::RepoPicker && self.search.repo_search_mode {
+            let Some(key) = self.keybinds.remap_text_key(key) else {
+                return;
+            };
+            if self.handle_repo_search_key(key) {
+                return;
+            }
+        }
+        if self.view == View::Issues && self.search.issue_search_mode {
+            let Some(key) = self.keybinds.remap_text_key(key) else {
+                return;
+            };
+            if self.handle_issue_search_key(key) {
+                return;
+            }
+        }
+        if matches!(self.view, View::LabelPicker | View::AssigneePicker) {
+            let Some(key) = self.keybinds.remap_text_key(key) else {
+                return;
+            };
+            if self.handle_popup_filter_key(key) {
+                return;
+            }
+        }
         let key = match self.keybinds.remap_key(key) {
             Some(key) => key,
             None => return,
         };
-        if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
-            self.handle_editor_key(key);
-            return;
-        }
-        if self.view == View::RepoPicker
-            && self.search.repo_search_mode
-            && self.handle_repo_search_key(key)
-        {
-            return;
-        }
-        if self.view == View::Issues
-            && self.search.issue_search_mode
-            && self.handle_issue_search_key(key)
-        {
-            return;
-        }
-        if matches!(self.view, View::LabelPicker | View::AssigneePicker)
-            && self.handle_popup_filter_key(key)
-        {
-            return;
-        }
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('r')
             && self.view == View::RepoPicker

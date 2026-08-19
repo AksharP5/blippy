@@ -327,6 +327,20 @@ impl Keybinds {
         Some(key)
     }
 
+    pub fn remap_text_key(&self, key: KeyEvent) -> Option<KeyEvent> {
+        if matches!(key.code, KeyCode::Char(_))
+            && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
+        {
+            return Some(key);
+        }
+
+        match self.remap_key(key) {
+            Some(mapped) if !matches!(mapped.code, KeyCode::Char(_)) => Some(mapped),
+            Some(_) => Some(key),
+            None => None,
+        }
+    }
+
     pub fn binding_label(&self, action: &str) -> String {
         let binding = match self.action_bindings.get(action) {
             Some(binding) => binding,

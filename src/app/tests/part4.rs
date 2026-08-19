@@ -37,6 +37,26 @@ fn repo_picker_search_filters_entries() {
 }
 
 #[test]
+fn changing_repo_clears_repo_scoped_in_flight_state() {
+    let mut app = App::new(Config::default());
+    app.set_current_repo_with_path("acme", "one", None);
+    app.set_current_issue(10, 7);
+    app.set_syncing(true);
+    app.set_comment_syncing(true);
+    app.set_pull_request_files_syncing(true);
+    app.set_pull_request_review_comments_syncing(true);
+    app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
+
+    app.set_current_repo_with_path("acme", "two", None);
+
+    assert!(!app.syncing());
+    assert!(!app.comment_syncing());
+    assert!(!app.pull_request_files_syncing());
+    assert!(!app.pull_request_review_comments_syncing());
+    assert_eq!(app.pending_issue_badge(7), None);
+}
+
+#[test]
 fn ctrl_g_resets_repo_picker_query_when_reopened() {
     let mut app = App::new(Config::default());
     app.set_repos(vec![

@@ -330,7 +330,6 @@ jobs:
     uses: ./.github/workflows/publish-npm.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
-    secrets: inherit
     # publish jobs get escalated permissions
     permissions:
       "contents": "read"

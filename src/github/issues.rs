@@ -109,7 +109,9 @@ impl GitHubClient {
                     Some(pull_number) => pull_number,
                     None => continue,
                 };
-                if !html_url.contains("/pull/") || !seen.insert(pull_number) {
+                if !item_url_matches_repo(html_url, owner, repo, "pull", pull_number)
+                    || !seen.insert(pull_number)
+                {
                     continue;
                 }
                 linked.push((pull_number, html_url.to_string()));
@@ -167,7 +169,9 @@ impl GitHubClient {
                     Some(issue_number) => issue_number,
                     None => continue,
                 };
-                if !html_url.contains("/issues/") || !seen.insert(issue_number) {
+                if !item_url_matches_repo(html_url, owner, repo, "issues", issue_number)
+                    || !seen.insert(issue_number)
+                {
                     continue;
                 }
                 linked.push((issue_number, html_url.to_string()));
@@ -302,5 +306,41 @@ impl GitHubClient {
         assignees.sort_by_key(|value| value.to_ascii_lowercase());
         assignees.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         Ok(assignees)
+    }
+}
+
+fn item_url_matches_repo(
+    html_url: &str,
+    owner: &str,
+    repo: &str,
+    route: &str,
+    number: i64,
+) -> bool {
+    let expected = format!("https://github.com/{}/{}/{}/{}", owner, repo, route, number);
+    html_url
+        .trim_end_matches('/')
+        .eq_ignore_ascii_case(&expected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::item_url_matches_repo;
+
+    #[test]
+    fn linked_item_url_must_match_the_current_repo() {
+        assert!(item_url_matches_repo(
+            "https://github.com/acme/blippy/pull/20",
+            "Acme",
+            "Blippy",
+            "pull",
+            20,
+        ));
+        assert!(!item_url_matches_repo(
+            "https://github.com/other/blippy/pull/20",
+            "acme",
+            "blippy",
+            "pull",
+            20,
+        ));
     }
 }

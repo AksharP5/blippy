@@ -196,6 +196,7 @@ async fn sync_repo_inserts_issues_and_comments() {
         .await
         .expect("sync");
     assert_eq!(stats.issues, 2);
+    assert_eq!(stats.incomplete_reason, None);
     assert_eq!(stats.comments, 0);
 
     let rows = list_issues(&conn, 1).expect("list issues");
@@ -354,6 +355,7 @@ async fn sync_repo_persists_partial_when_later_page_fails() {
         .await
         .expect("sync");
     assert_eq!(stats.issues, 2);
+    assert_eq!(stats.incomplete_reason.as_deref(), Some("rate limit"));
 
     let rows = list_issues(&conn, 1).expect("list issues");
     assert_eq!(rows.len(), 2);
@@ -660,6 +662,7 @@ async fn sync_repo_does_not_advance_cursor_on_partial_failure() {
         .await
         .expect("sync");
     assert_eq!(stats.issues, 1);
+    assert_eq!(stats.incomplete_reason.as_deref(), Some("rate limit"));
     assert!(!stats.not_modified);
 
     let stored_repo = get_repo_by_slug(&conn, "acme", "blippy")
@@ -720,6 +723,7 @@ async fn sync_repo_keeps_partial_when_only_pull_requests_seen_before_failure() {
         .await
         .expect("sync");
     assert_eq!(stats.issues, 1);
+    assert_eq!(stats.incomplete_reason.as_deref(), Some("rate limit"));
 
     drop(conn);
     let _ = fs::remove_dir_all(&dir);

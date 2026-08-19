@@ -251,6 +251,8 @@ impl App {
         self.context.path = path.map(ToString::to_string);
         self.context.issue_id = None;
         self.context.issue_number = None;
+        self.sync.syncing = false;
+        self.reset_issue_sync_state();
         self.sync.repo_permissions_syncing = false;
         self.sync.repo_permissions_sync_requested = true;
         self.sync.repo_issue_metadata_editable = None;
@@ -263,6 +265,7 @@ impl App {
         self.linked.pull_request_lookups.clear();
         self.linked.issue_lookups.clear();
         self.linked.navigation_origin = None;
+        self.interaction.pending_issue_actions.clear();
         self.clear_linked_picker_state();
         self.reset_pull_request_state();
         self.search.repo_search_mode = false;
@@ -273,11 +276,22 @@ impl App {
     }
 
     pub fn set_current_issue(&mut self, issue_id: i64, issue_number: i64) {
+        let issue_changed = self.context.issue_id != Some(issue_id);
         self.context.issue_id = Some(issue_id);
         self.context.issue_number = Some(issue_number);
-        if self.pull_request.pull_request_files_issue_id != Some(issue_id) {
+        if issue_changed {
+            self.reset_issue_sync_state();
             self.reset_pull_request_state();
         }
+    }
+
+    fn reset_issue_sync_state(&mut self) {
+        self.sync.comment_syncing = false;
+        self.sync.pull_request_files_syncing = false;
+        self.sync.pull_request_review_comments_syncing = false;
+        self.sync.comment_sync_requested = false;
+        self.sync.pull_request_files_sync_requested = false;
+        self.sync.pull_request_review_comments_sync_requested = false;
     }
 
     pub fn update_issue_state_by_number(&mut self, issue_number: i64, state: &str) {

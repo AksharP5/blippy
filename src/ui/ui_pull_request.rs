@@ -148,16 +148,22 @@ pub(super) fn draw_pull_request_files(
             "No changed files cached yet. Press r to refresh.",
         )]
     } else {
+        let view_state_loaded = app.pull_request_view_state_loaded();
         app.pull_request_files()
             .iter()
             .map(|file| {
                 let comment_count =
                     app.pull_request_comments_count_for_path(file.filename.as_str());
                 let viewed = app.pull_request_file_is_viewed(file.filename.as_str());
+                let viewed_marker = match (view_state_loaded, viewed) {
+                    (false, _) => "?",
+                    (true, true) => "✓",
+                    (true, false) => "·",
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(
-                        if viewed { "✓" } else { "·" },
-                        if viewed {
+                        viewed_marker,
+                        if view_state_loaded && viewed {
                             Style::default()
                                 .fg(theme.accent_success)
                                 .add_modifier(Modifier::BOLD)

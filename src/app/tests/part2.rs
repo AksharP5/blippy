@@ -126,6 +126,22 @@ fn slash_search_matches_issue_number() {
 }
 
 #[test]
+fn custom_plain_keybinding_does_not_rewrite_search_text() {
+    let mut config = Config::default();
+    config
+        .keybinds
+        .insert("refresh".to_string(), "x".to_string());
+    let mut app = App::new(config);
+    app.set_view(View::Issues);
+    app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+    app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+    assert_eq!(app.issue_query(), "xr");
+}
+
+#[test]
 fn reopen_action_for_closed_issue() {
     let mut app = App::new(Config::default());
     app.set_view(View::Issues);
@@ -610,6 +626,9 @@ fn selected_pull_request_file_view_toggle_flips_current_state() {
             patch: Some("@@ -1,1 +1,1 @@\n-old\n+new".to_string()),
         }],
     );
+    assert!(app.selected_pull_request_file_view_toggle().is_none());
+
+    app.set_pull_request_view_state(Some("PR_id".to_string()), std::collections::HashSet::new());
 
     let (path, viewed) = app
         .selected_pull_request_file_view_toggle()

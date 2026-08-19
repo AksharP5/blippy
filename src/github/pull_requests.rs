@@ -59,16 +59,6 @@ impl GitHubClient {
               }
             }
         "#;
-        let id_only_query = r#"
-            query($owner: String!, $repo: String!, $number: Int!) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $number) {
-                  id
-                }
-              }
-            }
-        "#;
-
         let mut cursor: Option<String> = None;
         let mut pull_request_id: Option<String> = None;
         let mut viewed_files = HashSet::new();
@@ -80,26 +70,7 @@ impl GitHubClient {
                 "number": pull_number,
                 "cursor": cursor,
             });
-            let response = match self.graphql(query, payload).await {
-                Ok(response) => response,
-                Err(_) => {
-                    let fallback = self
-                        .graphql(
-                            id_only_query,
-                            serde_json::json!({
-                                "owner": owner,
-                                "repo": repo,
-                                "number": pull_number,
-                            }),
-                        )
-                        .await?;
-                    let pull_request_id = fallback["data"]["repository"]["pullRequest"]
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(ToString::to_string);
-                    return Ok((pull_request_id, HashSet::new()));
-                }
-            };
+            let response = self.graphql(query, payload).await?;
             let pull_request = &response["data"]["repository"]["pullRequest"];
             if pull_request.is_null() {
                 return Ok((None, HashSet::new()));
@@ -261,8 +232,7 @@ impl GitHubClient {
     ) -> Result<Vec<ApiPullRequestReviewComment>> {
         let thread_map = self
             .list_pull_request_review_thread_map(owner, repo, pull_number)
-            .await
-            .unwrap_or_default();
+            .await?;
 
         let mut page = 1;
         let mut comments = Vec::new();

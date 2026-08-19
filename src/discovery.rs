@@ -80,8 +80,7 @@ fn scan_repos_in_dir(
             continue;
         }
 
-        let git_dir = path.join(".git");
-        if git_dir.is_dir() {
+        if is_git_repo(&path) {
             repos.push(DiscoveredRepo { path });
             continue;
         }
@@ -110,6 +109,11 @@ fn scan_repos_in_dir(
     }
 
     Ok(repos)
+}
+
+pub fn is_git_repo(path: &Path) -> bool {
+    let git_entry = path.join(".git");
+    git_entry.is_dir() || git_entry.is_file()
 }
 
 fn excluded_dirs() -> HashSet<&'static str> {
@@ -160,6 +164,19 @@ mod tests {
         let root = unique_temp_dir("scan");
         let repo_path = root.join("work").join("repo");
         fs::create_dir_all(repo_path.join(".git")).expect("create .git");
+
+        let repos = scan_repos_in_dir(&root, 4, &excluded_dirs()).expect("scan");
+        assert_eq!(repos, vec![DiscoveredRepo { path: repo_path }]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_repos_in_dir_finds_git_files_used_by_worktrees() {
+        let root = unique_temp_dir("worktree");
+        let repo_path = root.join("work").join("repo");
+        fs::create_dir_all(&repo_path).expect("create repo");
+        fs::write(repo_path.join(".git"), "gitdir: /tmp/example.git").expect("create .git");
 
         let repos = scan_repos_in_dir(&root, 4, &excluded_dirs()).expect("scan");
         assert_eq!(repos, vec![DiscoveredRepo { path: repo_path }]);
