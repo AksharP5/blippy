@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12](https://github.com/AksharP5/blippy/compare/v0.1.11...v0.1.12) - 2026-10-04
+
+### Fixed
+
+- prevent stale GitHub state and lost updates ([#36](https://github.com/AksharP5/blippy/pull/36))
+
 ## [0.1.11](https://github.com/AksharP5/blippy/compare/v0.1.10...v0.1.11) - 2026-08-19
 
 ### Fixed
