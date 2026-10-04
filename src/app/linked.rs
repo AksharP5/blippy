@@ -31,6 +31,7 @@ impl App {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub fn linked_pull_request_known(&self, issue_number: i64) -> bool {
         self.linked
             .pull_requests
@@ -38,6 +39,7 @@ impl App {
             .is_some_and(|items| items.lookup == LinkedLookup::Complete)
     }
 
+    #[cfg(test)]
     pub fn linked_issue_known(&self, pull_number: i64) -> bool {
         self.linked
             .issues

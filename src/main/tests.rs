@@ -1014,15 +1014,6 @@ fn partial_linked_issues_remain_visible_and_refresh_discovers_missing_links() {
     assert!(!app.begin_linked_issue_lookup(9));
     assert!(!app.begin_linked_pull_request_lookup(100));
     assert!(app.status().contains("Timeline unavailable"));
-    assert!(
-        !super::main_linked_actions::try_open_cached_linked_issue(
-            &mut app,
-            &conn,
-            super::LinkedIssueTarget::Browser,
-        )
-        .expect("incomplete cache requires lookup")
-    );
-
     app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
     assert!(app.begin_linked_issue_lookup(9));
     app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
@@ -1205,6 +1196,57 @@ fn linked_navigation_opens_cached_targets_hidden_by_filters() {
         ));
         assert_eq!(app.view(), View::Issues);
         assert_eq!(app.selected_issue_row().expect("origin").number, 7);
+    }
+}
+
+#[test]
+fn partial_and_inferred_links_open_cached_targets_without_github() {
+    let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+    crate::store::upsert_repo(
+        &conn,
+        &crate::store::RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "blippy".to_string(),
+            updated_at: None,
+            etag: None,
+        },
+    )
+    .expect("cache repo");
+    for target_is_pr in [true, false] {
+        for inferred in [true, false] {
+            let mut app = linked_navigation_app(target_is_pr);
+            for issue in app.issues() {
+                crate::store::upsert_issue(&conn, issue).expect("cache target");
+            }
+            match (target_is_pr, inferred) {
+                (true, true) => app.set_linked_issues_for_pull_request(8, vec![7], true),
+                (true, false) => app.set_linked_pull_requests(7, vec![8], false),
+                (false, true) => app.set_linked_pull_requests(8, vec![7], true),
+                (false, false) => app.set_linked_issues_for_pull_request(7, vec![8], false),
+            }
+            let opened = if target_is_pr {
+                assert!(!app.linked_pull_request_known(7));
+                assert!(app.selected_issue_has_known_linked_pr());
+                super::main_linked_actions::try_open_cached_linked_pull_request(
+                    &mut app,
+                    &conn,
+                    super::LinkedPullRequestTarget::Tui,
+                )
+            } else {
+                assert!(!app.linked_issue_known(7));
+                assert!(app.selected_pull_request_has_known_linked_issue());
+                super::main_linked_actions::try_open_cached_linked_issue(
+                    &mut app,
+                    &conn,
+                    super::LinkedIssueTarget::Tui,
+                )
+            }
+            .expect("open saved link");
+            assert!(opened, "saved links must not require a GitHub lookup");
+            assert_eq!(app.current_issue_number(), Some(8));
+            assert_eq!(app.view(), View::IssueDetail);
+        }
     }
 }
 

@@ -67,10 +67,6 @@ pub(super) fn try_open_cached_linked_pull_request(
     if issue.is_pr {
         return Ok(false);
     }
-    if !app.linked_pull_request_known(issue.number) {
-        return Ok(false);
-    }
-
     let pull_numbers = app.linked_pull_requests_for_issue(issue.number);
     if pull_numbers.is_empty() {
         return Ok(false);
@@ -138,10 +134,6 @@ pub(super) fn try_open_cached_linked_issue(
     if !issue.is_pr {
         return Ok(false);
     }
-    if !app.linked_issue_known(issue.number) {
-        return Ok(false);
-    }
-
     let issue_numbers = app.linked_issues_for_pull_request(issue.number);
     if issue_numbers.is_empty() {
         return Ok(false);
