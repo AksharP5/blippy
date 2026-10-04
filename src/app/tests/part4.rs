@@ -139,7 +139,17 @@ fn repository_aliases_follow_repeated_renames_without_cycles() {
     app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
     for repo in ["two", "three", "one"] {
         let requested = app.current_repo().expect("repo").to_string();
-        app.resolve_repository_alias("acme", &requested, "acme", repo);
+        app.resolve_repository_alias(
+            "acme",
+            &requested,
+            &crate::store::RepoRow {
+                id: 1,
+                owner: "acme".into(),
+                name: repo.into(),
+                updated_at: None,
+                etag: None,
+            },
+        );
         assert_eq!(app.current_repo(), Some(repo));
         assert!(app.repo_permissions_syncing());
         assert_eq!(app.pending_issue_badge(7), Some("closing"));
@@ -164,7 +174,17 @@ fn aliased_requests_keep_independent_completion_guards() {
         app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
     }
     app.set_current_repo_with_path("acme", "old", None);
-    app.resolve_repository_alias("acme", "old", "acme", "new");
+    app.resolve_repository_alias(
+        "acme",
+        "old",
+        &crate::store::RepoRow {
+            id: 1,
+            owner: "acme".into(),
+            name: "new".into(),
+            updated_at: None,
+            etag: None,
+        },
+    );
     app.finish_repo_sync("acme", "old");
     app.finish_repo_permissions_sync("acme", "old");
     app.finish_repo_labels_sync("acme", "old");

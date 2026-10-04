@@ -374,7 +374,8 @@ pub(super) fn open_linked_item_in_tui(
     };
 
     load_comments_for_issue(app, conn, issue_id)?;
-    app.reveal_issue_by_number(number, mode);
+    let revealed = app.reveal_issue_by_number(number, mode);
+    debug_assert!(revealed, "linked item #{number} found but not revealed");
     app.set_current_issue(issue_id, number);
     app.reset_issue_detail_scroll();
     app.set_view(View::IssueDetail);

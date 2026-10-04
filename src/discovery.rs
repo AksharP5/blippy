@@ -59,29 +59,36 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 fn scan_repos_in_dir(
-    _root: &Path,
-    _max_depth: usize,
-    _excluded: &HashSet<&'static str>,
+    root: &Path,
+    max_depth: usize,
+    excluded: &HashSet<&'static str>,
 ) -> Result<Vec<DiscoveredRepo>> {
     let mut repos = Vec::new();
-    if !_root.exists() {
+    if !root.exists() {
         return Ok(repos);
     }
 
     let mut stack = Vec::new();
-    stack.push((_root.to_path_buf(), 0usize));
+    stack.push((root.to_path_buf(), 0usize));
 
     while let Some((path, depth)) = stack.pop() {
-        if depth > _max_depth {
+        if depth > max_depth {
             continue;
         }
 
-        if is_excluded(&path, _excluded) {
+        if is_excluded(&path, excluded) {
             continue;
         }
 
         if is_git_repo(&path) {
             repos.push(DiscoveredRepo { path: path.clone() });
+            // Git knows its linked worktrees, so ordinary repository contents need no traversal.
+            repos.extend(
+                nested_worktrees(&path, max_depth - depth, excluded)
+                    .into_iter()
+                    .map(|path| DiscoveredRepo { path }),
+            );
+            continue;
         }
 
         let entries = match std::fs::read_dir(&path) {
@@ -108,6 +115,57 @@ fn scan_repos_in_dir(
     }
 
     Ok(repos)
+}
+
+fn nested_worktrees(
+    repo: &Path,
+    max_depth: usize,
+    excluded: &HashSet<&'static str>,
+) -> Vec<PathBuf> {
+    if max_depth == 0 {
+        return Vec::new();
+    }
+    let Ok(root) = std::fs::canonicalize(repo) else {
+        return Vec::new();
+    };
+    let Ok(output) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "list", "--porcelain", "-z"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter_map(|record| {
+            let worktree = record.strip_prefix(b"worktree ")?;
+            #[cfg(unix)]
+            let worktree = {
+                use std::os::unix::ffi::OsStrExt;
+                PathBuf::from(std::ffi::OsStr::from_bytes(worktree))
+            };
+            #[cfg(not(unix))]
+            let worktree = PathBuf::from(std::str::from_utf8(worktree).ok()?);
+            let worktree = std::fs::canonicalize(worktree).ok()?;
+            let relative = worktree.strip_prefix(&root).ok()?;
+            if relative.as_os_str().is_empty()
+                || relative.components().count() > max_depth
+                || relative
+                    .ancestors()
+                    .any(|ancestor| is_excluded(ancestor, excluded))
+                || !is_git_repo(&worktree)
+            {
+                return None;
+            }
+            Some(repo.join(relative))
+        })
+        .collect()
 }
 
 pub fn is_git_repo(path: &Path) -> bool {
@@ -155,7 +213,7 @@ fn canonical_key(path: &Path) -> String {
 mod tests {
     use super::{DiscoveredRepo, excluded_dirs, full_scan, scan_repos_in_dir};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -184,23 +242,59 @@ mod tests {
     }
 
     #[test]
-    fn full_scan_finds_nested_worktrees_and_preserves_exclusions() {
+    fn scans_find_registered_worktrees_without_traversing_repository_contents() {
         let root = unique_temp_dir("nested-worktree");
-        fs::create_dir_all(root.join(".git")).expect("create outer repo");
-        let worktree = root.join(".worktrees").join("review");
-        fs::create_dir_all(&worktree).expect("create worktree");
-        fs::write(worktree.join(".git"), "gitdir: /tmp/example.git")
-            .expect("create worktree git file");
-        fs::create_dir_all(root.join("target").join("ignored").join(".git"))
-            .expect("create excluded repo");
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).expect("create repo");
+        run_git(&repo, &["init"]);
+        run_git(
+            &repo,
+            &[
+                "-c",
+                "user.name=Blippy Tests",
+                "-c",
+                "user.email=blippy@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "Initial commit",
+            ],
+        );
+        let worktree = repo.join("reviews").join("branches").join("feature one");
+        let excluded = repo.join("target").join("ignored");
+        let outside = root.join("outside");
+        for path in [&worktree, &excluded, &outside] {
+            run_git(
+                &repo,
+                &[
+                    "worktree",
+                    "add",
+                    "--detach",
+                    path.to_str().expect("worktree path"),
+                ],
+            );
+        }
+        let embedded = repo.join("src").join("generated").join("unrelated");
+        fs::create_dir_all(&embedded).expect("create embedded repo");
+        run_git(&embedded, &["init"]);
 
-        let repos = full_scan(&root).expect("scan");
+        let repos = full_scan(&repo).expect("scan");
         assert_eq!(
             repos,
             vec![
-                DiscoveredRepo { path: root.clone() },
-                DiscoveredRepo { path: worktree }
+                DiscoveredRepo { path: repo.clone() },
+                DiscoveredRepo {
+                    path: worktree.clone()
+                }
             ],
+        );
+        let shallow = scan_repos_in_dir(&repo, 2, &excluded_dirs()).expect("shallow scan");
+        assert_eq!(shallow, vec![DiscoveredRepo { path: repo.clone() }]);
+        let bounded = scan_repos_in_dir(&repo, 3, &excluded_dirs()).expect("bounded scan");
+        assert_eq!(bounded, repos);
+        assert_eq!(
+            full_scan(&worktree).expect("scan linked worktree"),
+            vec![DiscoveredRepo { path: worktree }],
         );
 
         let _ = fs::remove_dir_all(&root);
@@ -241,5 +335,19 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("blippy-scan-{}-{}", label, nanos));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    fn run_git(path: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

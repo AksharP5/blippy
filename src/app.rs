@@ -8,7 +8,7 @@ use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
 use crate::keybinds::Keybinds;
 use crate::pr_diff::{DiffKind, parse_patch};
-use crate::store::{CommentRow, IssueRow, LocalRepoRow};
+use crate::store::{CommentRow, IssueRow, LocalRepoRow, RepoRow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -390,6 +390,7 @@ struct LinkedState {
 
 #[derive(Debug, Default)]
 struct RepoContextState {
+    id: Option<i64>,
     owner: Option<String>,
     repo: Option<String>,
     key: Option<String>,

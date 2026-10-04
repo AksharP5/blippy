@@ -138,80 +138,85 @@ impl GitHubClient {
         let resolved = self.get_repo(owner, repo).await?;
         let owner = resolved.owner.login.as_str();
         let repo = resolved.name.as_str();
-        let mut linked = Vec::new();
-        let mut seen = HashSet::new();
-        let query = r#"
-            query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $number) {
-                  closingIssuesReferences(first: 100, after: $cursor) {
-                    pageInfo { hasNextPage endCursor }
-                    nodes { number url }
-                  }
+        discover_linked_issues(
+            async |linked, seen| {
+                let query = r#"
+                    query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                      repository(owner: $owner, name: $repo) {
+                        pullRequest(number: $number) {
+                          closingIssuesReferences(first: 100, after: $cursor) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { number url }
+                          }
+                        }
+                      }
+                    }
+                "#;
+                let mut cursor: Option<String> = None;
+                let mut cursors = HashSet::new();
+                loop {
+                    let response = self
+                        .graphql(
+                            query,
+                            serde_json::json!({
+                                "owner": owner,
+                                "repo": repo,
+                                "number": pull_number,
+                                "cursor": cursor,
+                            }),
+                        )
+                        .await?;
+                    let issues =
+                        &response["data"]["repository"]["pullRequest"]["closingIssuesReferences"];
+                    if let Some(nodes) = issues["nodes"].as_array() {
+                        for issue in nodes {
+                            append_linked_issue(owner, repo, issue, linked, seen);
+                        }
+                    }
+                    cursor = next_graphql_cursor(&issues["pageInfo"], &mut cursors)?;
+                    if cursor.is_none() {
+                        break;
+                    }
                 }
-              }
-            }
-        "#;
-        let mut cursor: Option<String> = None;
-        let mut cursors = HashSet::new();
-        loop {
-            let response = self
-                .graphql(
-                    query,
-                    serde_json::json!({
-                        "owner": owner,
-                        "repo": repo,
-                        "number": pull_number,
-                        "cursor": cursor,
-                    }),
-                )
-                .await?;
-            let issues = &response["data"]["repository"]["pullRequest"]["closingIssuesReferences"];
-            if let Some(nodes) = issues["nodes"].as_array() {
-                for issue in nodes {
-                    append_linked_issue(owner, repo, issue, &mut linked, &mut seen);
+                Ok(())
+            },
+            async |linked, seen| {
+                let mut page = 1u32;
+                loop {
+                    let url = format!(
+                        "{}/repos/{}/{}/issues/{}/timeline",
+                        API_BASE, owner, repo, pull_number
+                    );
+                    let response = self
+                        .client
+                        .get(url)
+                        .bearer_auth(&self.token)
+                        .query(&[("per_page", "100"), ("page", &page.to_string())])
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let events = response.json::<Vec<serde_json::Value>>().await?;
+                    if events.is_empty() {
+                        break;
+                    }
+
+                    for event in &events {
+                        let issue = match event.get("source").and_then(|value| value.get("issue")) {
+                            Some(issue) => issue,
+                            None => continue,
+                        };
+                        append_linked_issue(owner, repo, issue, linked, seen);
+                    }
+
+                    if events.len() < 100 {
+                        break;
+                    }
+                    page += 1;
                 }
-            }
-            cursor = next_graphql_cursor(&issues["pageInfo"], &mut cursors)?;
-            if cursor.is_none() {
-                break;
-            }
-        }
-
-        let mut page = 1u32;
-        loop {
-            let url = format!(
-                "{}/repos/{}/{}/issues/{}/timeline",
-                API_BASE, owner, repo, pull_number
-            );
-            let response = self
-                .client
-                .get(url)
-                .bearer_auth(&self.token)
-                .query(&[("per_page", "100"), ("page", &page.to_string())])
-                .send()
-                .await?
-                .error_for_status()?;
-            let events = response.json::<Vec<serde_json::Value>>().await?;
-            if events.is_empty() {
-                break;
-            }
-
-            for event in &events {
-                let issue = match event.get("source").and_then(|value| value.get("issue")) {
-                    Some(issue) => issue,
-                    None => continue,
-                };
-                append_linked_issue(owner, repo, issue, &mut linked, &mut seen);
-            }
-
-            if events.len() < 100 {
-                break;
-            }
-            page += 1;
-        }
-
-        Ok(linked)
+                Ok(())
+            },
+        )
+        .await
     }
 
     pub async fn close_issue(&self, owner: &str, repo: &str, issue_number: i64) -> Result<()> {
@@ -339,6 +344,25 @@ impl GitHubClient {
     }
 }
 
+async fn discover_linked_issues(
+    closing_issues: impl AsyncFnOnce(&mut Vec<(i64, String)>, &mut HashSet<i64>) -> Result<()>,
+    timeline: impl AsyncFnOnce(&mut Vec<(i64, String)>, &mut HashSet<i64>) -> Result<()>,
+) -> Result<Vec<(i64, String)>> {
+    let mut linked = Vec::new();
+    let mut seen = HashSet::new();
+    let closing_result = closing_issues(&mut linked, &mut seen).await;
+    let timeline_result = timeline(&mut linked, &mut seen).await;
+
+    match (closing_result, timeline_result) {
+        (Err(closing_error), Err(timeline_error)) => Err(anyhow!(
+            "Closing-issue lookup failed: {closing_error:#}; timeline lookup failed: {timeline_error:#}"
+        )),
+        (Err(error), _) if linked.is_empty() => Err(error.context("Closing-issue lookup failed")),
+        (_, Err(error)) if linked.is_empty() => Err(error.context("Timeline lookup failed")),
+        _ => Ok(linked),
+    }
+}
+
 fn append_linked_issue(
     owner: &str,
     repo: &str,
@@ -380,8 +404,107 @@ fn item_url_matches_repo(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_linked_issue, item_url_matches_repo};
+    use super::{append_linked_issue, discover_linked_issues, item_url_matches_repo};
     use std::collections::HashSet;
+
+    #[tokio::test]
+    async fn graphql_failure_still_discovers_timeline_links() {
+        let linked = discover_linked_issues(
+            async |_, _| Err(anyhow::anyhow!("GraphQL unavailable")),
+            async |linked, seen| {
+                append_linked_issue(
+                    "acme",
+                    "blippy",
+                    &serde_json::json!({
+                        "number": 21,
+                        "html_url": "https://github.com/acme/blippy/issues/21",
+                    }),
+                    linked,
+                    seen,
+                );
+                Ok(())
+            },
+        )
+        .await
+        .expect("timeline links remain usable");
+
+        assert_eq!(
+            linked,
+            vec![(21, "https://github.com/acme/blippy/issues/21".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn timeline_failure_keeps_unique_closing_links() {
+        let issue = serde_json::json!({
+            "number": 20,
+            "url": "https://github.com/acme/blippy/issues/20",
+        });
+        let linked = discover_linked_issues(
+            async |linked, seen| {
+                append_linked_issue("acme", "blippy", &issue, linked, seen);
+                Ok(())
+            },
+            async |linked, seen| {
+                append_linked_issue("acme", "blippy", &issue, linked, seen);
+                Err(anyhow::anyhow!("timeline unavailable"))
+            },
+        )
+        .await
+        .expect("closing links remain usable");
+
+        assert_eq!(
+            linked,
+            vec![(20, "https://github.com/acme/blippy/issues/20".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_link_sources_are_reported_when_no_links_are_available() {
+        for (closing_error, timeline_error, partial_link) in [
+            (Some("GraphQL unavailable"), None, false),
+            (None, Some("timeline unavailable"), false),
+            (
+                Some("GraphQL unavailable"),
+                Some("timeline unavailable"),
+                false,
+            ),
+            (
+                Some("GraphQL unavailable"),
+                Some("timeline unavailable"),
+                true,
+            ),
+        ] {
+            let error = discover_linked_issues(
+                async |linked, _| {
+                    if partial_link {
+                        linked.push((20, "https://github.com/acme/blippy/issues/20".to_string()));
+                    }
+                    match closing_error {
+                        Some(error) => Err(anyhow::anyhow!(error)),
+                        None => Ok(()),
+                    }
+                },
+                async |_, _| match timeline_error {
+                    Some(error) => Err(anyhow::anyhow!(error)),
+                    None => Ok(()),
+                },
+            )
+            .await
+            .expect_err("failed discovery must not look like an empty result");
+            let message = format!("{error:#}");
+            for expected in [closing_error, timeline_error].into_iter().flatten() {
+                assert!(message.contains(expected), "{message}");
+            }
+        }
+
+        assert!(
+            discover_linked_issues(async |_, _| Ok(()), async |_, _| Ok(()))
+                .await
+                .expect("successful empty discovery")
+                .is_empty()
+        );
+    }
 
     #[test]
     fn closing_and_incoming_issue_links_preserve_unique_current_repo_targets() {

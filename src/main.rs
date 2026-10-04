@@ -602,6 +602,7 @@ fn refresh_current_repo_issues(app: &mut App, conn: &rusqlite::Connection) -> Re
         }
     };
     let issues = list_issues(conn, repo_row.id)?;
+    app.set_current_repo_id(repo_row.id);
     app.set_issues(issues);
     Ok(())
 }

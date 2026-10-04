@@ -56,6 +56,7 @@ pub(super) fn load_issues_for_slug(
         }
     };
     let issues = list_issues(conn, repo_row.id)?;
+    app.set_current_repo_id(repo_row.id);
     app.set_issues(issues);
     app.set_status(format!("{}/{}", owner, repo));
     Ok(())

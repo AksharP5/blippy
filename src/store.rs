@@ -390,14 +390,6 @@ fn repo_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepoRow> {
     })
 }
 
-pub fn count_issues_updated_since(conn: &Connection, repo_id: i64, since: &str) -> Result<i64> {
-    Ok(conn.query_row(
-        "SELECT COUNT(*) FROM issues WHERE repo_id = ?1 AND updated_at >= ?2",
-        (repo_id, since),
-        |row| row.get(0),
-    )?)
-}
-
 pub fn update_issue_comments_count(conn: &Connection, issue_id: i64, count: i64) -> Result<()> {
     conn.execute(
         "UPDATE issues SET comments_count = ?1 WHERE id = ?2",

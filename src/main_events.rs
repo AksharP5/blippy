@@ -40,13 +40,7 @@ pub(super) fn handle_events(
                 stats,
             } => {
                 app.finish_repo_sync(&owner, &repo);
-                app.resolve_repository_alias(
-                    &owner,
-                    &repo,
-                    &resolved_repo.owner,
-                    &resolved_repo.name,
-                );
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+                if app.resolve_repository_alias(&owner, &repo, &resolved_repo) {
                     refresh_current_repo_issues(app, conn)?;
                     let (open_count, closed_count) = app.issue_counts();
                     if let Some(reason) = stats.incomplete_reason {
@@ -145,24 +139,39 @@ pub(super) fn handle_events(
             }
             AppEvent::IssueCreated { repo, issue } => {
                 let issue_number = issue.number;
-                crate::store::upsert_issue(conn, &issue)?;
+                let cache_result = crate::store::upsert_issue(conn, &issue);
                 if !repo.is_current(app) {
+                    if let Err(error) = cache_result {
+                        app.set_status(format!(
+                            "Created issue {}/{} #{}; cache update failed: {}",
+                            repo.owner, repo.repo, issue_number, error
+                        ));
+                    }
                     continue;
                 }
-                app.set_work_item_mode(WorkItemMode::Issues);
-                app.set_issue_filter(IssueFilter::Open);
-                refresh_current_repo_issues(app, conn)?;
-                if app.reveal_issue_by_number(issue_number, WorkItemMode::Issues)
-                    && let Some((issue_id, issue_number)) = app
-                        .selected_issue_row()
-                        .map(|issue| (issue.id, issue.number))
-                {
-                    app.set_current_issue(issue_id, issue_number);
-                    load_comments_for_issue(app, conn, issue_id)?;
-                    app.set_view(View::IssueDetail);
-                }
-                app.set_status(format!("Created issue #{}", issue_number));
                 app.request_sync();
+                let cache_result = cache_result.and_then(|()| {
+                    app.set_work_item_mode(WorkItemMode::Issues);
+                    app.set_issue_filter(IssueFilter::Open);
+                    refresh_current_repo_issues(app, conn)?;
+                    if app.reveal_issue_by_number(issue_number, WorkItemMode::Issues)
+                        && let Some((issue_id, issue_number)) = app
+                            .selected_issue_row()
+                            .map(|issue| (issue.id, issue.number))
+                    {
+                        app.set_current_issue(issue_id, issue_number);
+                        load_comments_for_issue(app, conn, issue_id)?;
+                        app.set_view(View::IssueDetail);
+                    }
+                    Ok(())
+                });
+                app.set_status(match cache_result {
+                    Ok(()) => format!("Created issue #{}", issue_number),
+                    Err(error) => format!(
+                        "Created issue #{}; cache update failed: {}",
+                        issue_number, error
+                    ),
+                });
             }
             AppEvent::IssueCreateFailed { repo, message } => {
                 if !repo.is_current(app) {
@@ -595,12 +604,24 @@ pub(super) fn handle_events(
                 comment_id,
                 body,
             } => {
-                crate::store::update_comment_body_by_id(conn, comment_id, &body)?;
+                let cache_result = crate::store::update_comment_body_by_id(conn, comment_id, &body);
                 if !repo.is_current(app) {
+                    if let Err(error) = cache_result {
+                        app.set_status(format!(
+                            "{}/{} #{} comment updated; cache update failed: {}",
+                            repo.owner, repo.repo, issue_number, error
+                        ));
+                    }
                     continue;
                 }
                 app.update_comment_body_by_id(comment_id, body.as_str());
-                app.set_status(format!("#{} comment updated", issue_number));
+                app.set_status(match cache_result {
+                    Ok(()) => format!("#{} comment updated", issue_number),
+                    Err(error) => format!(
+                        "#{} comment updated; cache update failed: {}",
+                        issue_number, error
+                    ),
+                });
                 app.request_comment_sync();
                 app.request_sync();
             }
@@ -610,13 +631,28 @@ pub(super) fn handle_events(
                 issue_id,
                 comment_id,
             } => {
-                let count = crate::store::delete_comment_by_id(conn, comment_id, issue_id)?;
+                let cache_result = crate::store::delete_comment_by_id(conn, comment_id, issue_id);
                 if !repo.is_current(app) {
+                    if let Err(error) = cache_result {
+                        app.set_status(format!(
+                            "{}/{} #{} comment deleted; cache update failed: {}",
+                            repo.owner, repo.repo, issue_number, error
+                        ));
+                    }
                     continue;
                 }
                 app.remove_comment_by_id(comment_id);
-                app.update_issue_comments_count_by_number(issue_number, count);
-                app.set_status(format!("#{} comment deleted", issue_number));
+                let status = match cache_result {
+                    Ok(count) => {
+                        app.update_issue_comments_count_by_number(issue_number, count);
+                        format!("#{} comment deleted", issue_number)
+                    }
+                    Err(error) => format!(
+                        "#{} comment deleted; cache update failed: {}",
+                        issue_number, error
+                    ),
+                };
+                app.set_status(status);
                 app.request_comment_sync();
                 app.request_sync();
             }

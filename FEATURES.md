@@ -6,7 +6,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 ## Repository Discovery and Sync
 
-- Scans local git repositories, including nested worktrees, and indexes GitHub remotes
+- Scans local git repositories and registered nested worktrees without traversing repository contents, and indexes GitHub remotes
 - Recognizes GitHub SSH remotes with explicit ports
 - Supports direct `owner/repo` repo context from the current working tree
 - Keeps a local SQLite cache for fast navigation
@@ -15,6 +15,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Stalled GitHub API requests time out after 30 seconds
 - Background sync avoids duplicate requests during repository and issue navigation
 - Renamed and transferred repositories retain their cached issues and linked items
+- Cache write failures report successful GitHub actions and keep the terminal session open
 
 ## Issues and Pull Requests in One Flow
 

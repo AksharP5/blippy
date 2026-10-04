@@ -270,6 +270,131 @@ fn offscreen_repository_redirect_keeps_pending_operations_visible_under_both_nam
 }
 
 #[test]
+fn late_sync_does_not_select_a_repository_after_its_old_name_is_reused() {
+    for (cached, requested) in [(false, "new"), (true, "new"), (true, "old")] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = crate::app::App::new(Config::default());
+        let renamed = crate::store::RepoRow {
+            id: 1,
+            owner: "acme".into(),
+            name: "new".into(),
+            updated_at: None,
+            etag: None,
+        };
+        crate::store::upsert_repo(&conn, &renamed).expect("renamed repository");
+        let (event_tx, event_rx) = channel();
+        app.set_current_repo_with_path("acme", "old", None);
+        event_tx
+            .send(super::AppEvent::SyncFinished {
+                owner: "acme".into(),
+                repo: "old".into(),
+                resolved_repo: renamed.clone(),
+                stats: Default::default(),
+            })
+            .expect("rename completed");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("learn rename");
+        app.begin_repo_sync();
+
+        if cached {
+            let reused = crate::store::RepoRow {
+                id: 2,
+                name: "old".into(),
+                ..renamed.clone()
+            };
+            crate::store::upsert_repo(&conn, &reused).expect("different repository at old name");
+        }
+        super::main_data::load_issues_for_slug(&mut app, &conn, "acme", "old", None)
+            .expect("select old name");
+        event_tx
+            .send(super::AppEvent::SyncFinished {
+                owner: "acme".into(),
+                repo: requested.into(),
+                resolved_repo: renamed,
+                stats: Default::default(),
+            })
+            .expect("late sync completed");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle late sync");
+        assert_eq!(app.current_repo(), Some("old"));
+        assert!(app.issues().is_empty());
+        assert!(!app.status().starts_with("Synced"));
+    }
+}
+
+#[test]
+fn successful_github_mutations_survive_cache_write_failures() {
+    for action in ["create", "edit", "delete"] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = linked_navigation_app(true);
+        crate::store::upsert_repo(
+            &conn,
+            &crate::store::RepoRow {
+                id: 1,
+                owner: "acme".into(),
+                name: "blippy".into(),
+                updated_at: None,
+                etag: None,
+            },
+        )
+        .expect("repo");
+        crate::store::upsert_issue(&conn, &app.issues()[0]).expect("issue");
+        let comment = crate::store::CommentRow {
+            id: 50,
+            issue_id: 1,
+            author: "alex".into(),
+            body: "before".into(),
+            created_at: None,
+            last_accessed_at: None,
+        };
+        crate::store::upsert_comment(&conn, &comment).expect("comment");
+        app.set_comments(vec![comment]);
+        conn.pragma_update(None, "query_only", true)
+            .expect("read-only cache");
+        let repo = super::RepoIdentity::new("acme", "blippy");
+        let event = match action {
+            "create" => super::AppEvent::IssueCreated {
+                repo,
+                issue: app.issues()[1].clone(),
+            },
+            "edit" => super::AppEvent::IssueCommentUpdated {
+                repo,
+                issue_number: 7,
+                comment_id: 50,
+                body: "after".into(),
+            },
+            _ => super::AppEvent::IssueCommentDeleted {
+                repo,
+                issue_number: 7,
+                issue_id: 1,
+                comment_id: 50,
+            },
+        };
+        let (event_tx, event_rx) = channel();
+        event_tx.send(event).expect("successful GitHub mutation");
+        event_tx
+            .send(super::AppEvent::RepoPermissionsResolved {
+                owner: "acme".into(),
+                repo: "blippy".into(),
+                can_edit_issue_metadata: true,
+                can_merge_pull_request: true,
+            })
+            .expect("subsequent event");
+        super::main_events::handle_events(&mut app, &conn, &event_rx)
+            .expect("cache failures must not close the app");
+        assert_eq!(app.repo_issue_metadata_editable(), Some(true));
+        assert!(app.status().contains("cache update failed"));
+        assert!(app.take_sync_request());
+        if action == "edit" {
+            assert_eq!(app.comments()[0].body, "after");
+            assert!(app.take_comment_sync_request());
+        }
+        if action == "delete" {
+            assert!(app.comments().is_empty());
+            assert!(app.take_comment_sync_request());
+        }
+    }
+}
+
+#[test]
 fn review_edits_and_deletions_refresh_after_an_older_snapshot() {
     let conn = rusqlite::Connection::open_in_memory().expect("conn");
     for delete in [false, true] {

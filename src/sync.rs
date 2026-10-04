@@ -141,21 +141,13 @@ where
         .as_ref()
         .and_then(|stored_repo| stored_repo.etag.clone());
 
-    // A first-page ETag cannot certify later pages at the same update timestamp.
-    let use_first_page_etag = match (previous_etag.as_ref(), previous_cursor.as_deref()) {
-        (Some(_), Some(cursor)) => {
-            crate::store::count_issues_updated_since(_conn, repo_row.id, cursor)? < 100
-        }
-        _ => true,
-    };
-
     let mut stats = SyncStats::default();
     let mut page = 1u32;
     let mut fetched_any_page = false;
     let mut latest_seen_updated_at = previous_cursor.clone();
-    let mut first_page_etag = None;
+    let mut first_page_etag = previous_etag.clone();
     loop {
-        let if_none_match = if page == 1 && use_first_page_etag {
+        let if_none_match = if page == 1 {
             previous_etag.as_deref()
         } else {
             None
@@ -171,11 +163,11 @@ where
             .await;
         let (issues, etag) = match page_result {
             Ok(ApiIssuesPageResult::NotModified) => {
+                // The ETag certifies only this page, including when the cache is sparse.
                 stats.not_modified = true;
-                return Ok(SyncResult {
-                    repo: repo_row,
-                    stats,
-                });
+                fetched_any_page = true;
+                page += 1;
+                continue;
             }
             Ok(ApiIssuesPageResult::Page(page_result)) => {
                 fetched_any_page = true;
@@ -183,6 +175,7 @@ where
             }
             Err(error) => {
                 if fetched_any_page {
+                    stats.not_modified = false;
                     stats.incomplete_reason = Some(error.to_string());
                     break;
                 }
@@ -225,6 +218,7 @@ where
         for row in &rows {
             crate::store::upsert_issue(&transaction, row)?;
             stats.issues += 1;
+            stats.not_modified = false;
         }
         transaction.commit()?;
         _on_progress(page, &stats);
@@ -238,7 +232,12 @@ where
         let next_cursor = latest_seen_updated_at
             .as_deref()
             .or(previous_cursor.as_deref());
-        let next_etag = first_page_etag.as_deref().or(previous_etag.as_deref());
+        // Changing `since` changes the request the ETag belongs to.
+        let next_etag = if next_cursor == previous_cursor.as_deref() {
+            first_page_etag.as_deref()
+        } else {
+            None
+        };
         crate::store::update_repo_sync_state(_conn, repo_row.id, next_cursor, next_etag)?;
         repo_row.updated_at = next_cursor.map(ToString::to_string);
         repo_row.etag = next_etag.map(ToString::to_string);

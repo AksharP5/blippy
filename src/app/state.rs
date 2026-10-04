@@ -34,20 +34,38 @@ impl App {
         self.repository_key_is_current(&repository_key(owner, repo))
     }
 
+    pub fn set_current_repo_id(&mut self, id: i64) {
+        self.context.id = Some(id);
+        if let Some(key) = self.current_repository_request_key() {
+            // A cached repository owns this name; an earlier redirect may now be obsolete.
+            self.context.aliases.remove(&key);
+            self.context.key = Some(key);
+        }
+    }
+
     pub fn resolve_repository_alias(
         &mut self,
         requested_owner: &str,
         requested_repo: &str,
-        owner: &str,
-        repo: &str,
-    ) {
+        resolved: &RepoRow,
+    ) -> bool {
+        let requested_key = repository_key(requested_owner, requested_repo);
+        let selected_key = self.current_repository_request_key();
         let old_key = self.resolved_repository_key(requested_owner, requested_repo);
-        let key = repository_key(owner, repo);
-        let current = self
-            .context
-            .key
-            .as_ref()
-            .is_some_and(|context| context == &old_key || context == &key);
+        let key = repository_key(&resolved.owner, &resolved.name);
+        let current = self.context.id.map_or_else(
+            || {
+                selected_key
+                    .as_ref()
+                    .is_some_and(|selected| selected == &requested_key || selected == &key)
+            },
+            |id| id == resolved.id,
+        );
+        if selected_key.as_ref() == Some(&requested_key)
+            && self.context.id.is_some_and(|id| id != resolved.id)
+        {
+            return false;
+        }
         if old_key != key {
             for target in self.context.aliases.values_mut() {
                 if *target == old_key {
@@ -56,21 +74,22 @@ impl App {
             }
             self.context.aliases.insert(old_key, key.clone());
         }
-        let requested_key = repository_key(requested_owner, requested_repo);
         if requested_key != key {
             self.context.aliases.insert(requested_key, key.clone());
         }
         self.context.aliases.retain(|alias, target| alias != target);
         if !current {
-            return;
+            return false;
         }
         if self.current_repository_request_key().as_ref() != Some(&key) {
             self.linked.pull_requests.clear();
             self.linked.issues.clear();
         }
-        self.context.owner = Some(owner.to_string());
-        self.context.repo = Some(repo.to_string());
+        self.context.id = Some(resolved.id);
+        self.context.owner = Some(resolved.owner.clone());
+        self.context.repo = Some(resolved.name.clone());
         self.context.key = Some(key);
+        true
     }
 
     pub fn should_quit(&self) -> bool {
@@ -372,6 +391,7 @@ impl App {
     }
 
     pub fn set_current_repo_with_path(&mut self, owner: &str, repo: &str, path: Option<&str>) {
+        self.context.id = None;
         self.context.owner = Some(owner.to_string());
         self.context.repo = Some(repo.to_string());
         self.context.key = Some(self.resolved_repository_key(owner, repo));

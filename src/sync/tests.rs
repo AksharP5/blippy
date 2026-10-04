@@ -418,7 +418,7 @@ async fn sync_repo_finishes_a_short_page_without_another_request() {
         .expect("lookup")
         .expect("repo");
     assert_eq!(repo.updated_at.as_deref(), Some("2024-01-05T00:00:00Z"));
-    assert_eq!(repo.etag.as_deref(), Some("short-page"));
+    assert_eq!(repo.etag, None);
 }
 
 #[tokio::test]
@@ -491,14 +491,14 @@ async fn sync_repo_updates_repo_sync_cursor_after_success() {
         stored_repo.updated_at.as_deref(),
         Some("2024-01-03T00:00:00Z")
     );
-    assert_eq!(stored_repo.etag.as_deref(), Some("etag-cursor"));
+    assert_eq!(stored_repo.etag, None);
 
     drop(conn);
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
-async fn sync_repo_skips_fetch_when_etag_not_modified() {
+async fn sync_repo_reports_no_changes_after_etag_and_later_pages_are_checked() {
     let dir = unique_temp_dir("sync-not-modified");
     let db_path = dir.join("blippy.db");
     let conn = open_db_at(&db_path).expect("open db");
@@ -551,22 +551,59 @@ async fn sync_repo_skips_fetch_when_etag_not_modified() {
 }
 
 #[tokio::test]
+async fn sync_repo_preserves_state_when_a_later_page_fails_after_not_modified() {
+    let conn = open_db_at(std::path::Path::new(":memory:")).expect("open db");
+    let existing = crate::store::RepoRow {
+        id: 1,
+        owner: "acme".to_string(),
+        name: "blippy".to_string(),
+        updated_at: Some("2024-01-05T00:00:00Z".to_string()),
+        etag: Some("unchanged-first-page".to_string()),
+    };
+    crate::store::upsert_repo(&conn, &existing).expect("seed repo state");
+    let client = FakeGitHub {
+        repo: serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "name": "blippy",
+            "owner": {"login": "acme"},
+        }))
+        .expect("API repo"),
+        issues: Vec::new(),
+        fail_get_repo: false,
+        fail_issue_page: Some(2),
+        issue_page_size: 100,
+        page_etag: existing.etag.clone(),
+        not_modified_when_etag_matches: true,
+    };
+
+    let result = sync_repo_with_progress(&client, &conn, "acme", "blippy", |_, _| {})
+        .await
+        .expect("return incomplete sync");
+    assert_eq!(result.stats.issues, 0);
+    assert!(!result.stats.not_modified);
+    assert_eq!(
+        result.stats.incomplete_reason.as_deref(),
+        Some("rate limit")
+    );
+    assert_eq!(result.repo, existing);
+    assert_eq!(
+        get_repo_by_slug(&conn, "acme", "blippy").expect("stored state"),
+        Some(existing)
+    );
+}
+
+#[tokio::test]
 async fn sync_repo_fetches_later_same_timestamp_changes_despite_first_page_etag() {
-    for cached_count in [100, 101] {
+    for cached_count in [1, 99, 100, 101] {
         let conn = open_db_at(std::path::Path::new(":memory:")).expect("open db");
-        let issue = |number| {
-            serde_json::from_value(serde_json::json!({
-                "id": number,
-                "number": number,
-                "state": "open",
-                "title": format!("Issue {number}"),
-                "comments": 0,
-                "updated_at": "2024-01-05T00:00:00Z",
-                "labels": [],
-                "assignees": [],
-            }))
-            .expect("API issue")
+        let existing = crate::store::RepoRow {
+            id: 1,
+            owner: "acme".to_string(),
+            name: "blippy".to_string(),
+            updated_at: Some("2024-01-05T00:00:00Z".to_string()),
+            etag: Some("unchanged-first-page".to_string()),
         };
+        crate::store::upsert_repo(&conn, &existing).expect("seed repo state");
         let mut client = FakeGitHub {
             repo: serde_json::from_value(serde_json::json!({
                 "id": 1,
@@ -574,26 +611,21 @@ async fn sync_repo_fetches_later_same_timestamp_changes_despite_first_page_etag(
                 "owner": {"login": "acme"},
             }))
             .expect("API repo"),
-            issues: ((102 - cached_count)..=101).rev().map(issue).collect(),
+            issues: (1..=101)
+                .rev()
+                .map(|number| issue_fixture(number, existing.updated_at.as_deref()))
+                .collect(),
             fail_get_repo: false,
             fail_issue_page: None,
             issue_page_size: 100,
             page_etag: Some("unchanged-first-page".to_string()),
-            not_modified_when_etag_matches: false,
+            not_modified_when_etag_matches: true,
         };
-        sync_repo(&client, &conn, "acme", "blippy")
-            .await
-            .expect("initial sync");
-        assert_eq!(
-            list_issues(&conn, 1).expect("cached issues").len(),
-            cached_count as usize
-        );
-
-        if cached_count == 100 {
-            client.issues.push(issue(1));
+        for issue in &client.issues[..cached_count] {
+            crate::store::upsert_issue(&conn, &map_issue_to_row(1, issue))
+                .expect("seed cached issue");
         }
         client.issues[100].title = "Changed on the second page".to_string();
-        client.not_modified_when_etag_matches = true;
 
         let stats = sync_repo(&client, &conn, "acme", "blippy")
             .await
@@ -689,14 +721,22 @@ async fn sync_repo_resolves_a_cold_redirect_and_reuses_its_cursor_on_the_next_sy
         first.repo.updated_at.as_deref(),
         Some("2024-01-05T00:00:00Z")
     );
-    assert_eq!(first.repo.etag, client.page_etag);
+    assert_eq!(first.repo.etag, None);
 
     client.not_modified_when_etag_matches = true;
     let second = sync_repo_with_progress(&client, &conn, "old-owner", "old-name", |_, _| {})
         .await
         .expect("repeat sync through the old remote");
-    assert!(second.stats.not_modified);
-    assert_eq!(second.repo, first.repo);
+    assert!(!second.stats.not_modified);
+    assert_eq!(second.stats.issues, 1);
+    assert_eq!(second.repo.updated_at, first.repo.updated_at);
+    assert_eq!(second.repo.etag, client.page_etag);
+
+    let third = sync_repo_with_progress(&client, &conn, "old-owner", "old-name", |_, _| {})
+        .await
+        .expect("reuse ETag for the same cursor");
+    assert!(third.stats.not_modified);
+    assert_eq!(third.repo, second.repo);
     assert_eq!(list_issues(&conn, 1).expect("cached issues").len(), 1);
 }
 
