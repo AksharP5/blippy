@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+const NESTED_REPO_DEPTH: usize = 4;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredRepo {
     pub path: PathBuf,
@@ -68,11 +70,12 @@ fn scan_repos_in_dir(
         return Ok(repos);
     }
 
+    let mut seen = HashSet::new();
     let mut stack = Vec::new();
-    stack.push((root.to_path_buf(), 0usize));
+    stack.push((root.to_path_buf(), 0usize, max_depth));
 
-    while let Some((path, depth)) = stack.pop() {
-        if depth > max_depth {
+    while let Some((path, depth, mut limit)) = stack.pop() {
+        if depth > limit {
             continue;
         }
 
@@ -81,13 +84,23 @@ fn scan_repos_in_dir(
         }
 
         if is_git_repo(&path) {
+            if !seen.insert(canonical_key(&path)) {
+                continue;
+            }
             repos.push(DiscoveredRepo { path: path.clone() });
-            // Git knows its linked worktrees, so ordinary repository contents need no traversal.
-            repos.extend(
-                nested_worktrees(&path, max_depth - depth, excluded)
-                    .into_iter()
-                    .map(|path| DiscoveredRepo { path }),
-            );
+            // Bound ordinary traversal; Git can enumerate linked worktrees at any depth.
+            for worktree in nested_worktrees(&path, max_depth - depth, excluded) {
+                let nested_depth = worktree
+                    .strip_prefix(&path)
+                    .expect("worktree is inside the repository")
+                    .components()
+                    .count();
+                stack.push((worktree, depth + nested_depth, max_depth));
+            }
+            limit = max_depth.min(depth.saturating_add(NESTED_REPO_DEPTH));
+        }
+
+        if depth == limit {
             continue;
         }
 
@@ -106,11 +119,7 @@ fn scan_repos_in_dir(
                 continue;
             }
 
-            if depth == usize::MAX {
-                continue;
-            }
-
-            stack.push((entry_path, depth + 1));
+            stack.push((entry_path, depth + 1, limit));
         }
     }
 
@@ -242,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn scans_find_registered_worktrees_without_traversing_repository_contents() {
+    fn scans_find_shallow_nested_repos_and_deep_registered_worktrees() {
         let root = unique_temp_dir("nested-worktree");
         let repo = root.join("repo");
         fs::create_dir_all(&repo).expect("create repo");
@@ -260,10 +269,11 @@ mod tests {
                 "Initial commit",
             ],
         );
-        let worktree = repo.join("reviews").join("branches").join("feature one");
+        let worktree = repo.join("reviews/branches/deep/nested/feature one");
+        let shallow_worktree = repo.join(".worktrees/review");
         let excluded = repo.join("target").join("ignored");
         let outside = root.join("outside");
-        for path in [&worktree, &excluded, &outside] {
+        for path in [&worktree, &shallow_worktree, &excluded, &outside] {
             run_git(
                 &repo,
                 &[
@@ -275,26 +285,37 @@ mod tests {
             );
         }
         let embedded = repo.join("src").join("generated").join("unrelated");
-        fs::create_dir_all(&embedded).expect("create embedded repo");
-        run_git(&embedded, &["init"]);
+        let boundary = repo.join("tools/packages/nested/boundary");
+        let deep_embedded = repo.join("assets/generated/cache/deep/unrelated");
+        let worktree_embedded = worktree.join("packages/library");
+        for path in [&embedded, &boundary, &deep_embedded, &worktree_embedded] {
+            fs::create_dir_all(path).expect("create embedded repo");
+            run_git(path, &["init"]);
+        }
 
-        let repos = full_scan(&repo).expect("scan");
-        assert_eq!(
-            repos,
-            vec![
-                DiscoveredRepo { path: repo.clone() },
-                DiscoveredRepo {
-                    path: worktree.clone()
-                }
-            ],
-        );
+        let mut expected = vec![
+            repo.clone(),
+            worktree.clone(),
+            shallow_worktree.clone(),
+            embedded.clone(),
+            boundary,
+            worktree_embedded.clone(),
+        ];
+        expected.sort();
+        assert_eq!(sorted_repo_paths(full_scan(&repo).expect("scan")), expected);
         let shallow = scan_repos_in_dir(&repo, 2, &excluded_dirs()).expect("shallow scan");
-        assert_eq!(shallow, vec![DiscoveredRepo { path: repo.clone() }]);
+        let mut expected = vec![repo.clone(), shallow_worktree.clone()];
+        expected.sort();
+        assert_eq!(sorted_repo_paths(shallow), expected);
         let bounded = scan_repos_in_dir(&repo, 3, &excluded_dirs()).expect("bounded scan");
-        assert_eq!(bounded, repos);
+        expected.push(embedded);
+        expected.sort();
+        assert_eq!(sorted_repo_paths(bounded), expected);
+        let mut expected = vec![worktree.clone(), worktree_embedded];
+        expected.sort();
         assert_eq!(
-            full_scan(&worktree).expect("scan linked worktree"),
-            vec![DiscoveredRepo { path: worktree }],
+            sorted_repo_paths(full_scan(&worktree).expect("scan linked worktree")),
+            expected,
         );
 
         let _ = fs::remove_dir_all(&root);
@@ -349,5 +370,11 @@ mod tests {
             "git {args:?}: {}",
             String::from_utf8_lossy(&output.stderr),
         );
+    }
+
+    fn sorted_repo_paths(repos: Vec<DiscoveredRepo>) -> Vec<PathBuf> {
+        let mut paths: Vec<_> = repos.into_iter().map(|repo| repo.path).collect();
+        paths.sort();
+        paths
     }
 }

@@ -544,7 +544,7 @@ fn linked_pull_request_none_does_not_clear_cached_link() {
 #[test]
 fn linked_pull_request_multi_preserves_all_candidates() {
     let mut app = App::new(Config::default());
-    app.set_linked_pull_requests(7, vec![42, 84]);
+    app.set_linked_pull_requests(7, vec![42, 84], true);
 
     assert_eq!(app.linked_pull_request_for_issue(7), Some(42));
     assert_eq!(app.linked_pull_requests_for_issue(7), vec![42, 84]);
@@ -553,7 +553,7 @@ fn linked_pull_request_multi_preserves_all_candidates() {
 #[test]
 fn linked_issue_multi_preserves_all_candidates() {
     let mut app = App::new(Config::default());
-    app.set_linked_issues_for_pull_request(42, vec![7, 9]);
+    app.set_linked_issues_for_pull_request(42, vec![7, 9], true);
 
     assert_eq!(app.linked_issue_for_pull_request(42), Some(7));
     assert_eq!(app.linked_issues_for_pull_request(42), vec![7, 9]);

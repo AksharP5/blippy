@@ -354,7 +354,7 @@ pub(super) fn handle_events(
                     .iter()
                     .map(|(pull_number, _url)| *pull_number)
                     .collect::<Vec<i64>>();
-                app.set_linked_pull_requests(issue_number, pull_numbers.clone());
+                app.set_linked_pull_requests(issue_number, pull_numbers.clone(), true);
 
                 if pull_numbers.is_empty() {
                     if target == LinkedPullRequestTarget::Probe {
@@ -460,7 +460,7 @@ pub(super) fn handle_events(
                 if !repo.is_current(app) {
                     continue;
                 }
-                app.set_linked_pull_requests(issue_number, Vec::new());
+                app.set_linked_pull_requests(issue_number, Vec::new(), false);
                 if target == LinkedPullRequestTarget::Probe {
                     continue;
                 }
@@ -483,11 +483,25 @@ pub(super) fn handle_events(
                 if !repo.is_current(app) {
                     continue;
                 }
+                let crate::github::LinkedIssues {
+                    issues,
+                    incomplete_reason,
+                } = issues;
                 let issue_numbers = issues
                     .iter()
                     .map(|(issue_number, _url)| *issue_number)
                     .collect::<Vec<i64>>();
-                app.set_linked_issues_for_pull_request(pull_number, issue_numbers.clone());
+                app.set_linked_issues_for_pull_request(
+                    pull_number,
+                    issue_numbers.clone(),
+                    incomplete_reason.is_none(),
+                );
+                let lookup_status = |message: String| match incomplete_reason.as_ref() {
+                    Some(reason) => {
+                        format!("{message}; linked lookup incomplete: {reason}; refresh to retry")
+                    }
+                    None => message,
+                };
 
                 if issue_numbers.is_empty() {
                     if target == LinkedIssueTarget::Probe {
@@ -498,6 +512,17 @@ pub(super) fn handle_events(
                 }
 
                 if target == LinkedIssueTarget::Probe {
+                    if incomplete_reason.is_some()
+                        && app
+                            .current_or_selected_issue()
+                            .is_some_and(|issue| issue.is_pr && issue.number == pull_number)
+                    {
+                        app.set_status(lookup_status(format!(
+                            "Found {} linked issues for PR #{}",
+                            issue_numbers.len(),
+                            pull_number
+                        )));
+                    }
                     continue;
                 }
 
@@ -508,11 +533,11 @@ pub(super) fn handle_events(
                         LinkedIssueTarget::Probe => LinkedPickerTarget::IssueTui,
                     };
                     app.open_linked_picker(app.view(), picker_target, issue_numbers);
-                    app.set_status(format!(
+                    app.set_status(lookup_status(format!(
                         "Found {} linked issues for PR #{}",
                         app.linked_picker_numbers().len(),
                         pull_number
-                    ));
+                    )));
                     continue;
                 }
 
@@ -534,15 +559,18 @@ pub(super) fn handle_events(
                         issue_number,
                         WorkItemMode::Issues,
                     )? {
-                        app.set_status(format!("Opened linked issue #{} in TUI", issue_number));
+                        app.set_status(lookup_status(format!(
+                            "Opened linked issue #{} in TUI",
+                            issue_number
+                        )));
                         continue;
                     }
 
                     app.clear_linked_navigation_origin();
-                    app.set_status(format!(
+                    app.set_status(lookup_status(format!(
                         "Linked issue #{} not cached in TUI yet; press r then Shift+P",
                         issue_number
-                    ));
+                    )));
                     continue;
                 }
 
@@ -566,14 +594,17 @@ pub(super) fn handle_events(
                         app.set_status(format!("Open linked issue failed: {}", error));
                         continue;
                     }
-                    app.set_status(format!("Opened linked issue #{} in browser", issue_number));
+                    app.set_status(lookup_status(format!(
+                        "Opened linked issue #{} in browser",
+                        issue_number
+                    )));
                     continue;
                 }
 
-                app.set_status(format!(
+                app.set_status(lookup_status(format!(
                     "Linked issue #{} found but URL unavailable",
                     issue_number
-                ));
+                )));
             }
             AppEvent::LinkedIssueLookupFailed {
                 repo,
@@ -584,7 +615,7 @@ pub(super) fn handle_events(
                 if !repo.is_current(app) {
                     continue;
                 }
-                app.set_linked_issues_for_pull_request(pull_number, Vec::new());
+                app.set_linked_issues_for_pull_request(pull_number, Vec::new(), false);
                 if target == LinkedIssueTarget::Probe {
                     continue;
                 }

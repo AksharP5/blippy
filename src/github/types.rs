@@ -1,5 +1,11 @@
 use serde::Deserialize;
 
+#[derive(Debug, Clone)]
+pub struct LinkedIssues {
+    pub issues: Vec<(i64, String)>,
+    pub incomplete_reason: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiUser {
     pub login: String,

@@ -6,7 +6,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 ## Repository Discovery and Sync
 
-- Scans local git repositories and registered nested worktrees without traversing repository contents, and indexes GitHub remotes
+- Scans local git repositories and indexes GitHub remotes; searches four directory levels inside each repository for nested repositories and finds registered nested worktrees at any depth, subject to scan depth limits and exclusions
 - Recognizes GitHub SSH remotes with explicit ports
 - Supports direct `owner/repo` repo context from the current working tree
 - Keeps a local SQLite cache for fast navigation
@@ -39,7 +39,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Jump from a PR to its linked issue (and back)
 - Includes issues closed by the pull request
 - Open linked items in TUI or browser
-- Linked metadata is cached to reduce repeated lookups
+- Linked metadata is cached to reduce repeated lookups; partial results remain usable, and refresh retries incomplete or failed lookups
 - Opening a linked item clears list search and assignee filters to reveal the target
 
 ## Pull Request Review Workspace

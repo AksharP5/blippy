@@ -381,11 +381,24 @@ struct SyncState {
 
 #[derive(Debug, Default)]
 struct LinkedState {
-    pull_requests: HashMap<i64, Vec<i64>>,
-    issues: HashMap<i64, Vec<i64>>,
-    pull_request_lookups: HashSet<i64>,
-    issue_lookups: HashSet<i64>,
+    pull_requests: HashMap<i64, LinkedItems>,
+    issues: HashMap<i64, LinkedItems>,
     navigation_origin: Option<(i64, WorkItemMode)>,
+}
+
+#[derive(Debug, Default)]
+struct LinkedItems {
+    numbers: Vec<i64>,
+    lookup: LinkedLookup,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+enum LinkedLookup {
+    #[default]
+    Ready,
+    Loading,
+    Complete,
+    Incomplete,
 }
 
 #[derive(Debug, Default)]

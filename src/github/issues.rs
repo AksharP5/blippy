@@ -134,7 +134,7 @@ impl GitHubClient {
         owner: &str,
         repo: &str,
         pull_number: i64,
-    ) -> Result<Vec<(i64, String)>> {
+    ) -> Result<LinkedIssues> {
         let resolved = self.get_repo(owner, repo).await?;
         let owner = resolved.owner.login.as_str();
         let repo = resolved.name.as_str();
@@ -347,20 +347,31 @@ impl GitHubClient {
 async fn discover_linked_issues(
     closing_issues: impl AsyncFnOnce(&mut Vec<(i64, String)>, &mut HashSet<i64>) -> Result<()>,
     timeline: impl AsyncFnOnce(&mut Vec<(i64, String)>, &mut HashSet<i64>) -> Result<()>,
-) -> Result<Vec<(i64, String)>> {
+) -> Result<LinkedIssues> {
     let mut linked = Vec::new();
     let mut seen = HashSet::new();
     let closing_result = closing_issues(&mut linked, &mut seen).await;
     let timeline_result = timeline(&mut linked, &mut seen).await;
 
-    match (closing_result, timeline_result) {
-        (Err(closing_error), Err(timeline_error)) => Err(anyhow!(
-            "Closing-issue lookup failed: {closing_error:#}; timeline lookup failed: {timeline_error:#}"
-        )),
-        (Err(error), _) if linked.is_empty() => Err(error.context("Closing-issue lookup failed")),
-        (_, Err(error)) if linked.is_empty() => Err(error.context("Timeline lookup failed")),
-        _ => Ok(linked),
+    let incomplete_reason = match (closing_result, timeline_result) {
+        (Err(closing_error), Err(timeline_error)) => {
+            return Err(anyhow!(
+                "Closing-issue lookup failed: {closing_error:#}; timeline lookup failed: {timeline_error:#}"
+            ));
+        }
+        (Err(error), _) => Some(format!("Closing-issue lookup failed: {error:#}")),
+        (_, Err(error)) => Some(format!("Timeline lookup failed: {error:#}")),
+        _ => None,
+    };
+    if linked.is_empty()
+        && let Some(reason) = incomplete_reason.as_ref()
+    {
+        return Err(anyhow!("{reason}"));
     }
+    Ok(LinkedIssues {
+        issues: linked,
+        incomplete_reason,
+    })
 }
 
 fn append_linked_issue(
@@ -429,8 +440,14 @@ mod tests {
         .expect("timeline links remain usable");
 
         assert_eq!(
-            linked,
+            linked.issues,
             vec![(21, "https://github.com/acme/blippy/issues/21".to_string())]
+        );
+        assert!(
+            linked
+                .incomplete_reason
+                .unwrap()
+                .contains("GraphQL unavailable")
         );
     }
 
@@ -454,8 +471,14 @@ mod tests {
         .expect("closing links remain usable");
 
         assert_eq!(
-            linked,
+            linked.issues,
             vec![(20, "https://github.com/acme/blippy/issues/20".to_string())]
+        );
+        assert!(
+            linked
+                .incomplete_reason
+                .unwrap()
+                .contains("timeline unavailable")
         );
     }
 
@@ -498,12 +521,11 @@ mod tests {
             }
         }
 
-        assert!(
-            discover_linked_issues(async |_, _| Ok(()), async |_, _| Ok(()))
-                .await
-                .expect("successful empty discovery")
-                .is_empty()
-        );
+        let empty = discover_linked_issues(async |_, _| Ok(()), async |_, _| Ok(()))
+            .await
+            .expect("successful empty discovery");
+        assert!(empty.issues.is_empty());
+        assert!(empty.incomplete_reason.is_none());
     }
 
     #[test]

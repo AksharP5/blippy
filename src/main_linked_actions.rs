@@ -5,20 +5,25 @@ pub(super) fn maybe_probe_visible_linked_items(
     token: &str,
     event_tx: Sender<AppEvent>,
 ) {
-    if app.view() != View::Issues {
-        return;
-    }
     let (owner, repo) = match (app.current_owner(), app.current_repo()) {
         (Some(owner), Some(repo)) => (owner.to_string(), repo.to_string()),
         _ => return,
     };
 
-    let visible = app
-        .issues_for_view()
-        .iter()
-        .take(20)
-        .map(|issue| (issue.number, issue.is_pr))
-        .collect::<Vec<(i64, bool)>>();
+    let visible = match app.view() {
+        View::Issues => app
+            .issues_for_view()
+            .iter()
+            .take(20)
+            .map(|issue| (issue.number, issue.is_pr))
+            .collect::<Vec<_>>(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles => app
+            .current_or_selected_issue()
+            .map(|issue| (issue.number, issue.is_pr))
+            .into_iter()
+            .collect(),
+        _ => return,
+    };
 
     for (number, is_pr) in visible {
         if is_pr {
@@ -60,6 +65,9 @@ pub(super) fn try_open_cached_linked_pull_request(
         None => return Ok(false),
     };
     if issue.is_pr {
+        return Ok(false);
+    }
+    if !app.linked_pull_request_known(issue.number) {
         return Ok(false);
     }
 
@@ -128,6 +136,9 @@ pub(super) fn try_open_cached_linked_issue(
         None => return Ok(false),
     };
     if !issue.is_pr {
+        return Ok(false);
+    }
+    if !app.linked_issue_known(issue.number) {
         return Ok(false);
     }
 

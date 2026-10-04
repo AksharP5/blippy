@@ -116,6 +116,7 @@ impl App {
                 self.set_issue_filter(IssueFilter::from_key(ch).unwrap_or(IssueFilter::Open));
             }
             KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.retry_incomplete_linked_lookups();
                 self.request_sync();
                 self.status = "Syncing".to_string();
             }
@@ -126,6 +127,7 @@ impl App {
                         View::IssueDetail | View::IssueComments | View::PullRequestFiles
                     ) =>
             {
+                self.retry_incomplete_linked_lookups();
                 self.request_comment_sync();
                 self.request_sync();
                 if self.current_view_issue_is_pull_request() {

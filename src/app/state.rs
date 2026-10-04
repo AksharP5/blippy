@@ -406,8 +406,6 @@ impl App {
         self.repo_label_colors.clear();
         self.linked.pull_requests.clear();
         self.linked.issues.clear();
-        self.linked.pull_request_lookups.clear();
-        self.linked.issue_lookups.clear();
         self.linked.navigation_origin = None;
         self.clear_linked_picker_state();
         self.reset_pull_request_state();

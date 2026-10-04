@@ -512,7 +512,7 @@ enum AppEvent {
     LinkedIssueResolved {
         repo: RepoIdentity,
         pull_number: i64,
-        issues: Vec<(i64, String)>,
+        issues: crate::github::LinkedIssues,
         target: LinkedIssueTarget,
     },
     LinkedIssueLookupFailed {

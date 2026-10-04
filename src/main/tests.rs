@@ -713,7 +713,7 @@ fn linked_pull_request_action_opens_picker_when_multiple_cached() {
         updated_at: None,
         is_pr: false,
     }]);
-    app.set_linked_pull_requests(7, vec![42, 43]);
+    app.set_linked_pull_requests(7, vec![42, 43], true);
 
     let handled = super::main_linked_actions::try_open_cached_linked_pull_request(
         &mut app,
@@ -767,7 +767,7 @@ fn linked_issue_action_opens_picker_when_multiple_cached() {
         updated_at: None,
         is_pr: true,
     }]);
-    app.set_linked_issues_for_pull_request(9, vec![100, 101]);
+    app.set_linked_issues_for_pull_request(9, vec![100, 101], true);
 
     let handled = super::main_linked_actions::try_open_cached_linked_issue(
         &mut app,
@@ -944,7 +944,8 @@ fn issue_events_from_another_repo_do_not_change_current_repo() {
 }
 
 #[test]
-fn failed_link_probe_is_not_retried_automatically() {
+fn failed_link_probe_retries_only_after_refresh() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let conn = rusqlite::Connection::open_in_memory().expect("conn");
     let mut app = crate::app::App::new(Config::default());
     app.set_current_repo_with_path("acme", "blippy", None);
@@ -961,8 +962,102 @@ fn failed_link_probe_is_not_retried_automatically() {
         .expect("send event");
     super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle events");
 
-    assert!(app.linked_pull_request_known(7));
+    assert!(!app.linked_pull_request_known(7));
     assert!(!app.begin_linked_pull_request_lookup(7));
+    app.set_view(View::Issues);
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    assert!(app.begin_linked_pull_request_lookup(7));
+}
+
+#[test]
+fn partial_linked_issues_remain_visible_and_refresh_discovers_missing_links() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_work_item_mode(WorkItemMode::PullRequests);
+    app.set_issues(vec![IssueRow {
+        id: 21,
+        repo_id: 1,
+        number: 9,
+        state: "open".to_string(),
+        title: "PR".to_string(),
+        body: String::new(),
+        labels: Vec::new(),
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: true,
+    }]);
+    app.set_current_issue(21, 9);
+    app.set_view(View::IssueDetail);
+    assert!(app.begin_linked_issue_lookup(9));
+    // The reverse association must not complete an in-flight lookup for the issue.
+    assert!(app.begin_linked_pull_request_lookup(100));
+    let (event_tx, event_rx) = channel();
+    event_tx
+        .send(super::AppEvent::LinkedIssueResolved {
+            repo: super::RepoIdentity::new("acme", "blippy"),
+            pull_number: 9,
+            issues: crate::github::LinkedIssues {
+                issues: vec![(100, "https://github.com/acme/blippy/issues/100".to_string())],
+                incomplete_reason: Some("Timeline unavailable".to_string()),
+            },
+            target: super::LinkedIssueTarget::Probe,
+        })
+        .expect("send partial result");
+    super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle result");
+
+    assert_eq!(app.linked_issues_for_pull_request(9), vec![100]);
+    assert!(!app.linked_issue_known(9));
+    assert!(!app.begin_linked_issue_lookup(9));
+    assert!(!app.begin_linked_pull_request_lookup(100));
+    assert!(app.status().contains("Timeline unavailable"));
+    assert!(
+        !super::main_linked_actions::try_open_cached_linked_issue(
+            &mut app,
+            &conn,
+            super::LinkedIssueTarget::Browser,
+        )
+        .expect("incomplete cache requires lookup")
+    );
+
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    assert!(app.begin_linked_issue_lookup(9));
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    assert!(
+        !app.begin_linked_issue_lookup(9),
+        "refresh must preserve in-flight lookup"
+    );
+    event_tx
+        .send(super::AppEvent::LinkedIssueResolved {
+            repo: super::RepoIdentity::new("acme", "blippy"),
+            pull_number: 9,
+            issues: crate::github::LinkedIssues {
+                issues: vec![
+                    (100, "https://github.com/acme/blippy/issues/100".to_string()),
+                    (101, "https://github.com/acme/blippy/issues/101".to_string()),
+                ],
+                incomplete_reason: None,
+            },
+            target: super::LinkedIssueTarget::Probe,
+        })
+        .expect("send complete result");
+    super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle result");
+    assert!(app.linked_issue_known(9));
+    assert_eq!(app.linked_issues_for_pull_request(9), vec![100, 101]);
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    assert!(!app.begin_linked_issue_lookup(9));
+    assert!(
+        super::main_linked_actions::try_open_cached_linked_issue(
+            &mut app,
+            &conn,
+            super::LinkedIssueTarget::Browser,
+        )
+        .expect("complete cache usable")
+    );
+    assert_eq!(app.linked_picker_numbers(), vec![100, 101]);
 }
 
 #[test]
