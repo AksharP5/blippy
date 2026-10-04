@@ -1,5 +1,13 @@
 use super::*;
 
+pub(crate) fn ensure_issue_action_available(app: &mut App, issue_number: i64) -> bool {
+    if let Some(action) = app.pending_issue_badge(issue_number) {
+        app.set_status(format!("#{} is already {}", issue_number, action));
+        return false;
+    }
+    true
+}
+
 pub(crate) fn ensure_can_edit_issue_metadata(app: &mut App) -> bool {
     if app.repo_issue_metadata_editable() == Some(true) {
         return true;
@@ -60,7 +68,7 @@ pub(crate) fn selected_issue_for_action(app: &App) -> Option<(i64, i64, Option<S
     None
 }
 
-pub(crate) fn selected_issue_labels(app: &App) -> Option<String> {
+pub(crate) fn selected_issue_labels(app: &App) -> Option<Vec<String>> {
     if app.view() == View::Issues {
         return app.selected_issue_row().map(|issue| issue.labels.clone());
     }
@@ -92,10 +100,8 @@ pub(crate) fn label_options_for_repo(app: &App) -> Vec<String> {
     let mut labels = app
         .issues()
         .iter()
-        .flat_map(|issue| issue.labels.split(','))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
+        .flat_map(|issue| issue.labels.iter())
+        .cloned()
         .collect::<Vec<String>>();
     labels.sort_by_key(|value| value.to_ascii_lowercase());
     labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));

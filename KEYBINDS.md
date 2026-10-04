@@ -112,7 +112,7 @@ Search mode:
 - `[` / `]`: Horizontal pan left/right
 - `0`: Reset horizontal pan
 - `h` / `l`: Select old/new diff side for commenting
-- `Shift+V`: Toggle visual range selection
+- `Shift+V`: Toggle visual range selection within one diff hunk
 - `m`: Add inline review comment
 - `e`: Edit selected inline review comment
 - `x`: Delete selected inline review comment

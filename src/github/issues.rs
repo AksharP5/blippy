@@ -72,6 +72,9 @@ impl GitHubClient {
         repo: &str,
         issue_number: i64,
     ) -> Result<Vec<(i64, String)>> {
+        let resolved = self.get_repo(owner, repo).await?;
+        let owner = resolved.owner.login.as_str();
+        let repo = resolved.name.as_str();
         let mut linked = Vec::new();
         let mut seen = HashSet::new();
         let mut page = 1u32;
@@ -132,8 +135,49 @@ impl GitHubClient {
         repo: &str,
         pull_number: i64,
     ) -> Result<Vec<(i64, String)>> {
+        let resolved = self.get_repo(owner, repo).await?;
+        let owner = resolved.owner.login.as_str();
+        let repo = resolved.name.as_str();
         let mut linked = Vec::new();
         let mut seen = HashSet::new();
+        let query = r#"
+            query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 100, after: $cursor) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes { number url }
+                  }
+                }
+              }
+            }
+        "#;
+        let mut cursor: Option<String> = None;
+        let mut cursors = HashSet::new();
+        loop {
+            let response = self
+                .graphql(
+                    query,
+                    serde_json::json!({
+                        "owner": owner,
+                        "repo": repo,
+                        "number": pull_number,
+                        "cursor": cursor,
+                    }),
+                )
+                .await?;
+            let issues = &response["data"]["repository"]["pullRequest"]["closingIssuesReferences"];
+            if let Some(nodes) = issues["nodes"].as_array() {
+                for issue in nodes {
+                    append_linked_issue(owner, repo, issue, &mut linked, &mut seen);
+                }
+            }
+            cursor = next_graphql_cursor(&issues["pageInfo"], &mut cursors)?;
+            if cursor.is_none() {
+                break;
+            }
+        }
+
         let mut page = 1u32;
         loop {
             let url = format!(
@@ -158,23 +202,7 @@ impl GitHubClient {
                     Some(issue) => issue,
                     None => continue,
                 };
-                if issue.get("pull_request").is_some() {
-                    continue;
-                }
-                let html_url = match issue.get("html_url").and_then(serde_json::Value::as_str) {
-                    Some(html_url) => html_url,
-                    None => continue,
-                };
-                let issue_number = match issue.get("number").and_then(serde_json::Value::as_i64) {
-                    Some(issue_number) => issue_number,
-                    None => continue,
-                };
-                if !item_url_matches_repo(html_url, owner, repo, "issues", issue_number)
-                    || !seen.insert(issue_number)
-                {
-                    continue;
-                }
-                linked.push((issue_number, html_url.to_string()));
+                append_linked_issue(owner, repo, issue, &mut linked, &mut seen);
             }
 
             if events.len() < 100 {
@@ -272,10 +300,11 @@ impl GitHubClient {
                 .await?
                 .error_for_status()?;
             let batch = response.json::<Vec<ApiLabel>>().await?;
-            if batch.is_empty() {
+            let is_last_page = batch.len() < 100;
+            labels.extend(batch);
+            if is_last_page {
                 break;
             }
-            labels.extend(batch);
             page += 1;
         }
         Ok(labels)
@@ -295,11 +324,12 @@ impl GitHubClient {
                 .await?
                 .error_for_status()?;
             let batch = response.json::<Vec<ApiUser>>().await?;
-            if batch.is_empty() {
-                break;
-            }
+            let is_last_page = batch.len() < 100;
             for user in batch {
                 assignees.push(user.login);
+            }
+            if is_last_page {
+                break;
             }
             page += 1;
         }
@@ -307,6 +337,32 @@ impl GitHubClient {
         assignees.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         Ok(assignees)
     }
+}
+
+fn append_linked_issue(
+    owner: &str,
+    repo: &str,
+    issue: &serde_json::Value,
+    linked: &mut Vec<(i64, String)>,
+    seen: &mut HashSet<i64>,
+) {
+    if issue.get("pull_request").is_some() {
+        return;
+    }
+    let Some(url) = issue
+        .get("html_url")
+        .or_else(|| issue.get("url"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return;
+    };
+    let Some(number) = issue.get("number").and_then(serde_json::Value::as_i64) else {
+        return;
+    };
+    if !item_url_matches_repo(url, owner, repo, "issues", number) || !seen.insert(number) {
+        return;
+    }
+    linked.push((number, url.to_string()));
 }
 
 fn item_url_matches_repo(
@@ -324,7 +380,47 @@ fn item_url_matches_repo(
 
 #[cfg(test)]
 mod tests {
-    use super::item_url_matches_repo;
+    use super::{append_linked_issue, item_url_matches_repo};
+    use std::collections::HashSet;
+
+    #[test]
+    fn closing_and_incoming_issue_links_preserve_unique_current_repo_targets() {
+        let candidates = [
+            serde_json::json!({"number": 20, "url": "https://github.com/acme/blippy/issues/20"}),
+            serde_json::json!({"number": 21, "html_url": "https://github.com/acme/blippy/issues/21"}),
+            serde_json::json!({"number": 21, "url": "https://github.com/acme/blippy/issues/21"}),
+            serde_json::json!({"number": 22, "url": "https://github.com/other/blippy/issues/22"}),
+        ];
+        let mut linked = Vec::new();
+        let mut seen = HashSet::new();
+        for issue in &candidates {
+            append_linked_issue("acme", "blippy", issue, &mut linked, &mut seen);
+        }
+        assert_eq!(
+            linked,
+            vec![
+                (20, "https://github.com/acme/blippy/issues/20".to_string()),
+                (21, "https://github.com/acme/blippy/issues/21".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn unrelated_timeline_items_do_not_create_issue_links() {
+        let mut linked = Vec::new();
+        let mut seen = HashSet::new();
+        for issue in [
+            serde_json::Value::Null,
+            serde_json::json!({
+                "number": 20,
+                "html_url": "https://github.com/acme/blippy/pull/20",
+                "pull_request": {"url": "https://api.github.com/repos/acme/blippy/pulls/20"},
+            }),
+        ] {
+            append_linked_issue("acme", "blippy", &issue, &mut linked, &mut seen);
+        }
+        assert!(linked.is_empty());
+    }
 
     #[test]
     fn linked_item_url_must_match_the_current_repo() {

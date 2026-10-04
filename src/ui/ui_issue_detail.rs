@@ -41,11 +41,7 @@ pub(super) fn draw_issue_detail(
             } else {
                 issue.assignees.clone()
             },
-            if issue.labels.is_empty() {
-                "none".to_string()
-            } else {
-                issue.labels.clone()
-            },
+            issue.labels.clone(),
             issue.comments_count,
             issue.updated_at.clone(),
         ),
@@ -55,7 +51,7 @@ pub(super) fn draw_issue_detail(
             String::new(),
             String::new(),
             "unassigned".to_string(),
-            "none".to_string(),
+            Vec::new(),
             0,
             None,
         ),
@@ -255,7 +251,7 @@ pub(super) fn draw_issue_detail(
         "labels: ",
         Style::default().fg(theme.text_muted),
     )];
-    labels_row.extend(label_chip_spans(app, labels.as_str(), 5, theme));
+    labels_row.extend(label_chip_spans(app, &labels, 5, theme));
     body_lines.push(Line::from(labels_row));
     if let Some(updated) = format_datetime(updated_at.as_deref()) {
         body_lines.push(Line::from(format!("updated: {}", updated)));
@@ -577,11 +573,14 @@ pub(super) fn draw_issue_comments(
     let block = panel_block(&title, theme);
     let mut lines = Vec::new();
     let mut comment_header_offsets = Vec::new();
+    let comments_content_width = content_area.width.saturating_sub(2);
+    let mut rendered_offset = 0usize;
     if app.comments().is_empty() {
         lines.push(Line::from("No comments cached yet."));
     } else {
         for (index, comment) in app.comments().iter().enumerate() {
-            comment_header_offsets.push((index, lines.len() as u16));
+            let comment_start = lines.len();
+            comment_header_offsets.push((index, rendered_offset.min(u16::MAX as usize) as u16));
             lines.push(comment_header(
                 index + 1,
                 comment.author.as_str(),
@@ -598,14 +597,20 @@ pub(super) fn draw_issue_comments(
                 }
             }
             lines.push(Line::from(""));
+            rendered_offset += wrapped_line_count(&lines[comment_start..], comments_content_width);
         }
     }
 
-    let comments_content_width = content_area.width.saturating_sub(2);
     let viewport_height = content_area.height.saturating_sub(2) as usize;
     let total_lines = wrapped_line_count(&lines, comments_content_width);
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_issue_comments_max_scroll(max_scroll);
+    app.set_issue_comment_offsets(
+        comment_header_offsets
+            .iter()
+            .map(|(_, offset)| *offset)
+            .collect(),
+    );
     let scroll = app.issue_comments_scroll();
 
     let paragraph = Paragraph::new(Text::from(lines))
@@ -650,7 +655,89 @@ fn linked_item_label(kind: &str, number: i64, total: usize) -> (String, Option<S
 
 #[cfg(test)]
 mod tests {
-    use super::linked_item_label;
+    use super::*;
+    use crate::config::Config;
+    use crate::store::CommentRow;
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn comments_app(body: String) -> App {
+        let mut app = App::new(Config::default());
+        app.set_view(View::IssueComments);
+        app.set_comments(vec![
+            CommentRow {
+                id: 1,
+                issue_id: 1,
+                author: "first-author".to_string(),
+                body,
+                created_at: None,
+                last_accessed_at: None,
+            },
+            CommentRow {
+                id: 2,
+                issue_id: 1,
+                author: "second-author".to_string(),
+                body: "second body".to_string(),
+                created_at: None,
+                last_accessed_at: None,
+            },
+        ]);
+        app
+    }
+
+    #[test]
+    fn clicking_wrapped_comment_header_selects_that_comment() {
+        let mut app = comments_app("aaaaaa ".repeat(24));
+        let mut terminal = Terminal::new(TestBackend::new(60, 22)).expect("test terminal");
+        terminal
+            .draw(|frame| draw_issue_comments(frame, &mut app, frame.area(), resolve_theme(None)))
+            .expect("draw comments");
+        let row = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(60)
+            .position(|cells| {
+                cells
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .contains("second-author")
+            })
+            .expect("second header visible");
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: row as u16,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(
+            app.selected_comment_row().map(|comment| comment.id),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn jumping_to_comment_scrolls_past_wrapped_preceding_body() {
+        let mut app = comments_app("aaaaaa ".repeat(140));
+        let mut terminal = Terminal::new(TestBackend::new(60, 16)).expect("test terminal");
+        terminal
+            .draw(|frame| draw_issue_comments(frame, &mut app, frame.area(), resolve_theme(None)))
+            .expect("draw comments");
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        terminal
+            .draw(|frame| draw_issue_comments(frame, &mut app, frame.area(), resolve_theme(None)))
+            .expect("draw selected comment");
+        assert!(terminal.backend().buffer().content.chunks(60).any(|cells| {
+            cells
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains("second-author")
+        }));
+    }
 
     #[test]
     fn linked_item_label_omits_hint_for_single() {

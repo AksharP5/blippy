@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn a_mouse_click_toggles_a_label_once() {
+    let mut app = App::new(Config::default());
+    app.open_label_picker(View::Issues, vec!["bug".to_string()], &[]);
+    app.register_mouse_region(MouseTarget::LabelOption(0), 1, 1, 10, 1);
+
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        app.on_mouse(MouseEvent {
+            kind,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    assert_eq!(app.selected_labels(), vec!["bug"]);
+}
+
+#[test]
 fn repo_picker_search_filters_entries() {
     let mut app = App::new(Config::default());
     app.set_repos(vec![
@@ -37,22 +58,128 @@ fn repo_picker_search_filters_entries() {
 }
 
 #[test]
-fn changing_repo_clears_repo_scoped_in_flight_state() {
+fn repeated_rescan_keys_do_not_start_overlapping_scans() {
+    let mut app = App::new(Config::default());
+    let key = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+    app.on_key(key);
+    assert!(app.scanning());
+    assert!(app.take_rescan_request());
+
+    app.on_key(KeyEvent::new_with_kind(
+        KeyCode::Char('r'),
+        KeyModifiers::CONTROL,
+        crossterm::event::KeyEventKind::Repeat,
+    ));
+    assert!(!app.take_rescan_request());
+
+    app.set_scanning(false);
+    app.on_key(key);
+    assert!(app.take_rescan_request());
+}
+
+#[test]
+fn in_flight_syncs_follow_their_targets_across_navigation() {
     let mut app = App::new(Config::default());
     app.set_current_repo_with_path("acme", "one", None);
     app.set_current_issue(10, 7);
-    app.set_syncing(true);
-    app.set_comment_syncing(true);
-    app.set_pull_request_files_syncing(true);
-    app.set_pull_request_review_comments_syncing(true);
+    app.begin_repo_sync();
+    app.begin_repo_permissions_sync();
+    app.begin_repo_labels_sync();
+    app.begin_comment_sync();
+    app.begin_pull_request_files_sync();
+    app.begin_pull_request_review_comments_sync();
     app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
 
     app.set_current_repo_with_path("acme", "two", None);
 
     assert!(!app.syncing());
+    assert!(!app.repo_permissions_syncing());
+    assert!(!app.repo_labels_syncing());
     assert!(!app.comment_syncing());
     assert!(!app.pull_request_files_syncing());
     assert!(!app.pull_request_review_comments_syncing());
+    assert_eq!(app.pending_issue_badge(7), None);
+
+    app.set_current_repo_with_path("ACME", "One", None);
+    app.set_current_issue(10, 7);
+    assert!(app.syncing());
+    assert!(app.repo_permissions_syncing());
+    assert!(app.repo_labels_syncing());
+    assert!(app.comment_syncing());
+    assert!(app.pull_request_files_syncing());
+    assert!(app.pull_request_review_comments_syncing());
+}
+
+#[test]
+fn pending_issue_actions_survive_navigation_and_clear_for_the_original_repo() {
+    let mut app = App::new(Config::default());
+    app.set_current_repo_with_path("Acme", "One", None);
+    app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
+
+    app.set_current_repo_with_path("Other", "One", None);
+    assert_eq!(app.pending_issue_badge(7), None);
+    app.set_pending_issue_action(7, super::super::PendingIssueAction::UpdatingLabels);
+
+    app.set_current_repo_with_path("aCME", "ONE", None);
+    assert_eq!(app.pending_issue_badge(7), Some("closing"));
+
+    app.set_current_repo_with_path("Other", "One", None);
+    app.clear_pending_issue_action("ACME", "one", 7);
+    assert_eq!(app.pending_issue_badge(7), Some("updating labels"));
+
+    app.set_current_repo_with_path("Acme", "One", None);
+    assert_eq!(app.pending_issue_badge(7), None);
+}
+
+#[test]
+fn repository_aliases_follow_repeated_renames_without_cycles() {
+    let mut app = App::new(Config::default());
+    app.set_current_repo_with_path("acme", "one", None);
+    app.begin_repo_permissions_sync();
+    app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
+    for repo in ["two", "three", "one"] {
+        let requested = app.current_repo().expect("repo").to_string();
+        app.resolve_repository_alias("acme", &requested, "acme", repo);
+        assert_eq!(app.current_repo(), Some(repo));
+        assert!(app.repo_permissions_syncing());
+        assert_eq!(app.pending_issue_badge(7), Some("closing"));
+    }
+    for alias in ["one", "two", "three"] {
+        assert!(app.repository_is_current("ACME", alias));
+    }
+    app.finish_repo_permissions_sync("acme", "one");
+    app.clear_pending_issue_action("acme", "one", 7);
+    assert!(!app.repo_permissions_syncing());
+    assert_eq!(app.pending_issue_badge(7), None);
+}
+
+#[test]
+fn aliased_requests_keep_independent_completion_guards() {
+    let mut app = App::new(Config::default());
+    for repo in ["old", "new"] {
+        app.set_current_repo_with_path("acme", repo, None);
+        app.begin_repo_sync();
+        app.begin_repo_permissions_sync();
+        app.begin_repo_labels_sync();
+        app.set_pending_issue_action(7, super::super::PendingIssueAction::Closing);
+    }
+    app.set_current_repo_with_path("acme", "old", None);
+    app.resolve_repository_alias("acme", "old", "acme", "new");
+    app.finish_repo_sync("acme", "old");
+    app.finish_repo_permissions_sync("acme", "old");
+    app.finish_repo_labels_sync("acme", "old");
+    app.clear_pending_issue_action("acme", "old", 7);
+    assert!(app.syncing());
+    assert!(app.repo_permissions_syncing());
+    assert!(app.repo_labels_syncing());
+    assert_eq!(app.pending_issue_badge(7), Some("closing"));
+    app.finish_repo_sync("acme", "new");
+    app.finish_repo_permissions_sync("acme", "new");
+    app.finish_repo_labels_sync("acme", "new");
+    app.clear_pending_issue_action("acme", "new", 7);
+    assert!(!app.syncing());
+    assert!(!app.repo_permissions_syncing());
+    assert!(!app.repo_labels_syncing());
     assert_eq!(app.pending_issue_badge(7), None);
 }
 
@@ -108,7 +235,7 @@ fn l_triggers_edit_labels_action() {
         state: "open".to_string(),
         title: "Issue".to_string(),
         body: String::new(),
-        labels: "bug".to_string(),
+        labels: vec!["bug".to_string()],
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -129,7 +256,7 @@ fn shift_a_triggers_edit_assignees_action_in_detail() {
         state: "open".to_string(),
         title: "Issue".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: "alex".to_string(),
         comments_count: 0,
         updated_at: None,
@@ -157,7 +284,7 @@ fn labels_picker_enter_submits() {
     app.open_label_picker(
         View::Issues,
         vec!["bug".to_string(), "triage".to_string()],
-        "bug,triage",
+        &["bug".to_string(), "triage".to_string()],
     );
 
     app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -170,7 +297,7 @@ fn labels_picker_enter_selects_highlighted_when_none_selected() {
     app.open_label_picker(
         View::Issues,
         vec!["bug".to_string(), "docs".to_string()],
-        "",
+        &[],
     );
 
     app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -185,7 +312,7 @@ fn labels_picker_enter_adds_highlighted_when_existing_labels_present() {
     app.open_label_picker(
         View::Issues,
         vec!["bug".to_string(), "docs".to_string()],
-        "bug",
+        &["bug".to_string()],
     );
 
     app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
@@ -238,7 +365,7 @@ fn labels_picker_enter_removes_highlighted_when_already_selected() {
     app.open_label_picker(
         View::Issues,
         vec!["bug".to_string(), "docs".to_string()],
-        "bug,docs",
+        &["bug".to_string(), "docs".to_string()],
     );
 
     app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -268,7 +395,7 @@ fn label_picker_space_toggles_highlighted_option() {
     app.open_label_picker(
         View::Issues,
         vec!["bug".to_string(), "docs".to_string()],
-        "",
+        &[],
     );
 
     app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
@@ -306,7 +433,7 @@ fn label_picker_type_filter_can_match_c_prefix() {
             "customer".to_string(),
             "docs".to_string(),
         ],
-        "",
+        &[],
     );
 
     app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
@@ -322,7 +449,7 @@ fn merge_label_options_dedupes_case_insensitive() {
     app.open_label_picker(
         View::Issues,
         vec!["bug".to_string(), "Docs".to_string()],
-        "",
+        &[],
     );
 
     app.merge_label_options(vec![
@@ -458,7 +585,7 @@ fn linked_picker_labels_include_cached_titles() {
         state: "open".to_string(),
         title: "Fix flaky sync test".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -485,7 +612,7 @@ fn linked_picker_captures_origin_from_selected_pull_request() {
         state: "open".to_string(),
         title: "PR source".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -513,7 +640,7 @@ fn linked_picker_origin_restores_pull_request_context_on_back() {
             state: "open".to_string(),
             title: "PR source".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -526,7 +653,7 @@ fn linked_picker_origin_restores_pull_request_context_on_back() {
             state: "open".to_string(),
             title: "Linked issue".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,

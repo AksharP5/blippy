@@ -42,7 +42,7 @@ pub struct ApiIssue {
     pub labels: Vec<ApiLabel>,
     pub assignees: Vec<ApiUser>,
     #[allow(dead_code)]
-    pub user: ApiUser,
+    pub user: Option<ApiUser>,
     pub pull_request: Option<serde_json::Value>,
 }
 
@@ -51,7 +51,7 @@ pub struct ApiComment {
     pub id: i64,
     pub body: Option<String>,
     pub created_at: Option<String>,
-    pub user: ApiUser,
+    pub user: Option<ApiUser>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -109,12 +109,11 @@ pub struct ApiPullRequestReviewComment {
     pub is_resolved: bool,
     pub path: String,
     pub line: Option<i64>,
-    pub original_line: Option<i64>,
     pub side: Option<String>,
     pub in_reply_to_id: Option<i64>,
     pub body: Option<String>,
     pub created_at: Option<String>,
-    pub user: ApiUser,
+    pub user: Option<ApiUser>,
 }
 
 #[derive(Debug, Clone)]
@@ -127,4 +126,42 @@ pub struct ApiIssuesPage {
 pub enum ApiIssuesPageResult {
     NotModified,
     Page(ApiIssuesPage),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issue_and_comment_lists_accept_unavailable_authors() {
+        let issue = serde_json::json!({
+            "id": 1,
+            "number": 1,
+            "state": "open",
+            "title": "Issue",
+            "comments": 0,
+            "labels": [],
+            "assignees": [],
+            "user": null,
+        });
+        let comment = serde_json::json!({"id": 2, "user": null});
+        let review = serde_json::json!({"id": 3, "path": "src/main.rs", "user": null});
+        let parsed = [
+            (
+                "issue",
+                serde_json::from_value::<ApiIssue>(issue).map(|_| ()),
+            ),
+            (
+                "comment",
+                serde_json::from_value::<ApiComment>(comment).map(|_| ()),
+            ),
+            (
+                "review comment",
+                serde_json::from_value::<ApiPullRequestReviewComment>(review).map(|_| ()),
+            ),
+        ];
+        for (kind, result) in parsed {
+            assert!(result.is_ok(), "{kind}: {result:?}");
+        }
+    }
 }

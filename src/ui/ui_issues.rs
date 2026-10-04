@@ -128,7 +128,7 @@ pub(super) fn draw_issues(
         if content.width > 0 && content.height > 2 {
             let cursor_x = content
                 .x
-                .saturating_add((8 + query_display.chars().count()) as u16)
+                .saturating_add((8 + Span::raw(query_display.as_str()).width()) as u16)
                 .min(content.x.saturating_add(content.width.saturating_sub(1)));
             let cursor_y = content.y.saturating_add(2);
             frame.set_cursor_position((cursor_x, cursor_y));
@@ -168,11 +168,7 @@ pub(super) fn draw_issues(
                 } else {
                     issue.assignees.as_str()
                 };
-                let labels = if issue.labels.is_empty() {
-                    "none"
-                } else {
-                    issue.labels.as_str()
-                };
+                let labels = &issue.labels;
                 let line1_spans = vec![
                     Span::styled(
                         if issue.is_pr {
@@ -277,22 +273,22 @@ pub(super) fn draw_issues(
         vertical: 1,
         horizontal: 2,
     });
-    frame.render_stateful_widget(
-        list,
-        issues_list_area,
-        &mut list_state(selected_for_list(
-            app.selected_issue(),
-            visible_issues.len(),
-        )),
-    );
+    let mut issues_state = list_state(selected_for_list(
+        app.selected_issue(),
+        visible_issues.len(),
+    ));
+    frame.render_stateful_widget(list, issues_list_area, &mut issues_state);
     register_mouse_region(app, MouseTarget::IssuesListPane, issues_list_area);
     let issues_list_inner = issues_list_area.inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
     let max_rows = (issues_list_inner.height as usize) / 2;
-    for index in 0..visible_issues.len().min(max_rows) {
-        let y = issues_list_inner.y.saturating_add((index * 2) as u16);
+    for (row, index) in (issues_state.offset()..visible_issues.len())
+        .take(max_rows)
+        .enumerate()
+    {
+        let y = issues_list_inner.y.saturating_add((row * 2) as u16);
         app.register_mouse_region(
             MouseTarget::IssueRow(index),
             issues_list_inner.x,
@@ -316,11 +312,7 @@ pub(super) fn draw_issues(
             } else {
                 issue.assignees.clone()
             };
-            let labels = if issue.labels.is_empty() {
-                "none".to_string()
-            } else {
-                issue.labels.clone()
-            };
+            let labels = issue.labels.clone();
             let mut lines = Vec::new();
             lines.push(Line::from(vec![
                 Span::styled(
@@ -467,7 +459,7 @@ pub(super) fn draw_issues(
                     .fg(theme.accent_primary)
                     .add_modifier(Modifier::BOLD),
             )];
-            label_row.extend(label_chip_spans(app, labels.as_str(), 4, theme));
+            label_row.extend(label_chip_spans(app, &labels, 4, theme));
             lines.push(Line::from(label_row));
             if let Some(updated) = format_datetime(issue.updated_at.as_deref()) {
                 lines.push(Line::from(vec![

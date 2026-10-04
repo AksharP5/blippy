@@ -99,6 +99,50 @@ mod tests {
         let config: Config = toml::from_str(input).expect("parse config");
         assert_eq!(config.theme.as_deref(), Some("midnight"));
     }
+
+    #[test]
+    fn config_paths_use_the_windows_profile_without_home() {
+        use std::path::PathBuf;
+        use std::process::Command;
+
+        const EXPECTED_DIR: &str = "BLIPPY_TEST_CONFIG_DIR";
+        if let Some(expected) = std::env::var_os(EXPECTED_DIR) {
+            let expected = PathBuf::from(expected).join("blippy");
+            assert_eq!(super::config_path(), expected.join("config.toml"));
+            assert_eq!(super::keybinds_path(), expected.join("keybinds.toml"));
+            return;
+        }
+
+        let profile = std::env::temp_dir().join("blippy-test-profile");
+        let xdg = profile.join("custom-config");
+        for override_dir in [None, Some(PathBuf::new()), Some(xdg)] {
+            let expected = override_dir
+                .as_ref()
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .cloned()
+                .unwrap_or_else(|| profile.join(".config"));
+            let mut command = Command::new(std::env::current_exe().expect("test executable"));
+            command
+                .args([
+                    "--exact",
+                    "config::tests::config_paths_use_the_windows_profile_without_home",
+                ])
+                .env_remove("HOME")
+                .env_remove("XDG_CONFIG_HOME")
+                .env("USERPROFILE", &profile)
+                .env(EXPECTED_DIR, expected);
+            if let Some(override_dir) = override_dir {
+                command.env("XDG_CONFIG_HOME", override_dir);
+            }
+            let output = command.output().expect("isolated config test");
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -116,12 +160,14 @@ fn keybinds_path() -> PathBuf {
 }
 
 fn config_dir() -> PathBuf {
-    if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
+    if let Ok(dir) = env::var("XDG_CONFIG_HOME")
+        && !dir.is_empty()
+    {
         return Path::new(&dir).to_path_buf();
     }
 
-    if let Ok(home) = env::var("HOME") {
-        return Path::new(&home).join(".config");
+    if let Some(home) = crate::discovery::home_dir() {
+        return home.join(".config");
     }
 
     env::current_dir().unwrap_or_else(|_| PathBuf::from("."))

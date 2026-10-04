@@ -12,7 +12,7 @@ fn ctrl_a_resets_assignee_filter_to_all() {
             state: "open".to_string(),
             title: "One".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: "alex".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -25,7 +25,7 @@ fn ctrl_a_resets_assignee_filter_to_all() {
             state: "open".to_string(),
             title: "Two".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: "sam".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -53,7 +53,7 @@ fn slash_search_filters_and_escape_clears() {
             state: "open".to_string(),
             title: "Login bug".to_string(),
             body: "Fails for SSO users".to_string(),
-            labels: "bug,auth".to_string(),
+            labels: vec!["bug".to_string(), "auth".to_string()],
             assignees: "alex".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -66,7 +66,7 @@ fn slash_search_filters_and_escape_clears() {
             state: "open".to_string(),
             title: "Docs polish".to_string(),
             body: "Update README".to_string(),
-            labels: "docs".to_string(),
+            labels: vec!["docs".to_string()],
             assignees: "sam".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -105,7 +105,7 @@ fn slash_search_matches_issue_number() {
         state: "open".to_string(),
         title: "Telemetry".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -152,7 +152,7 @@ fn reopen_action_for_closed_issue() {
         state: "closed".to_string(),
         title: "Closed".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -175,7 +175,7 @@ fn comment_action_on_issue() {
         state: "open".to_string(),
         title: "Open".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -283,7 +283,7 @@ fn shift_m_does_not_trigger_merge_for_non_pr_issue() {
         state: "open".to_string(),
         title: "Issue".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -316,6 +316,52 @@ fn w_emits_toggle_pull_request_file_viewed_action() {
         app.take_action(),
         Some(AppAction::TogglePullRequestFileViewed)
     );
+}
+
+#[test]
+fn releasing_d_does_not_complete_the_close_shortcut() {
+    use crossterm::event::KeyEventKind;
+
+    let mut app = App::new(Config::default());
+    app.set_current_issue(1, 7);
+    app.set_view(View::IssueDetail);
+    app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new_with_kind(
+        KeyCode::Char('d'),
+        KeyModifiers::NONE,
+        KeyEventKind::Release,
+    ));
+    assert_eq!(app.take_action(), None);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    assert_eq!(app.take_action(), Some(AppAction::CloseIssue));
+}
+
+#[test]
+fn editor_ignores_key_releases_and_accepts_repeat_events() {
+    use crossterm::event::KeyEventKind;
+
+    let mut app = App::new(Config::default());
+    app.open_issue_comment_editor(View::IssueDetail);
+    for kind in [
+        KeyEventKind::Press,
+        KeyEventKind::Release,
+        KeyEventKind::Repeat,
+    ] {
+        app.on_key(KeyEvent::new_with_kind(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+            kind,
+        ));
+    }
+    assert_eq!(app.editor().text(), "xx");
+
+    app.on_key(KeyEvent::new_with_kind(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+        KeyEventKind::Release,
+    ));
+    assert_eq!(app.take_action(), None);
 }
 
 #[test]
@@ -385,7 +431,7 @@ fn shift_n_does_not_trigger_create_issue_action_in_pull_request_detail_view() {
         state: "open".to_string(),
         title: "PR".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -475,7 +521,7 @@ fn mouse_click_issue_row_selects_and_opens_issue() {
         state: "open".to_string(),
         title: "Issue".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,

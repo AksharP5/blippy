@@ -77,6 +77,8 @@ See [FEATURES.md](FEATURES.md) for a full feature breakdown.
 
 ## Configuration
 
+`XDG_CONFIG_HOME` overrides the config directory when nonempty. Otherwise, `~` uses `HOME`, falling back to `USERPROFILE` on Windows.
+
 - Config file: `~/.config/blippy/config.toml`
 - Keybind overrides: `~/.config/blippy/keybinds.toml`
 - Example keybind file: [keybinds.example.toml](keybinds.example.toml)

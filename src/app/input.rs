@@ -2,6 +2,9 @@ use super::*;
 
 impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
+        if key.is_release() {
+            return;
+        }
         if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
             let Some(key) = self.keybinds.remap_text_key(key) else {
                 return;
@@ -41,6 +44,9 @@ impl App {
             && key.code == KeyCode::Char('r')
             && self.view == View::RepoPicker
         {
+            if self.sync.scanning {
+                return;
+            }
             self.sync.rescan_requested = true;
             self.sync.scanning = true;
             self.status = "Scanning".to_string();
@@ -412,6 +418,9 @@ impl App {
     }
 
     pub fn set_view(&mut self, view: View) {
+        if self.view != view && view == View::IssueComments {
+            self.navigation.issue_comment_offsets.clear();
+        }
         if view != View::LinkedPicker {
             self.clear_linked_picker_state();
         }

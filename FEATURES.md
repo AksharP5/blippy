@@ -6,10 +6,15 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 ## Repository Discovery and Sync
 
-- Scans local git repositories and indexes GitHub remotes
+- Scans local git repositories, including nested worktrees, and indexes GitHub remotes
+- Recognizes GitHub SSH remotes with explicit ports
 - Supports direct `owner/repo` repo context from the current working tree
 - Keeps a local SQLite cache for fast navigation
 - `blippy sync` updates discovered repositories and remotes
+- Broken local repositories are reported while scanning continues for healthy repositories
+- Stalled GitHub API requests time out after 30 seconds
+- Background sync avoids duplicate requests during repository and issue navigation
+- Renamed and transferred repositories retain their cached issues and linked items
 
 ## Issues and Pull Requests in One Flow
 
@@ -18,6 +23,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Distinguishes merged pull requests from closed pull requests
 - Fast list navigation with keyboard-first controls
 - Issue and PR detail views with context-aware panes
+- State and metadata updates prevent overlapping actions on the same item
 - Copy repository, issue, and pull request URLs to the system clipboard
 
 ## Issue Creation in TUI
@@ -30,17 +36,20 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 - Jump from an issue to its linked PR (and back)
 - Jump from a PR to its linked issue (and back)
+- Includes issues closed by the pull request
 - Open linked items in TUI or browser
 - Linked metadata is cached to reduce repeated lookups
+- Opening a linked item clears list search and assignee filters to reveal the target
 
 ## Pull Request Review Workspace
 
 - View changed files and diff, with option for checkout
+- PR checkout uses the selected GitHub remote and local repository
 - Merge pull requests directly from the review/detail flow
 - Split or expanded diff review modes
 - Horizontal diff panning for long lines
-- Mark files viewed/unviewed
-- Visual multiline range selection for review comments
+- Mark files viewed/unviewed, ignoring repeat toggles until GitHub responds
+- Visual multiline range selection within one diff hunk for review comments
 
 ## Comments and Review Threads
 

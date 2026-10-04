@@ -296,14 +296,8 @@ impl App {
         };
         self.linked.navigation_origin = None;
 
-        self.set_view(View::Issues);
-        self.set_work_item_mode(mode);
-        let try_filters = [IssueFilter::Open, IssueFilter::Closed];
-        for filter in try_filters {
-            self.set_issue_filter(filter);
-            if !self.select_issue_by_number(issue_number) {
-                continue;
-            }
+        if self.reveal_issue_by_number(issue_number, mode) {
+            self.set_view(View::Issues);
             self.status = format!("Returned to #{}", issue_number);
             return true;
         }

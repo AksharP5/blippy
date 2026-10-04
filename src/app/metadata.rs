@@ -81,7 +81,7 @@ impl App {
         &mut self,
         return_view: View,
         mut options: Vec<String>,
-        current_labels: &str,
+        current_labels: &[String],
     ) {
         self.editor_flow.cancel_view = return_view;
         options.sort_by_key(|value| value.to_ascii_lowercase());
@@ -89,7 +89,10 @@ impl App {
         self.metadata_picker.label_options = options;
         self.metadata_picker.selected_label_option = 0;
         self.metadata_picker.label_query.clear();
-        self.metadata_picker.label_selected = Self::csv_set(current_labels);
+        self.metadata_picker.label_selected = current_labels
+            .iter()
+            .map(|label| label.to_ascii_lowercase())
+            .collect();
         self.set_view(View::LabelPicker);
     }
 
@@ -163,6 +166,10 @@ impl App {
     }
 
     pub fn selected_labels_csv(&self) -> String {
+        self.selected_labels().join(",")
+    }
+
+    pub fn selected_labels(&self) -> Vec<String> {
         let mut values = self
             .metadata_picker
             .label_options
@@ -171,16 +178,7 @@ impl App {
             .cloned()
             .collect::<Vec<String>>();
         values.sort_by_key(|value| value.to_ascii_lowercase());
-        values.join(",")
-    }
-
-    pub fn selected_labels(&self) -> Vec<String> {
-        self.selected_labels_csv()
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-            .collect::<Vec<String>>()
+        values
     }
 
     pub fn selected_assignees_csv(&self) -> String {

@@ -13,10 +13,18 @@ pub(super) fn handle_events(
                     app.set_status(String::new());
                 }
             }
-            AppEvent::ScanFinished => {
+            AppEvent::ScanFinished { failures } => {
                 app.set_scanning(false);
                 if app.view() == View::RepoPicker {
-                    app.set_status(String::new());
+                    if let Some(message) = failures.first() {
+                        app.set_status(format!(
+                            "Scan skipped {} repositories: {}",
+                            failures.len(),
+                            message
+                        ));
+                    } else {
+                        app.set_status(String::new());
+                    }
                 }
             }
             AppEvent::ScanFailed { message } => {
@@ -25,11 +33,20 @@ pub(super) fn handle_events(
                     app.set_status(format!("Scan failed: {}", message));
                 }
             }
-            AppEvent::SyncFinished { owner, repo, stats } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
-                {
-                    app.set_syncing(false);
+            AppEvent::SyncFinished {
+                owner,
+                repo,
+                resolved_repo,
+                stats,
+            } => {
+                app.finish_repo_sync(&owner, &repo);
+                app.resolve_repository_alias(
+                    &owner,
+                    &repo,
+                    &resolved_repo.owner,
+                    &resolved_repo.name,
+                );
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
                     refresh_current_repo_issues(app, conn)?;
                     let (open_count, closed_count) = app.issue_counts();
                     if let Some(reason) = stats.incomplete_reason {
@@ -59,9 +76,7 @@ pub(super) fn handle_events(
                 page,
                 stats,
             } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
-                {
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
                     app.set_status(format!(
                         "Syncing page {}: {} issues cached",
                         page, stats.issues
@@ -73,23 +88,24 @@ pub(super) fn handle_events(
                 repo,
                 message,
             } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
-                {
-                    app.set_syncing(false);
+                app.finish_repo_sync(&owner, &repo);
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
                     app.set_status(format!("Sync failed: {}", message));
                 }
             }
             AppEvent::CommentsUpdated { issue_id, count } => {
+                app.finish_comment_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
-                    app.set_comment_syncing(false);
                     load_comments_for_issue(app, conn, issue_id)?;
+                    if let Some(issue_number) = app.current_issue_number() {
+                        app.update_issue_comments_count_by_number(issue_number, count as i64);
+                    }
                     app.set_status(format!("Updated {} comments", count));
                 }
             }
             AppEvent::CommentsFailed { issue_id, message } => {
+                app.finish_comment_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
-                    app.set_comment_syncing(false);
                     app.set_status(format!("Comments unavailable: {}", message));
                 }
             }
@@ -98,9 +114,6 @@ pub(super) fn handle_events(
                 issue_number,
                 message,
             } => {
-                if !repo.is_current(app) {
-                    continue;
-                }
                 if message.starts_with("closed")
                     || message.starts_with("close failed")
                     || message.starts_with("reopened")
@@ -110,7 +123,10 @@ pub(super) fn handle_events(
                     || message.starts_with("label update failed")
                     || message.starts_with("assignee update failed")
                 {
-                    app.clear_pending_issue_action(issue_number);
+                    app.clear_pending_issue_action(&repo.owner, &repo.repo, issue_number);
+                }
+                if !repo.is_current(app) {
+                    continue;
                 }
                 if message.starts_with("closed") {
                     app.update_issue_state_by_number(issue_number, "closed");
@@ -127,14 +143,16 @@ pub(super) fn handle_events(
                     app.request_comment_sync();
                 }
             }
-            AppEvent::IssueCreated { repo, issue_number } => {
+            AppEvent::IssueCreated { repo, issue } => {
+                let issue_number = issue.number;
+                crate::store::upsert_issue(conn, &issue)?;
                 if !repo.is_current(app) {
                     continue;
                 }
                 app.set_work_item_mode(WorkItemMode::Issues);
                 app.set_issue_filter(IssueFilter::Open);
                 refresh_current_repo_issues(app, conn)?;
-                if app.select_issue_by_number(issue_number)
+                if app.reveal_issue_by_number(issue_number, WorkItemMode::Issues)
                     && let Some((issue_id, issue_number)) = app
                         .selected_issue_row()
                         .map(|issue| (issue.id, issue.number))
@@ -157,11 +175,11 @@ pub(super) fn handle_events(
                 issue_number,
                 labels,
             } => {
+                app.clear_pending_issue_action(&repo.owner, &repo.repo, issue_number);
                 if !repo.is_current(app) {
                     continue;
                 }
-                app.clear_pending_issue_action(issue_number);
-                app.update_issue_labels_by_number(issue_number, labels.as_str());
+                app.update_issue_labels_by_number(issue_number, &labels);
                 app.set_status(format!("#{} labels updated", issue_number));
                 app.request_sync();
             }
@@ -170,10 +188,10 @@ pub(super) fn handle_events(
                 issue_number,
                 assignees,
             } => {
+                app.clear_pending_issue_action(&repo.owner, &repo.repo, issue_number);
                 if !repo.is_current(app) {
                     continue;
                 }
-                app.clear_pending_issue_action(issue_number);
                 app.update_issue_assignees_by_number(issue_number, assignees.as_str());
                 app.set_status(format!("#{} assignees updated", issue_number));
                 app.request_sync();
@@ -185,8 +203,8 @@ pub(super) fn handle_events(
                 viewed_files,
                 view_state_error,
             } => {
+                app.finish_pull_request_files_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
-                    app.set_pull_request_files_syncing(false);
                     let count = files.len();
                     app.set_pull_request_files(issue_id, files);
                     if let Some(message) = view_state_error {
@@ -201,22 +219,22 @@ pub(super) fn handle_events(
                 }
             }
             AppEvent::PullRequestFilesFailed { issue_id, message } => {
+                app.finish_pull_request_files_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
-                    app.set_pull_request_files_syncing(false);
                     app.set_status(format!("PR files unavailable: {}", message));
                 }
             }
             AppEvent::PullRequestReviewCommentsUpdated { issue_id, comments } => {
+                app.finish_pull_request_review_comments_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
-                    app.set_pull_request_review_comments_syncing(false);
                     let count = comments.len();
                     app.set_pull_request_review_comments(comments);
                     app.set_status(format!("Loaded {} review comments", count));
                 }
             }
             AppEvent::PullRequestReviewCommentsFailed { issue_id, message } => {
+                app.finish_pull_request_review_comments_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
-                    app.set_pull_request_review_comments_syncing(false);
                     app.set_status(format!("PR review comments unavailable: {}", message));
                 }
             }
@@ -238,6 +256,9 @@ pub(super) fn handle_events(
             } => {
                 if app.current_issue_id() == Some(issue_id) {
                     app.update_pull_request_review_comment_body_by_id(comment_id, body.as_str());
+                    if app.pull_request_review_comments_syncing() {
+                        app.request_pull_request_review_comments_sync();
+                    }
                     app.set_status("Review comment updated".to_string());
                 }
             }
@@ -252,6 +273,9 @@ pub(super) fn handle_events(
             } => {
                 if app.current_issue_id() == Some(issue_id) {
                     app.remove_pull_request_review_comment_by_id(comment_id);
+                    if app.pull_request_review_comments_syncing() {
+                        app.request_pull_request_review_comments_sync();
+                    }
                     app.set_status("Review comment deleted".to_string());
                 }
             }
@@ -280,8 +304,12 @@ pub(super) fn handle_events(
                 path,
                 viewed,
             } => {
+                app.finish_pull_request_file_view_update(issue_id, &path);
                 if app.current_issue_id() == Some(issue_id) {
                     app.set_pull_request_file_viewed(path.as_str(), viewed);
+                    if app.pull_request_files_syncing() {
+                        app.request_pull_request_files_sync();
+                    }
                     if viewed {
                         app.set_status(format!("Marked {} viewed on GitHub", path));
                     } else {
@@ -295,6 +323,7 @@ pub(super) fn handle_events(
                 viewed,
                 message,
             } => {
+                app.finish_pull_request_file_view_update(issue_id, &path);
                 if app.current_issue_id() == Some(issue_id) {
                     app.set_pull_request_file_viewed(path.as_str(), !viewed);
                     app.set_status(format!(
@@ -360,7 +389,12 @@ pub(super) fn handle_events(
                 if target == LinkedPullRequestTarget::Tui {
                     app.capture_linked_navigation_origin();
                     refresh_current_repo_issues(app, conn)?;
-                    if main_linked_actions::open_pull_request_in_tui(app, conn, pull_number)? {
+                    if main_linked_actions::open_linked_item_in_tui(
+                        app,
+                        conn,
+                        pull_number,
+                        WorkItemMode::PullRequests,
+                    )? {
                         app.set_status(format!(
                             "Opened linked pull request #{} in TUI",
                             pull_number
@@ -485,7 +519,12 @@ pub(super) fn handle_events(
                 if target == LinkedIssueTarget::Tui {
                     app.capture_linked_navigation_origin();
                     refresh_current_repo_issues(app, conn)?;
-                    if main_linked_actions::open_issue_in_tui(app, conn, issue_number)? {
+                    if main_linked_actions::open_linked_item_in_tui(
+                        app,
+                        conn,
+                        issue_number,
+                        WorkItemMode::Issues,
+                    )? {
                         app.set_status(format!("Opened linked issue #{} in TUI", issue_number));
                         continue;
                     }
@@ -556,6 +595,7 @@ pub(super) fn handle_events(
                 comment_id,
                 body,
             } => {
+                crate::store::update_comment_body_by_id(conn, comment_id, &body)?;
                 if !repo.is_current(app) {
                     continue;
                 }
@@ -567,14 +607,15 @@ pub(super) fn handle_events(
             AppEvent::IssueCommentDeleted {
                 repo,
                 issue_number,
+                issue_id,
                 comment_id,
-                count,
             } => {
+                let count = crate::store::delete_comment_by_id(conn, comment_id, issue_id)?;
                 if !repo.is_current(app) {
                     continue;
                 }
                 app.remove_comment_by_id(comment_id);
-                app.update_issue_comments_count_by_number(issue_number, count as i64);
+                app.update_issue_comments_count_by_number(issue_number, count);
                 app.set_status(format!("#{} comment deleted", issue_number));
                 app.request_comment_sync();
                 app.request_sync();
@@ -584,10 +625,8 @@ pub(super) fn handle_events(
                 repo,
                 labels,
             } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
-                {
-                    app.set_repo_labels_syncing(false);
+                app.finish_repo_labels_sync(&owner, &repo);
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
                     app.merge_repo_label_colors(labels.clone());
                     if app.view() == View::LabelPicker {
                         let options = labels
@@ -603,11 +642,29 @@ pub(super) fn handle_events(
                 repo,
                 assignees,
             } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
+                if RepoIdentity::new(&owner, &repo).is_current(app)
                     && app.view() == View::AssigneePicker
                 {
                     app.merge_assignee_options(assignees);
+                }
+            }
+            AppEvent::RepoLabelsFailed {
+                owner,
+                repo,
+                message,
+            } => {
+                app.finish_repo_labels_sync(&owner, &repo);
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
+                    app.set_status(format!("Repo labels unavailable: {}", message));
+                }
+            }
+            AppEvent::RepoAssigneesFailed {
+                owner,
+                repo,
+                message,
+            } => {
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
+                    app.set_status(format!("Repo assignees unavailable: {}", message));
                 }
             }
             AppEvent::RepoPermissionsResolved {
@@ -616,10 +673,8 @@ pub(super) fn handle_events(
                 can_edit_issue_metadata,
                 can_merge_pull_request,
             } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
-                {
-                    app.set_repo_permissions_syncing(false);
+                app.finish_repo_permissions_sync(&owner, &repo);
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
                     app.set_repo_issue_metadata_editable(Some(can_edit_issue_metadata));
                     app.set_repo_pull_request_mergeable(Some(can_merge_pull_request));
                     if !can_edit_issue_metadata {
@@ -634,10 +689,8 @@ pub(super) fn handle_events(
                 repo,
                 message,
             } => {
-                if app.current_owner() == Some(owner.as_str())
-                    && app.current_repo() == Some(repo.as_str())
-                {
-                    app.set_repo_permissions_syncing(false);
+                app.finish_repo_permissions_sync(&owner, &repo);
+                if RepoIdentity::new(&owner, &repo).is_current(app) {
                     app.set_repo_issue_metadata_editable(None);
                     app.set_repo_pull_request_mergeable(None);
                     app.set_status(format!("Repo permission check failed: {}", message));

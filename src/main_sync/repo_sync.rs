@@ -35,8 +35,8 @@ pub(crate) fn start_repo_sync(
                 )
                 .await
             });
-            let stats = match result {
-                Ok(stats) => stats,
+            let result = match result {
+                Ok(result) => result,
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::SyncFailed {
                         owner: owner.clone(),
@@ -46,7 +46,12 @@ pub(crate) fn start_repo_sync(
                     return;
                 }
             };
-            let _ = event_tx.send(AppEvent::SyncFinished { owner, repo, stats });
+            let _ = event_tx.send(AppEvent::SyncFinished {
+                owner,
+                repo,
+                resolved_repo: result.repo,
+                stats: result.stats,
+            });
         },
     );
 }
@@ -117,17 +122,27 @@ pub(crate) fn start_fetch_labels(
     spawn_with_services(
         token,
         event_tx,
-        move |_| AppEvent::RepoLabelsSuggested {
+        move |message| AppEvent::RepoLabelsFailed {
             owner: error_owner,
             repo: error_repo,
-            labels: Vec::new(),
+            message,
         },
         move |services, event_tx| {
             let labels = services
                 .runtime
                 .block_on(async { services.client.list_labels(&owner, &repo).await });
+            let labels = match labels {
+                Ok(labels) => labels,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::RepoLabelsFailed {
+                        owner,
+                        repo,
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
             let labels = labels
-                .unwrap_or_default()
                 .into_iter()
                 .map(|label| (label.name, label.color))
                 .collect::<Vec<(String, String)>>();
@@ -151,20 +166,28 @@ pub(crate) fn start_fetch_assignees(
     spawn_with_services(
         token,
         event_tx,
-        move |_| AppEvent::RepoAssigneesSuggested {
+        move |message| AppEvent::RepoAssigneesFailed {
             owner: error_owner,
             repo: error_repo,
-            assignees: Vec::new(),
+            message,
         },
         move |services, event_tx| {
             let assignees = services
                 .runtime
                 .block_on(async { services.client.list_assignees(&owner, &repo).await });
-            let _ = event_tx.send(AppEvent::RepoAssigneesSuggested {
-                owner,
-                repo,
-                assignees: assignees.unwrap_or_default(),
-            });
+            let event = match assignees {
+                Ok(assignees) => AppEvent::RepoAssigneesSuggested {
+                    owner,
+                    repo,
+                    assignees,
+                },
+                Err(error) => AppEvent::RepoAssigneesFailed {
+                    owner,
+                    repo,
+                    message: error.to_string(),
+                },
+            };
+            let _ = event_tx.send(event);
         },
     );
 }

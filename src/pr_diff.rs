@@ -27,12 +27,14 @@ pub fn parse_patch(patch: Option<&str>) -> Vec<DiffRow> {
     let mut rows = Vec::new();
     let mut old_line = 0i64;
     let mut new_line = 0i64;
+    let mut seen_hunk = false;
     let mut pending_removed: Vec<(i64, String, String)> = Vec::new();
     let mut pending_added: Vec<(i64, String, String)> = Vec::new();
 
     for line in patch.lines() {
         if line.starts_with("@@") {
             flush_change_block(&mut rows, &mut pending_removed, &mut pending_added);
+            seen_hunk = true;
             let (next_old, next_new) = parse_hunk_header(line).unwrap_or((old_line, new_line));
             old_line = next_old;
             new_line = next_new;
@@ -47,7 +49,7 @@ pub fn parse_patch(patch: Option<&str>) -> Vec<DiffRow> {
             continue;
         }
 
-        if line.starts_with('+') && !line.starts_with("+++") {
+        if line.starts_with('+') && (seen_hunk || !line.starts_with("+++")) {
             if let Some(content) = line.strip_prefix('+') {
                 pending_added.push((new_line, content.to_string(), line.to_string()));
             }
@@ -55,7 +57,7 @@ pub fn parse_patch(patch: Option<&str>) -> Vec<DiffRow> {
             continue;
         }
 
-        if line.starts_with('-') && !line.starts_with("---") {
+        if line.starts_with('-') && (seen_hunk || !line.starts_with("---")) {
             if let Some(content) = line.strip_prefix('-') {
                 pending_removed.push((old_line, content.to_string(), line.to_string()));
             }
@@ -199,5 +201,30 @@ mod tests {
         assert_eq!(rows[2].old_line, Some(4));
         assert_eq!(rows[2].new_line, Some(4));
         assert_eq!(rows[3].kind, DiffKind::Context);
+    }
+
+    #[test]
+    fn parse_patch_distinguishes_file_headers_from_hunk_content() {
+        let rows = parse_patch(Some(
+            "--- a/code.c\n+++ b/code.c\n@@ -1,4 +1,4 @@\n---i;\n--- a/content\n+++i;\n+++ b/content\n \n keep\n",
+        ));
+
+        assert_eq!(rows.len(), 7);
+        assert_eq!(rows[0].kind, DiffKind::Meta);
+        assert_eq!(rows[1].kind, DiffKind::Meta);
+        assert_eq!(rows[2].kind, DiffKind::Hunk);
+        assert_eq!(rows[3].kind, DiffKind::Changed);
+        assert_eq!(rows[3].left, "--i;");
+        assert_eq!(rows[3].right, "++i;");
+        assert_eq!(rows[3].old_line, Some(1));
+        assert_eq!(rows[3].new_line, Some(1));
+        assert_eq!(rows[4].kind, DiffKind::Changed);
+        assert_eq!(rows[4].left, "-- a/content");
+        assert_eq!(rows[4].right, "++ b/content");
+        assert_eq!(rows[5].kind, DiffKind::Context);
+        assert_eq!(rows[5].old_line, Some(3));
+        assert_eq!(rows[5].new_line, Some(3));
+        assert_eq!(rows[6].old_line, Some(4));
+        assert_eq!(rows[6].new_line, Some(4));
     }
 }

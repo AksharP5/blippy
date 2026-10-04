@@ -122,6 +122,28 @@ impl App {
         true
     }
 
+    pub fn reveal_issue_by_number(&mut self, issue_number: i64, mode: WorkItemMode) -> bool {
+        let issue = match self
+            .issues
+            .iter()
+            .find(|issue| issue.number == issue_number && mode.matches(issue))
+        {
+            Some(issue) => issue,
+            None => return false,
+        };
+        self.issue_filter = if issue_state_is_closed(&issue.state) {
+            IssueFilter::Closed
+        } else {
+            IssueFilter::Open
+        };
+        self.work_item_mode = mode;
+        self.assignee_filter = AssigneeFilter::All;
+        self.search.issue_query.clear();
+        self.search.issue_search_mode = false;
+        self.rebuild_issue_filter();
+        self.select_issue_by_number(issue_number)
+    }
+
     pub fn issue_counts(&self) -> (usize, usize) {
         let open = self
             .issues
@@ -212,15 +234,24 @@ impl App {
     }
 
     pub fn syncing(&self) -> bool {
-        self.sync.syncing
+        self.sync
+            .syncing
+            .iter()
+            .any(|key| self.repository_key_is_current(key))
     }
 
     pub fn repo_permissions_syncing(&self) -> bool {
-        self.sync.repo_permissions_syncing
+        self.sync
+            .repo_permissions_syncing
+            .iter()
+            .any(|key| self.repository_key_is_current(key))
     }
 
     pub fn repo_labels_syncing(&self) -> bool {
-        self.sync.repo_labels_syncing
+        self.sync
+            .repo_labels_syncing
+            .iter()
+            .any(|key| self.repository_key_is_current(key))
     }
 
     pub fn repo_issue_metadata_editable(&self) -> Option<bool> {
@@ -237,14 +268,20 @@ impl App {
     }
 
     pub fn comment_syncing(&self) -> bool {
-        self.sync.comment_syncing
+        self.context
+            .issue_id
+            .is_some_and(|id| self.sync.comment_syncing.contains(&id))
     }
 
     pub fn pull_request_files_syncing(&self) -> bool {
-        self.sync.pull_request_files_syncing
+        self.context
+            .issue_id
+            .is_some_and(|id| self.sync.pull_request_files_syncing.contains(&id))
     }
 
     pub fn pull_request_review_comments_syncing(&self) -> bool {
-        self.sync.pull_request_review_comments_syncing
+        self.context
+            .issue_id
+            .is_some_and(|id| self.sync.pull_request_review_comments_syncing.contains(&id))
     }
 }

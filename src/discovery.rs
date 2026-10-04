@@ -81,8 +81,7 @@ fn scan_repos_in_dir(
         }
 
         if is_git_repo(&path) {
-            repos.push(DiscoveredRepo { path });
-            continue;
+            repos.push(DiscoveredRepo { path: path.clone() });
         }
 
         let entries = match std::fs::read_dir(&path) {
@@ -154,7 +153,7 @@ fn canonical_key(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DiscoveredRepo, excluded_dirs, scan_repos_in_dir};
+    use super::{DiscoveredRepo, excluded_dirs, full_scan, scan_repos_in_dir};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -180,6 +179,29 @@ mod tests {
 
         let repos = scan_repos_in_dir(&root, 4, &excluded_dirs()).expect("scan");
         assert_eq!(repos, vec![DiscoveredRepo { path: repo_path }]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn full_scan_finds_nested_worktrees_and_preserves_exclusions() {
+        let root = unique_temp_dir("nested-worktree");
+        fs::create_dir_all(root.join(".git")).expect("create outer repo");
+        let worktree = root.join(".worktrees").join("review");
+        fs::create_dir_all(&worktree).expect("create worktree");
+        fs::write(worktree.join(".git"), "gitdir: /tmp/example.git")
+            .expect("create worktree git file");
+        fs::create_dir_all(root.join("target").join("ignored").join(".git"))
+            .expect("create excluded repo");
+
+        let repos = full_scan(&root).expect("scan");
+        assert_eq!(
+            repos,
+            vec![
+                DiscoveredRepo { path: root.clone() },
+                DiscoveredRepo { path: worktree }
+            ],
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

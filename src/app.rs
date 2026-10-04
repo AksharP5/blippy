@@ -7,7 +7,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
 use crate::keybinds::Keybinds;
-use crate::markdown;
 use crate::pr_diff::{DiffKind, parse_patch};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow};
 
@@ -352,7 +351,7 @@ impl WorkItemMode {
         }
     }
 
-    fn matches(self, issue: &IssueRow) -> bool {
+    pub(crate) fn matches(self, issue: &IssueRow) -> bool {
         match self {
             Self::Issues => !issue.is_pr,
             Self::PullRequests => issue.is_pr,
@@ -363,16 +362,16 @@ impl WorkItemMode {
 #[derive(Debug, Default)]
 struct SyncState {
     scanning: bool,
-    syncing: bool,
-    repo_permissions_syncing: bool,
+    syncing: HashSet<String>,
+    repo_permissions_syncing: HashSet<String>,
     repo_permissions_sync_requested: bool,
     repo_issue_metadata_editable: Option<bool>,
     repo_pull_request_mergeable: Option<bool>,
-    repo_labels_syncing: bool,
+    repo_labels_syncing: HashSet<String>,
     repo_labels_sync_requested: bool,
-    comment_syncing: bool,
-    pull_request_files_syncing: bool,
-    pull_request_review_comments_syncing: bool,
+    comment_syncing: HashSet<i64>,
+    pull_request_files_syncing: HashSet<i64>,
+    pull_request_review_comments_syncing: HashSet<i64>,
     comment_sync_requested: bool,
     pull_request_files_sync_requested: bool,
     pull_request_review_comments_sync_requested: bool,
@@ -393,6 +392,8 @@ struct LinkedState {
 struct RepoContextState {
     owner: Option<String>,
     repo: Option<String>,
+    key: Option<String>,
+    aliases: HashMap<String, String>,
     path: Option<String>,
     issue_id: Option<i64>,
     issue_number: Option<i64>,
@@ -475,6 +476,7 @@ struct NavigationState {
     issues_preview_max_scroll: u16,
     issue_comments_scroll: u16,
     issue_comments_max_scroll: u16,
+    issue_comment_offsets: Vec<u16>,
     issue_recent_comments_scroll: u16,
     issue_recent_comments_max_scroll: u16,
 }
@@ -514,7 +516,8 @@ impl Default for LinkedPickerState {
 #[derive(Debug, Default)]
 struct InteractionState {
     action: Option<AppAction>,
-    pending_issue_actions: HashMap<i64, PendingIssueAction>,
+    pending_issue_actions: HashMap<String, HashMap<i64, PendingIssueAction>>,
+    pending_file_view_updates: HashSet<(i64, String)>,
     pending_g: bool,
     pending_d: bool,
     mouse_regions: Vec<MouseRegion>,

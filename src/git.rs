@@ -25,8 +25,17 @@ pub fn parse_remote_url(url: &str) -> Option<RepoSlug> {
         return split_owner_repo(rest);
     }
 
-    if let Some(rest) = cleaned.strip_prefix("ssh://git@github.com/") {
-        return split_owner_repo(rest);
+    if cleaned.starts_with("ssh://") {
+        let parsed = reqwest::Url::parse(cleaned).ok()?;
+        if parsed.username() != "git"
+            || parsed.password().is_some()
+            || parsed.host_str() != Some("github.com")
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+        {
+            return None;
+        }
+        return split_owner_repo(parsed.path().strip_prefix('/')?);
     }
 
     if let Some(rest) = cleaned.strip_prefix("https://github.com/") {
@@ -97,7 +106,7 @@ fn repo_root_at(path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
+    let trimmed = stdout.strip_suffix('\n').unwrap_or(&stdout);
     if trimmed.is_empty() {
         return Ok(None);
     }
@@ -176,6 +185,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_remote_url_handles_ssh_url_with_explicit_port() {
+        let slug = parse_remote_url("ssh://git@github.com:22/acme/blippy.git").expect("slug");
+        assert_eq!(slug.owner, "acme");
+        assert_eq!(slug.repo, "blippy");
+    }
+
+    #[test]
+    fn parse_remote_url_rejects_unsupported_ssh_url_components() {
+        for url in [
+            "ssh://git@github.com.evil.invalid/acme/blippy.git",
+            "ssh://git@github.com:invalid/acme/blippy.git",
+            "ssh://git:secret@github.com/acme/blippy.git",
+            "ssh://git@github.com/acme/blippy.git?query",
+            "ssh://git@github.com/acme/blippy.git#fragment",
+        ] {
+            assert!(parse_remote_url(url).is_none(), "{url}");
+        }
+    }
+
+    #[test]
     fn parse_remote_url_rejects_non_github() {
         assert!(parse_remote_url("https://gitlab.com/acme/blippy").is_none());
     }
@@ -226,6 +255,22 @@ mod tests {
         assert_eq!(actual, Some(expected));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn repo_root_preserves_trailing_whitespace_in_directory_names() {
+        let root = unique_temp_dir("git-root-whitespace");
+        for name in ["repo ", "repo\t", "repo\n"] {
+            let dir = root.join(name);
+            fs::create_dir_all(&dir).expect("create repo directory");
+            init_git_repo(&dir);
+            let actual = super::repo_root_at(&dir).expect("repo root");
+            let expected = fs::canonicalize(&dir).expect("canonicalize directory");
+            assert_eq!(actual, Some(expected));
+        }
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

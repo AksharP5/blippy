@@ -252,6 +252,7 @@ pub struct Keybinds {
 impl Keybinds {
     pub fn from_overrides(overrides: &HashMap<String, String>) -> Self {
         let mut remap = HashMap::new();
+        let mut override_remap = HashMap::new();
         let mut default_usage = HashMap::new();
         let mut overridden_usage = HashMap::new();
         let mut action_bindings = HashMap::new();
@@ -276,7 +277,7 @@ impl Keybinds {
             action_bindings.insert(spec.action.to_string(), selected_key);
 
             if let Some(override_key) = override_key {
-                remap.insert(override_key.clone(), default_event);
+                override_remap.insert(override_key.clone(), default_event);
                 if override_key != default_key {
                     *overridden_usage
                         .entry(default_key.clone())
@@ -287,6 +288,7 @@ impl Keybinds {
 
             remap.insert(default_key, default_event);
         }
+        remap.extend(override_remap);
 
         let mut disabled_defaults = HashSet::new();
         for (default_key, total) in default_usage {
@@ -568,6 +570,17 @@ mod tests {
         let disabled_default =
             keybinds.remap_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(disabled_default.is_none());
+    }
+
+    #[test]
+    fn overrides_take_precedence_over_other_default_bindings() {
+        let overrides = HashMap::from([("quit".to_string(), "ctrl+g".to_string())]);
+        let keybinds = Keybinds::from_overrides(&overrides);
+
+        assert_eq!(
+            keybinds.remap_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL)),
+            Some(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        );
     }
 
     #[test]

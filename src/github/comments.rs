@@ -23,10 +23,11 @@ impl GitHubClient {
                 .await?
                 .error_for_status()?;
             let batch = response.json::<Vec<ApiComment>>().await?;
-            if batch.is_empty() {
+            let is_last_page = batch.len() < 100;
+            comments.extend(batch);
+            if is_last_page {
                 break;
             }
-            comments.extend(batch);
             page += 1;
         }
         Ok(comments)

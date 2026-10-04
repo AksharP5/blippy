@@ -17,6 +17,9 @@ pub(crate) fn close_issue_with_comment(
             }
         };
 
+    if !ensure_issue_action_available(app, issue_number) {
+        return Ok(());
+    }
     start_close_issue(owner, repo, issue_number, token.to_string(), body, event_tx);
     app.set_pending_issue_action(issue_number, PendingIssueAction::Closing);
     app.set_view(View::Issues);
@@ -206,7 +209,9 @@ pub(crate) fn update_issue_labels(
         }
     };
 
-    let labels_display = labels.join(",");
+    if !ensure_issue_action_available(app, issue_number) {
+        return Ok(());
+    }
     start_update_labels(
         owner,
         repo,
@@ -214,7 +219,6 @@ pub(crate) fn update_issue_labels(
         token.to_string(),
         labels,
         event_tx,
-        labels_display,
     );
     app.set_pending_issue_action(issue_number, PendingIssueAction::UpdatingLabels);
     app.set_view(app.editor_cancel_view());
@@ -243,6 +247,9 @@ pub(crate) fn update_issue_assignees(
         }
     };
 
+    if !ensure_issue_action_available(app, issue_number) {
+        return Ok(());
+    }
     let assignees_display = assignees.join(",");
     start_update_assignees(
         owner,
@@ -268,6 +275,9 @@ pub(crate) fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent
         }
     };
 
+    if !ensure_issue_action_available(app, issue_number) {
+        return Ok(());
+    }
     if issue_state
         .as_deref()
         .is_some_and(|state| state.eq_ignore_ascii_case("open"))
@@ -311,6 +321,9 @@ pub(crate) fn merge_pull_request(
             return Ok(());
         }
     };
+    if !ensure_issue_action_available(app, issue_number) {
+        return Ok(());
+    }
     if !is_pr {
         app.set_status("Selected item is not a pull request".to_string());
         return Ok(());

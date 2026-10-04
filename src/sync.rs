@@ -12,6 +12,12 @@ pub struct SyncStats {
     pub incomplete_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncResult {
+    pub repo: RepoRow,
+    pub stats: SyncStats,
+}
+
 #[async_trait]
 pub trait GitHubApi {
     async fn get_repo(&self, owner: &str, repo: &str) -> Result<ApiRepo>;
@@ -54,13 +60,12 @@ pub fn map_repo_to_row(repo: &ApiRepo) -> RepoRow {
     }
 }
 
-pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
+pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> IssueRow {
     let labels = issue
         .labels
         .iter()
-        .map(|label| label.name.as_str())
-        .collect::<Vec<&str>>()
-        .join(",");
+        .map(|label| label.name.clone())
+        .collect();
     let assignees = issue
         .assignees
         .iter()
@@ -80,7 +85,7 @@ pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
     } else {
         issue.state.clone()
     };
-    Some(IssueRow {
+    IssueRow {
         id: issue.id,
         repo_id,
         number: issue.number,
@@ -92,14 +97,18 @@ pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
         comments_count: issue.comments,
         updated_at: issue.updated_at.clone(),
         is_pr,
-    })
+    }
 }
 
 pub fn map_comment_to_row(issue_id: i64, comment: &ApiComment) -> CommentRow {
     CommentRow {
         id: comment.id,
         issue_id,
-        author: comment.user.login.clone(),
+        author: comment
+            .user
+            .as_ref()
+            .map(|user| user.login.clone())
+            .unwrap_or_else(|| "unknown".to_string()),
         body: comment.body.clone().unwrap_or_default(),
         created_at: comment.created_at.clone(),
         last_accessed_at: Some(crate::store::comment_now_epoch()),
@@ -112,20 +121,18 @@ pub async fn sync_repo_with_progress<F>(
     _owner: &str,
     _repo: &str,
     mut _on_progress: F,
-) -> Result<SyncStats>
+) -> Result<SyncResult>
 where
     F: FnMut(u32, &SyncStats),
 {
-    let stored_repo = crate::store::get_repo_by_slug(_conn, _owner, _repo)?;
-    let repo_row = match stored_repo.as_ref() {
-        Some(repo_row) => repo_row.clone(),
-        None => {
-            let repo = _client.get_repo(_owner, _repo).await?;
-            let repo_row = map_repo_to_row(&repo);
-            crate::store::upsert_repo(_conn, &repo_row)?;
-            repo_row
-        }
-    };
+    let repo = _client.get_repo(_owner, _repo).await?;
+    let stored_repo = crate::store::get_repo_by_id(_conn, repo.id)?;
+    let mut repo_row = map_repo_to_row(&repo);
+    if let Some(stored) = &stored_repo {
+        repo_row.updated_at = stored.updated_at.clone();
+        repo_row.etag = stored.etag.clone();
+    }
+    crate::store::upsert_repo(_conn, &repo_row)?;
 
     let previous_cursor = stored_repo
         .as_ref()
@@ -134,21 +141,29 @@ where
         .as_ref()
         .and_then(|stored_repo| stored_repo.etag.clone());
 
+    // A first-page ETag cannot certify later pages at the same update timestamp.
+    let use_first_page_etag = match (previous_etag.as_ref(), previous_cursor.as_deref()) {
+        (Some(_), Some(cursor)) => {
+            crate::store::count_issues_updated_since(_conn, repo_row.id, cursor)? < 100
+        }
+        _ => true,
+    };
+
     let mut stats = SyncStats::default();
     let mut page = 1u32;
     let mut fetched_any_page = false;
     let mut latest_seen_updated_at = previous_cursor.clone();
     let mut first_page_etag = None;
     loop {
-        let if_none_match = if page == 1 {
+        let if_none_match = if page == 1 && use_first_page_etag {
             previous_etag.as_deref()
         } else {
             None
         };
         let page_result = _client
             .list_issues_page(
-                _owner,
-                _repo,
+                &repo_row.owner,
+                &repo_row.name,
                 page,
                 if_none_match,
                 previous_cursor.as_deref(),
@@ -157,7 +172,10 @@ where
         let (issues, etag) = match page_result {
             Ok(ApiIssuesPageResult::NotModified) => {
                 stats.not_modified = true;
-                return Ok(stats);
+                return Ok(SyncResult {
+                    repo: repo_row,
+                    stats,
+                });
             }
             Ok(ApiIssuesPageResult::Page(page_result)) => {
                 fetched_any_page = true;
@@ -177,6 +195,7 @@ where
         if issues.is_empty() {
             break;
         }
+        let is_last_page = issues.len() < 100;
         let mut rows = Vec::new();
         let mut reached_previous_cursor = false;
         for issue in issues {
@@ -188,10 +207,7 @@ where
                 break;
             }
 
-            let row = match map_issue_to_row(repo_row.id, &issue) {
-                Some(row) => row,
-                None => continue,
-            };
+            let row = map_issue_to_row(repo_row.id, &issue);
 
             if let Some(updated_at) = row.updated_at.as_deref() {
                 let should_replace = latest_seen_updated_at
@@ -212,7 +228,7 @@ where
         }
         transaction.commit()?;
         _on_progress(page, &stats);
-        if reached_previous_cursor {
+        if reached_previous_cursor || is_last_page {
             break;
         }
         page += 1;
@@ -224,9 +240,14 @@ where
             .or(previous_cursor.as_deref());
         let next_etag = first_page_etag.as_deref().or(previous_etag.as_deref());
         crate::store::update_repo_sync_state(_conn, repo_row.id, next_cursor, next_etag)?;
+        repo_row.updated_at = next_cursor.map(ToString::to_string);
+        repo_row.etag = next_etag.map(ToString::to_string);
     }
 
-    Ok(stats)
+    Ok(SyncResult {
+        repo: repo_row,
+        stats,
+    })
 }
 
 #[cfg(test)]

@@ -63,6 +63,18 @@ impl App {
             .remove(file_path);
     }
 
+    pub fn begin_pull_request_file_view_update(&mut self, issue_id: i64, path: &str) -> bool {
+        self.interaction
+            .pending_file_view_updates
+            .insert((issue_id, path.to_string()))
+    }
+
+    pub fn finish_pull_request_file_view_update(&mut self, issue_id: i64, path: &str) {
+        self.interaction
+            .pending_file_view_updates
+            .remove(&(issue_id, path.to_string()));
+    }
+
     pub fn selected_pull_request_file_view_toggle(&self) -> Option<(String, bool)> {
         if !self.pull_request_view_state_loaded() {
             return None;
@@ -601,6 +613,11 @@ impl App {
         let (start_index, end_index) = self.selected_pull_request_diff_range();
         let start_index = start_index.min(rows.len() - 1);
         let end_index = end_index.min(rows.len() - 1);
+        let hunk_range = pull_request_hunk_range_for_row(rows, start_index)?;
+        // GitHub requires multiline review threads to stay within one diff hunk.
+        if end_index > hunk_range.end {
+            return None;
+        }
 
         let side = self.pull_request.pull_request_review_side;
         let mut selected_lines = Vec::new();

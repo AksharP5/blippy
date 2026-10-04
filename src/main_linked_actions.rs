@@ -84,7 +84,7 @@ pub(super) fn try_open_cached_linked_pull_request(
     if target == LinkedPullRequestTarget::Tui {
         app.capture_linked_navigation_origin();
         refresh_current_repo_issues(app, conn)?;
-        if open_pull_request_in_tui(app, conn, pull_number)? {
+        if open_linked_item_in_tui(app, conn, pull_number, WorkItemMode::PullRequests)? {
             app.set_status(format!(
                 "Opened linked pull request #{} in TUI",
                 pull_number
@@ -152,7 +152,7 @@ pub(super) fn try_open_cached_linked_issue(
     if target == LinkedIssueTarget::Tui {
         app.capture_linked_navigation_origin();
         refresh_current_repo_issues(app, conn)?;
-        if open_issue_in_tui(app, conn, issue_number)? {
+        if open_linked_item_in_tui(app, conn, issue_number, WorkItemMode::Issues)? {
             app.set_status(format!("Opened linked issue #{} in TUI", issue_number));
             return Ok(true);
         }
@@ -286,13 +286,18 @@ pub(super) fn open_selected_linked_item(app: &mut App, conn: &rusqlite::Connecti
     };
 
     let cancel_view = app.linked_picker_cancel_view();
-    app.apply_linked_picker_navigation_origin();
+    if matches!(
+        target,
+        LinkedPickerTarget::PullRequestTui | LinkedPickerTarget::IssueTui
+    ) {
+        app.apply_linked_picker_navigation_origin();
+    }
     app.clear_linked_picker_state();
 
     match target {
         LinkedPickerTarget::PullRequestTui => {
             refresh_current_repo_issues(app, conn)?;
-            if open_pull_request_in_tui(app, conn, number)? {
+            if open_linked_item_in_tui(app, conn, number, WorkItemMode::PullRequests)? {
                 app.set_status(format!("Opened linked pull request #{} in TUI", number));
                 return Ok(());
             }
@@ -305,7 +310,7 @@ pub(super) fn open_selected_linked_item(app: &mut App, conn: &rusqlite::Connecti
         }
         LinkedPickerTarget::IssueTui => {
             refresh_current_repo_issues(app, conn)?;
-            if open_issue_in_tui(app, conn, number)? {
+            if open_linked_item_in_tui(app, conn, number, WorkItemMode::Issues)? {
                 app.set_status(format!("Opened linked issue #{} in TUI", number));
                 return Ok(());
             }
@@ -353,68 +358,32 @@ pub(super) fn open_selected_linked_item(app: &mut App, conn: &rusqlite::Connecti
     Ok(())
 }
 
-pub(super) fn open_pull_request_in_tui(
+pub(super) fn open_linked_item_in_tui(
     app: &mut App,
     conn: &rusqlite::Connection,
-    pull_number: i64,
+    number: i64,
+    mode: WorkItemMode,
 ) -> Result<bool> {
-    app.set_view(View::Issues);
-    app.set_work_item_mode(WorkItemMode::PullRequests);
+    let issue_id = match app
+        .issues()
+        .iter()
+        .find(|issue| issue.number == number && mode.matches(issue))
+    {
+        Some(issue) => issue.id,
+        None => return Ok(false),
+    };
 
-    let try_filters = [IssueFilter::Open, IssueFilter::Closed];
-    for filter in try_filters {
-        app.set_issue_filter(filter);
-        if !app.select_issue_by_number(pull_number) {
-            continue;
-        }
-
-        let (issue_id, issue_number) = match app.selected_issue_row() {
-            Some(issue) => (issue.id, issue.number),
-            None => return Ok(false),
-        };
-        app.set_current_issue(issue_id, issue_number);
-        app.reset_issue_detail_scroll();
-        load_comments_for_issue(app, conn, issue_id)?;
-        app.set_view(View::IssueDetail);
-        app.set_comment_syncing(false);
-        app.request_comment_sync();
+    load_comments_for_issue(app, conn, issue_id)?;
+    app.reveal_issue_by_number(number, mode);
+    app.set_current_issue(issue_id, number);
+    app.reset_issue_detail_scroll();
+    app.set_view(View::IssueDetail);
+    app.request_comment_sync();
+    if mode == WorkItemMode::PullRequests {
         app.request_pull_request_files_sync();
         app.request_pull_request_review_comments_sync();
-        return Ok(true);
     }
-
-    Ok(false)
-}
-
-pub(super) fn open_issue_in_tui(
-    app: &mut App,
-    conn: &rusqlite::Connection,
-    issue_number: i64,
-) -> Result<bool> {
-    app.set_view(View::Issues);
-    app.set_work_item_mode(WorkItemMode::Issues);
-
-    let try_filters = [IssueFilter::Open, IssueFilter::Closed];
-    for filter in try_filters {
-        app.set_issue_filter(filter);
-        if !app.select_issue_by_number(issue_number) {
-            continue;
-        }
-
-        let (issue_id, issue_number) = match app.selected_issue_row() {
-            Some(issue) => (issue.id, issue.number),
-            None => return Ok(false),
-        };
-        app.set_current_issue(issue_id, issue_number);
-        app.reset_issue_detail_scroll();
-        load_comments_for_issue(app, conn, issue_id)?;
-        app.set_view(View::IssueDetail);
-        app.set_comment_syncing(false);
-        app.request_comment_sync();
-        return Ok(true);
-    }
-
-    Ok(false)
+    Ok(true)
 }
 
 pub(super) fn start_linked_pull_request_lookup(
