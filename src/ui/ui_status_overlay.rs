@@ -1206,7 +1206,7 @@ mod tests {
             state: "open".to_string(),
             title: "Item".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,

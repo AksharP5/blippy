@@ -1,7 +1,97 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+fn repository_key(owner: &str, repo: &str) -> String {
+    let mut key = format!("{owner}/{repo}");
+    key.make_ascii_lowercase();
+    key
+}
+
 impl App {
+    fn resolved_repository_key(&self, owner: &str, repo: &str) -> String {
+        let key = repository_key(owner, repo);
+        self.context.aliases.get(&key).cloned().unwrap_or(key)
+    }
+
+    fn current_repository_request_key(&self) -> Option<String> {
+        Some(repository_key(
+            self.context.owner.as_deref()?,
+            self.context.repo.as_deref()?,
+        ))
+    }
+
+    pub(super) fn repository_key_is_current(&self, key: &str) -> bool {
+        let resolved = self
+            .context
+            .aliases
+            .get(key)
+            .map(String::as_str)
+            .unwrap_or(key);
+        self.context.key.as_deref() == Some(resolved)
+    }
+
+    pub fn repository_is_current(&self, owner: &str, repo: &str) -> bool {
+        self.repository_key_is_current(&repository_key(owner, repo))
+    }
+
+    pub fn set_current_repo_id(&mut self, id: i64) {
+        self.context.id = Some(id);
+        if let Some(key) = self.current_repository_request_key() {
+            // A cached repository owns this name; an earlier redirect may now be obsolete.
+            self.context.aliases.remove(&key);
+            self.context.key = Some(key);
+        }
+    }
+
+    pub fn resolve_repository_alias(
+        &mut self,
+        requested_owner: &str,
+        requested_repo: &str,
+        resolved: &RepoRow,
+    ) -> bool {
+        let requested_key = repository_key(requested_owner, requested_repo);
+        let selected_key = self.current_repository_request_key();
+        let old_key = self.resolved_repository_key(requested_owner, requested_repo);
+        let key = repository_key(&resolved.owner, &resolved.name);
+        let current = self.context.id.map_or_else(
+            || {
+                selected_key
+                    .as_ref()
+                    .is_some_and(|selected| selected == &requested_key || selected == &key)
+            },
+            |id| id == resolved.id,
+        );
+        if selected_key.as_ref() == Some(&requested_key)
+            && self.context.id.is_some_and(|id| id != resolved.id)
+        {
+            return false;
+        }
+        if old_key != key {
+            for target in self.context.aliases.values_mut() {
+                if *target == old_key {
+                    *target = key.clone();
+                }
+            }
+            self.context.aliases.insert(old_key, key.clone());
+        }
+        if requested_key != key {
+            self.context.aliases.insert(requested_key, key.clone());
+        }
+        self.context.aliases.retain(|alias, target| alias != target);
+        if !current {
+            return false;
+        }
+        if self.current_repository_request_key().as_ref() != Some(&key) {
+            self.linked.pull_requests.clear();
+            self.linked.issues.clear();
+        }
+        self.context.id = Some(resolved.id);
+        self.context.owner = Some(resolved.owner.clone());
+        self.context.repo = Some(resolved.name.clone());
+        self.context.key = Some(key);
+        true
+    }
+
     pub fn should_quit(&self) -> bool {
         self.should_quit
     }
@@ -44,6 +134,7 @@ impl App {
     }
 
     pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
+        self.navigation.issue_comment_offsets.clear();
         let selected_comment_id = self.selected_comment_row().map(|comment| comment.id);
         self.comments = comments;
         if self.comments.is_empty() {
@@ -103,6 +194,18 @@ impl App {
         }
     }
 
+    pub fn set_issue_comment_offsets(&mut self, offsets: Vec<u16>) {
+        let selected = self.navigation.selected_comment;
+        let previous = self.navigation.issue_comment_offsets.get(selected).copied();
+        let current = offsets.get(selected).copied();
+        if previous != current {
+            self.navigation.issue_comments_scroll = current
+                .unwrap_or_default()
+                .min(self.navigation.issue_comments_max_scroll);
+        }
+        self.navigation.issue_comment_offsets = offsets;
+    }
+
     pub fn set_issue_recent_comments_max_scroll(&mut self, max_scroll: u16) {
         self.navigation.issue_recent_comments_max_scroll = max_scroll;
         if self.navigation.issue_recent_comments_scroll > max_scroll {
@@ -153,16 +256,38 @@ impl App {
         self.sync.scanning = scanning;
     }
 
-    pub fn set_syncing(&mut self, syncing: bool) {
-        self.sync.syncing = syncing;
+    pub fn begin_repo_sync(&mut self) {
+        if let Some(key) = self.current_repository_request_key() {
+            self.sync.syncing.insert(key);
+        }
     }
 
-    pub fn set_repo_permissions_syncing(&mut self, syncing: bool) {
-        self.sync.repo_permissions_syncing = syncing;
+    pub fn finish_repo_sync(&mut self, owner: &str, repo: &str) {
+        self.sync.syncing.remove(&repository_key(owner, repo));
     }
 
-    pub fn set_repo_labels_syncing(&mut self, syncing: bool) {
-        self.sync.repo_labels_syncing = syncing;
+    pub fn begin_repo_permissions_sync(&mut self) {
+        if let Some(key) = self.current_repository_request_key() {
+            self.sync.repo_permissions_syncing.insert(key);
+        }
+    }
+
+    pub fn finish_repo_permissions_sync(&mut self, owner: &str, repo: &str) {
+        self.sync
+            .repo_permissions_syncing
+            .remove(&repository_key(owner, repo));
+    }
+
+    pub fn begin_repo_labels_sync(&mut self) {
+        if let Some(key) = self.current_repository_request_key() {
+            self.sync.repo_labels_syncing.insert(key);
+        }
+    }
+
+    pub fn finish_repo_labels_sync(&mut self, owner: &str, repo: &str) {
+        self.sync
+            .repo_labels_syncing
+            .remove(&repository_key(owner, repo));
     }
 
     pub fn set_repo_issue_metadata_editable(&mut self, editable: Option<bool>) {
@@ -173,16 +298,36 @@ impl App {
         self.sync.repo_pull_request_mergeable = mergeable;
     }
 
-    pub fn set_comment_syncing(&mut self, syncing: bool) {
-        self.sync.comment_syncing = syncing;
+    pub fn begin_comment_sync(&mut self) {
+        if let Some(id) = self.context.issue_id {
+            self.sync.comment_syncing.insert(id);
+        }
     }
 
-    pub fn set_pull_request_files_syncing(&mut self, syncing: bool) {
-        self.sync.pull_request_files_syncing = syncing;
+    pub fn finish_comment_sync(&mut self, issue_id: i64) {
+        self.sync.comment_syncing.remove(&issue_id);
     }
 
-    pub fn set_pull_request_review_comments_syncing(&mut self, syncing: bool) {
-        self.sync.pull_request_review_comments_syncing = syncing;
+    pub fn begin_pull_request_files_sync(&mut self) {
+        if let Some(id) = self.context.issue_id {
+            self.sync.pull_request_files_syncing.insert(id);
+        }
+    }
+
+    pub fn finish_pull_request_files_sync(&mut self, issue_id: i64) {
+        self.sync.pull_request_files_syncing.remove(&issue_id);
+    }
+
+    pub fn begin_pull_request_review_comments_sync(&mut self) {
+        if let Some(id) = self.context.issue_id {
+            self.sync.pull_request_review_comments_syncing.insert(id);
+        }
+    }
+
+    pub fn finish_pull_request_review_comments_sync(&mut self, issue_id: i64) {
+        self.sync
+            .pull_request_review_comments_syncing
+            .remove(&issue_id);
     }
 
     pub fn request_comment_sync(&mut self) {
@@ -246,26 +391,22 @@ impl App {
     }
 
     pub fn set_current_repo_with_path(&mut self, owner: &str, repo: &str, path: Option<&str>) {
+        self.context.id = None;
         self.context.owner = Some(owner.to_string());
         self.context.repo = Some(repo.to_string());
+        self.context.key = Some(self.resolved_repository_key(owner, repo));
         self.context.path = path.map(ToString::to_string);
         self.context.issue_id = None;
         self.context.issue_number = None;
-        self.sync.syncing = false;
         self.reset_issue_sync_state();
-        self.sync.repo_permissions_syncing = false;
         self.sync.repo_permissions_sync_requested = true;
         self.sync.repo_issue_metadata_editable = None;
         self.sync.repo_pull_request_mergeable = None;
-        self.sync.repo_labels_syncing = false;
         self.sync.repo_labels_sync_requested = true;
         self.repo_label_colors.clear();
         self.linked.pull_requests.clear();
         self.linked.issues.clear();
-        self.linked.pull_request_lookups.clear();
-        self.linked.issue_lookups.clear();
         self.linked.navigation_origin = None;
-        self.interaction.pending_issue_actions.clear();
         self.clear_linked_picker_state();
         self.reset_pull_request_state();
         self.search.repo_search_mode = false;
@@ -286,9 +427,7 @@ impl App {
     }
 
     fn reset_issue_sync_state(&mut self) {
-        self.sync.comment_syncing = false;
-        self.sync.pull_request_files_syncing = false;
-        self.sync.pull_request_review_comments_syncing = false;
+        self.navigation.issue_comment_offsets.clear();
         self.sync.comment_sync_requested = false;
         self.sync.pull_request_files_sync_requested = false;
         self.sync.pull_request_review_comments_sync_requested = false;
@@ -307,10 +446,10 @@ impl App {
         }
     }
 
-    pub fn update_issue_labels_by_number(&mut self, issue_number: i64, labels: &str) {
+    pub fn update_issue_labels_by_number(&mut self, issue_number: i64, labels: &[String]) {
         for issue in &mut self.issues {
             if issue.number == issue_number {
-                issue.labels = labels.to_string();
+                issue.labels = labels.to_vec();
             }
         }
         self.rebuild_issue_filter();
@@ -337,6 +476,7 @@ impl App {
         for comment in &mut self.comments {
             if comment.id == comment_id {
                 comment.body = body.to_string();
+                self.navigation.issue_comment_offsets.clear();
                 return;
             }
         }
@@ -353,6 +493,7 @@ impl App {
         };
 
         self.comments.remove(removed_index);
+        self.navigation.issue_comment_offsets.clear();
         if self.comments.is_empty() {
             self.navigation.selected_comment = 0;
             self.navigation.issue_comments_scroll = 0;
@@ -378,21 +519,40 @@ impl App {
     }
 
     pub fn set_pending_issue_action(&mut self, issue_number: i64, action: PendingIssueAction) {
+        let Some(key) = self.current_repository_request_key() else {
+            return;
+        };
         self.interaction
             .pending_issue_actions
+            .entry(key)
+            .or_default()
             .insert(issue_number, action);
     }
 
-    pub fn clear_pending_issue_action(&mut self, issue_number: i64) {
-        self.interaction.pending_issue_actions.remove(&issue_number);
+    pub fn clear_pending_issue_action(&mut self, owner: &str, repo: &str, issue_number: i64) {
+        let key = repository_key(owner, repo);
+        let Some(actions) = self.interaction.pending_issue_actions.get_mut(&key) else {
+            return;
+        };
+        actions.remove(&issue_number);
+        if actions.is_empty() {
+            self.interaction.pending_issue_actions.remove(&key);
+        }
     }
 
     pub fn pending_issue_badge(&self, issue_number: i64) -> Option<&'static str> {
         self.interaction
             .pending_issue_actions
-            .get(&issue_number)
-            .copied()
-            .map(PendingIssueAction::label)
+            .iter()
+            .find_map(|(key, actions)| {
+                if !self.repository_key_is_current(key) {
+                    return None;
+                }
+                actions
+                    .get(&issue_number)
+                    .copied()
+                    .map(PendingIssueAction::label)
+            })
     }
 
     pub fn take_rescan_request(&mut self) -> bool {

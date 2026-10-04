@@ -110,24 +110,24 @@ pub(super) fn draw_label_picker(
                 .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
-    frame.render_stateful_widget(
-        list,
-        sections[1],
-        &mut list_state(selected_for_list(
-            filtered
-                .iter()
-                .position(|index| *index == app.selected_label_option())
-                .unwrap_or(0),
-            filtered.len(),
-        )),
-    );
+    let mut labels_state = list_state(selected_for_list(
+        filtered
+            .iter()
+            .position(|index| *index == app.selected_label_option())
+            .unwrap_or(0),
+        filtered.len(),
+    ));
+    frame.render_stateful_widget(list, sections[1], &mut labels_state);
     let labels_inner = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
     let max_rows = labels_inner.height as usize;
-    for index in 0..filtered.len().min(max_rows) {
-        let y = labels_inner.y.saturating_add(index as u16);
+    for (row, index) in (labels_state.offset()..filtered.len())
+        .take(max_rows)
+        .enumerate()
+    {
+        let y = labels_inner.y.saturating_add(row as u16);
         app.register_mouse_region(
             MouseTarget::LabelOption(index),
             labels_inner.x,
@@ -303,24 +303,24 @@ pub(super) fn draw_assignee_picker(
                 .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
-    frame.render_stateful_widget(
-        list,
-        sections[1],
-        &mut list_state(selected_for_list(
-            filtered
-                .iter()
-                .position(|index| *index == app.selected_assignee_option())
-                .unwrap_or(0),
-            filtered.len(),
-        )),
-    );
+    let mut assignees_state = list_state(selected_for_list(
+        filtered
+            .iter()
+            .position(|index| *index == app.selected_assignee_option())
+            .unwrap_or(0),
+        filtered.len(),
+    ));
+    frame.render_stateful_widget(list, sections[1], &mut assignees_state);
     let assignees_inner = sections[1].inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
     let max_rows = assignees_inner.height as usize;
-    for index in 0..filtered.len().min(max_rows) {
-        let y = assignees_inner.y.saturating_add(index as u16);
+    for (row, index) in (assignees_state.offset()..filtered.len())
+        .take(max_rows)
+        .enumerate()
+    {
+        let y = assignees_inner.y.saturating_add(row as u16);
         app.register_mouse_region(
             MouseTarget::AssigneeOption(index),
             assignees_inner.x,

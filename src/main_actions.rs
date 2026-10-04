@@ -45,7 +45,6 @@ pub(super) fn handle_actions(
             app.reset_issue_detail_scroll();
             load_comments_for_issue(app, conn, issue_id)?;
             app.set_view(View::IssueDetail);
-            app.set_comment_syncing(false);
             app.request_comment_sync();
             if is_pr {
                 app.request_pull_request_files_sync();
@@ -246,7 +245,7 @@ pub(super) fn handle_actions(
             app.set_current_issue(issue_id, issue_number);
             let labels = selected_issue_labels(app).unwrap_or_default();
             let options = label_options_for_repo(app);
-            app.open_label_picker(return_view, options, labels.as_str());
+            app.open_label_picker(return_view, options, &labels);
             app.request_repo_labels_sync();
         }
         AppAction::EditAssignees => {
@@ -292,6 +291,9 @@ pub(super) fn handle_actions(
         }
         AppAction::CloseIssue => {
             if let Some((issue_id, issue_number, _)) = selected_issue_for_action(app) {
+                if !ensure_issue_action_available(app, issue_number) {
+                    return Ok(());
+                }
                 app.set_current_issue(issue_id, issue_number);
             }
             app.set_selected_preset(0);
@@ -307,7 +309,6 @@ pub(super) fn handle_actions(
         }
         AppAction::SavePreset => {
             save_preset_from_editor(app)?;
-            app.set_view(View::CommentPresetPicker);
         }
     }
     Ok(())

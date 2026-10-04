@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 const DB_FILE_NAME: &str = "blippy.db";
 const APP_DIR_NAME: &str = "blippy";
@@ -26,7 +26,7 @@ pub struct IssueRow {
     pub state: String,
     pub title: String,
     pub body: String,
-    pub labels: String,
+    pub labels: Vec<String>,
     pub assignees: String,
     pub comments_count: i64,
     pub updated_at: Option<String>,
@@ -127,7 +127,7 @@ pub fn upsert_issue(conn: &Connection, issue: &IssueRow) -> Result<()> {
             issue.state.as_str(),
             issue.title.as_str(),
             issue.body.as_str(),
-            issue.labels.as_str(),
+            serde_json::to_string(&issue.labels)?,
             issue.assignees.as_str(),
             issue.comments_count,
             issue.updated_at.as_deref(),
@@ -190,9 +190,25 @@ pub fn update_comment_body_by_id(conn: &Connection, comment_id: i64, body: &str)
     Ok(())
 }
 
-pub fn delete_comment_by_id(conn: &Connection, comment_id: i64) -> Result<()> {
-    conn.execute("DELETE FROM comments WHERE id = ?1", [comment_id])?;
-    Ok(())
+pub fn delete_comment_by_id(conn: &Connection, comment_id: i64, issue_id: i64) -> Result<i64> {
+    let transaction = conn.unchecked_transaction()?;
+    let deleted = transaction.execute(
+        "DELETE FROM comments WHERE id = ?1 AND issue_id = ?2",
+        (comment_id, issue_id),
+    )?;
+    if deleted > 0 {
+        transaction.execute(
+            "UPDATE issues SET comments_count = MAX(comments_count - 1, 0) WHERE id = ?1",
+            [issue_id],
+        )?;
+    }
+    let count = transaction.query_row(
+        "SELECT comments_count FROM issues WHERE id = ?1",
+        [issue_id],
+        |row| row.get(0),
+    )?;
+    transaction.commit()?;
+    Ok(count)
 }
 
 pub fn list_issues(conn: &Connection, repo_id: i64) -> Result<Vec<IssueRow>> {
@@ -214,7 +230,16 @@ pub fn list_issues(conn: &Connection, repo_id: i64) -> Result<Vec<IssueRow>> {
             state: row.get(3)?,
             title: row.get(4)?,
             body: row.get(5)?,
-            labels: row.get(6)?,
+            labels: {
+                let labels: String = row.get(6)?;
+                serde_json::from_str(&labels).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        6,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?
+            },
             assignees: row.get(7)?,
             comments_count: row.get(8)?,
             updated_at: row.get(9)?,
@@ -335,27 +360,34 @@ pub fn delete_local_repos_at_path(conn: &Connection, path: &str) -> Result<()> {
 }
 
 pub fn get_repo_by_slug(conn: &Connection, owner: &str, repo: &str) -> Result<Option<RepoRow>> {
-    let mut statement = conn.prepare(
-        "
-        SELECT id, owner, name, updated_at, etag
-        FROM repos
-        WHERE owner = ?1 AND name = ?2
-        LIMIT 1
-        ",
-    )?;
-    let mut rows = statement.query([owner, repo])?;
-    let row = rows.next()?;
-    let row = match row {
-        Some(row) => row,
-        None => return Ok(None),
-    };
-    Ok(Some(RepoRow {
+    Ok(conn
+        .query_row(
+            "SELECT id, owner, name, updated_at, etag FROM repos
+             WHERE owner = ?1 COLLATE NOCASE AND name = ?2 COLLATE NOCASE LIMIT 1",
+            (owner, repo),
+            repo_from_row,
+        )
+        .optional()?)
+}
+
+pub fn get_repo_by_id(conn: &Connection, id: i64) -> Result<Option<RepoRow>> {
+    Ok(conn
+        .query_row(
+            "SELECT id, owner, name, updated_at, etag FROM repos WHERE id = ?1",
+            [id],
+            repo_from_row,
+        )
+        .optional()?)
+}
+
+fn repo_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepoRow> {
+    Ok(RepoRow {
         id: row.get(0)?,
         owner: row.get(1)?,
         name: row.get(2)?,
         updated_at: row.get(3)?,
         etag: row.get(4)?,
-    }))
+    })
 }
 
 pub fn update_issue_comments_count(conn: &Connection, issue_id: i64, count: i64) -> Result<()> {
@@ -418,11 +450,15 @@ fn data_dir() -> PathBuf {
 }
 
 fn unix_data_dir() -> PathBuf {
-    if let Ok(dir) = env::var("XDG_DATA_HOME") {
+    if let Ok(dir) = env::var("XDG_DATA_HOME")
+        && !dir.is_empty()
+    {
         return PathBuf::from(dir);
     }
 
-    if let Ok(home) = env::var("HOME") {
+    if let Ok(home) = env::var("HOME")
+        && !home.is_empty()
+    {
         return Path::new(&home).join(".local").join("share");
     }
 
@@ -430,11 +466,15 @@ fn unix_data_dir() -> PathBuf {
 }
 
 fn windows_data_dir() -> PathBuf {
-    if let Ok(dir) = env::var("LOCALAPPDATA") {
+    if let Ok(dir) = env::var("LOCALAPPDATA")
+        && !dir.is_empty()
+    {
         return PathBuf::from(dir);
     }
 
-    if let Ok(dir) = env::var("APPDATA") {
+    if let Ok(dir) = env::var("APPDATA")
+        && !dir.is_empty()
+    {
         return PathBuf::from(dir);
     }
 
@@ -490,7 +530,7 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
             state TEXT NOT NULL,
             title TEXT NOT NULL,
             body TEXT NOT NULL,
-            labels TEXT NOT NULL DEFAULT '',
+            labels TEXT NOT NULL DEFAULT '[]',
             assignees TEXT NOT NULL DEFAULT '',
             comments_count INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT,
@@ -525,6 +565,45 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
     )?;
     add_comment_accessed_column(conn)?;
     add_issue_comments_count_column(conn)?;
+    migrate_label_encoding(conn)?;
+    Ok(())
+}
+
+fn migrate_label_encoding(conn: &Connection) -> Result<()> {
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version >= 1 {
+        return Ok(());
+    }
+    let transaction =
+        rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version >= 1 {
+        return Ok(());
+    }
+
+    let mut statement = transaction.prepare("SELECT id, labels FROM issues")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, labels) = row?;
+        let names = labels
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        transaction.execute(
+            "UPDATE issues SET labels = ?1 WHERE id = ?2",
+            (serde_json::to_string(&names)?, id),
+        )?;
+    }
+    drop(statement);
+
+    // Legacy comma storage lost label boundaries; refresh those values from GitHub.
+    transaction.execute("UPDATE repos SET updated_at = NULL, etag = NULL", [])?;
+    transaction.pragma_update(None, "user_version", 1)?;
+    transaction.commit()?;
     Ok(())
 }
 

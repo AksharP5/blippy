@@ -50,12 +50,11 @@ use crate::config::Config;
 use crate::discovery::{home_dir, quick_scan};
 use crate::git::list_github_remotes_at;
 use crate::github::GitHubClient;
-use crate::repo_index::{index_repo_path, prune_missing_local_repos};
+use crate::repo_index::{index_repo_paths, prune_missing_local_repos};
 use crate::store::delete_db;
 use crate::store::{
     comment_now_epoch, comments_for_issue, get_repo_by_slug, list_issues, list_local_repos,
     prune_comments, replace_comments_for_issue, touch_comments_for_issue,
-    update_issue_comments_count,
 };
 use crate::sync::{SyncStats, sync_repo_with_progress};
 
@@ -149,15 +148,6 @@ where
     });
 }
 
-fn with_store_conn<F>(mut work: F)
-where
-    F: FnMut(&rusqlite::Connection),
-{
-    if let Ok(conn) = crate::store::open_db() {
-        work(&conn);
-    }
-}
-
 const AUTH_DEBUG_ENV: &str = "BLIPPY_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -243,24 +233,27 @@ fn handle_cache_reset() -> Result<()> {
 }
 
 fn handle_sync() -> Result<()> {
+    let start = Instant::now();
     let home = home_dir().unwrap_or(env::current_dir()?);
     let repos = crate::discovery::full_scan(&home)?;
     let conn = crate::store::open_db()?;
 
-    let start = Instant::now();
-    let mut indexed = 0usize;
-    for repo in &repos {
-        indexed += index_repo_path(&conn, &repo.path)?;
-    }
+    let stats = index_repo_paths(&conn, repos.iter().map(|repo| repo.path.as_path()))?;
     prune_missing_local_repos(&conn)?;
 
     let duration = start.elapsed();
     println!(
         "Discovered {} repos ({} remotes) in {:.2?}",
         repos.len(),
-        indexed,
+        stats.remotes,
         duration
     );
+    if !stats.failures.is_empty() {
+        for message in stats.failures.values() {
+            eprintln!("{}", message);
+        }
+        anyhow::bail!("Scan skipped {} repositories", stats.failures.len());
+    }
     Ok(())
 }
 
@@ -281,14 +274,6 @@ fn run_app(
 
     loop {
         if app.view() != last_view {
-            if matches!(
-                last_view,
-                View::IssueDetail | View::IssueComments | View::PullRequestFiles
-            ) {
-                app.set_comment_syncing(false);
-                app.set_pull_request_files_syncing(false);
-                app.set_pull_request_review_comments_syncing(false);
-            }
             last_view = app.view();
             last_issue_poll = Instant::now();
             last_comment_poll = Instant::now();
@@ -392,8 +377,7 @@ impl RepoIdentity {
     }
 
     fn is_current(&self, app: &App) -> bool {
-        app.current_owner() == Some(self.owner.as_str())
-            && app.current_repo() == Some(self.repo.as_str())
+        app.repository_is_current(&self.owner, &self.repo)
     }
 }
 
@@ -403,10 +387,10 @@ fn load_comments_for_issue(
     issue_id: i64,
 ) -> Result<()> {
     let comments = comments_for_issue(conn, issue_id)?;
-    app.set_comments(comments);
     let now = comment_now_epoch();
     touch_comments_for_issue(conn, issue_id, now)?;
     prune_comments(conn, COMMENT_TTL_SECONDS, COMMENT_CAP)?;
+    app.set_comments(comments);
     Ok(())
 }
 
@@ -420,7 +404,9 @@ enum ScanMode {
 #[derive(Debug, Clone)]
 enum AppEvent {
     ReposUpdated,
-    ScanFinished,
+    ScanFinished {
+        failures: Vec<String>,
+    },
     ScanFailed {
         message: String,
     },
@@ -433,6 +419,7 @@ enum AppEvent {
     SyncFinished {
         owner: String,
         repo: String,
+        resolved_repo: crate::store::RepoRow,
         stats: SyncStats,
     },
     SyncFailed {
@@ -525,7 +512,7 @@ enum AppEvent {
     LinkedIssueResolved {
         repo: RepoIdentity,
         pull_number: i64,
-        issues: Vec<(i64, String)>,
+        issues: crate::github::LinkedIssues,
         target: LinkedIssueTarget,
     },
     LinkedIssueLookupFailed {
@@ -541,7 +528,7 @@ enum AppEvent {
     },
     IssueCreated {
         repo: RepoIdentity,
-        issue_number: i64,
+        issue: crate::store::IssueRow,
     },
     IssueCreateFailed {
         repo: RepoIdentity,
@@ -550,7 +537,7 @@ enum AppEvent {
     IssueLabelsUpdated {
         repo: RepoIdentity,
         issue_number: i64,
-        labels: String,
+        labels: Vec<String>,
     },
     IssueAssigneesUpdated {
         repo: RepoIdentity,
@@ -566,8 +553,8 @@ enum AppEvent {
     IssueCommentDeleted {
         repo: RepoIdentity,
         issue_number: i64,
+        issue_id: i64,
         comment_id: i64,
-        count: usize,
     },
     RepoLabelsSuggested {
         owner: String,
@@ -578,6 +565,16 @@ enum AppEvent {
         owner: String,
         repo: String,
         assignees: Vec<String>,
+    },
+    RepoLabelsFailed {
+        owner: String,
+        repo: String,
+        message: String,
+    },
+    RepoAssigneesFailed {
+        owner: String,
+        repo: String,
+        message: String,
     },
     RepoPermissionsResolved {
         owner: String,
@@ -605,6 +602,7 @@ fn refresh_current_repo_issues(app: &mut App, conn: &rusqlite::Connection) -> Re
         }
     };
     let issues = list_issues(conn, repo_row.id)?;
+    app.set_current_repo_id(repo_row.id);
     app.set_issues(issues);
     Ok(())
 }

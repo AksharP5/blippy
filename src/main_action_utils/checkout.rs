@@ -13,16 +13,29 @@ pub(crate) fn checkout_pull_request(app: &mut App) -> Result<()> {
         return Ok(());
     }
 
-    let working_dir = app.current_repo_path().unwrap_or(".").to_string();
     let issue_number = issue.number;
-    let number = issue_number.to_string();
+    let working_dir = match app.current_repo_path() {
+        Some(path) => path.to_string(),
+        None => {
+            app.set_status("No local repository selected".to_string());
+            return Ok(());
+        }
+    };
+    let url = match issue_url(app) {
+        Some(url) => url,
+        None => {
+            app.set_status("No repo selected".to_string());
+            return Ok(());
+        }
+    };
     let before_branch = current_git_branch(working_dir.as_str());
     let before_head = current_git_head(working_dir.as_str());
 
-    let output = std::process::Command::new("gh")
-        .args(["pr", "checkout", number.as_str()])
-        .current_dir(working_dir.as_str())
-        .output();
+    let mut checkout = std::process::Command::new("gh");
+    checkout
+        .args(["pr", "checkout", url.as_str()])
+        .current_dir(working_dir.as_str());
+    let output = checkout.output();
 
     let output = match output {
         Ok(output) => output,
@@ -42,10 +55,7 @@ pub(crate) fn checkout_pull_request(app: &mut App) -> Result<()> {
         );
     }
 
-    let detached_output = std::process::Command::new("gh")
-        .args(["pr", "checkout", number.as_str(), "--detach"])
-        .current_dir(working_dir.as_str())
-        .output();
+    let detached_output = checkout.arg("--detach").output();
 
     if detached_output
         .as_ref()

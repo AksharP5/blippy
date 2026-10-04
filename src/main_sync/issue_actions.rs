@@ -56,37 +56,37 @@ pub(crate) fn start_create_issue(
 ) {
     let event_repo = RepoIdentity::new(&owner, &repo);
     let setup_repo = event_repo.clone();
-    spawn_with_services(
+    spawn_with_db(
         token,
         event_tx,
         move |message| AppEvent::IssueCreateFailed {
             repo: setup_repo,
             message,
         },
-        move |services, event_tx| {
-            let result = services.runtime.block_on(async {
-                services
+        move |ctx, event_tx| {
+            let result = ctx.services.runtime.block_on(async {
+                let repo_row = match crate::store::get_repo_by_slug(&ctx.conn, &owner, &repo)? {
+                    Some(repo_row) => repo_row,
+                    None => {
+                        let repo_info = ctx.services.client.get_repo(&owner, &repo).await?;
+                        let repo_row = crate::sync::map_repo_to_row(&repo_info);
+                        crate::store::upsert_repo(&ctx.conn, &repo_row)?;
+                        repo_row
+                    }
+                };
+                let issue = ctx
+                    .services
                     .client
                     .create_issue(&owner, &repo, title.as_str(), body.as_deref())
-                    .await
+                    .await?;
+                Ok::<_, anyhow::Error>((repo_row, issue))
             });
 
             match result {
-                Ok(issue) => {
-                    with_store_conn(|conn| {
-                        let repo_row = crate::store::get_repo_by_slug(conn, &owner, &repo)
-                            .ok()
-                            .flatten();
-                        if let Some(repo_row) = repo_row {
-                            let row = crate::sync::map_issue_to_row(repo_row.id, &issue);
-                            if let Some(row) = row {
-                                let _ = crate::store::upsert_issue(conn, &row);
-                            }
-                        }
-                    });
+                Ok((repo_row, issue)) => {
                     let _ = event_tx.send(AppEvent::IssueCreated {
                         repo: event_repo.clone(),
-                        issue_number: issue.number,
+                        issue: crate::sync::map_issue_to_row(repo_row.id, &issue),
                     });
                 }
                 Err(error) => {
@@ -129,13 +129,6 @@ pub(crate) fn start_update_comment(
 
             match result {
                 Ok(()) => {
-                    with_store_conn(|conn| {
-                        let _ = crate::store::update_comment_body_by_id(
-                            conn,
-                            comment_id,
-                            body.as_str(),
-                        );
-                    });
                     let _ = event_tx.send(AppEvent::IssueCommentUpdated {
                         repo: event_repo.clone(),
                         issue_number,
@@ -184,19 +177,11 @@ pub(crate) fn start_delete_comment(
 
             match result {
                 Ok(()) => {
-                    let mut count = 0usize;
-                    with_store_conn(|conn| {
-                        let _ = crate::store::delete_comment_by_id(conn, comment_id);
-                        let comments =
-                            crate::store::comments_for_issue(conn, issue_id).unwrap_or_default();
-                        count = comments.len();
-                        let _ = update_issue_comments_count(conn, issue_id, count as i64);
-                    });
                     let _ = event_tx.send(AppEvent::IssueCommentDeleted {
                         repo: event_repo.clone(),
                         issue_number,
+                        issue_id,
                         comment_id,
-                        count,
                     });
                 }
                 Err(error) => {
@@ -218,7 +203,6 @@ pub(crate) fn start_update_labels(
     token: String,
     labels: Vec<String>,
     event_tx: Sender<AppEvent>,
-    labels_display: String,
 ) {
     let event_repo = RepoIdentity::new(&owner, &repo);
     let setup_repo = event_repo.clone();
@@ -242,7 +226,7 @@ pub(crate) fn start_update_labels(
                     let _ = event_tx.send(AppEvent::IssueLabelsUpdated {
                         repo: event_repo.clone(),
                         issue_number,
-                        labels: labels_display,
+                        labels,
                     });
                 }
                 Err(error) => {

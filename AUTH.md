@@ -31,6 +31,7 @@ Suggested repository permissions:
 - Repository metadata: `Read`
 - Issues: `Read and write`
 - Pull requests: `Read and write`
+- Contents: `Read and write` to [merge pull requests](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)
 
 ### Classic token
 

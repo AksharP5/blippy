@@ -214,22 +214,22 @@ pub(super) fn draw_pull_request_files(
                     .fg(theme.text_primary)
                     .add_modifier(Modifier::BOLD),
             );
-        frame.render_stateful_widget(
-            files_list,
-            panes[0],
-            &mut list_state(selected_for_list(
-                app.selected_pull_request_file(),
-                app.pull_request_files().len(),
-            )),
-        );
+        let mut files_state = list_state(selected_for_list(
+            app.selected_pull_request_file(),
+            app.pull_request_files().len(),
+        ));
+        frame.render_stateful_widget(files_list, panes[0], &mut files_state);
         register_mouse_region(app, MouseTarget::PullRequestFilesPane, panes[0]);
         let files_inner = panes[0].inner(Margin {
             vertical: 1,
             horizontal: 1,
         });
         let max_file_rows = files_inner.height as usize;
-        for index in 0..app.pull_request_files().len().min(max_file_rows) {
-            let y = files_inner.y.saturating_add(index as u16);
+        for (row, index) in (files_state.offset()..app.pull_request_files().len())
+            .take(max_file_rows)
+            .enumerate()
+        {
+            let y = files_inner.y.saturating_add(row as u16);
             app.register_mouse_region(
                 MouseTarget::PullRequestFileRow(index),
                 files_inner.x,

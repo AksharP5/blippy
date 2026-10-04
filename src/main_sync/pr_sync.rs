@@ -94,54 +94,99 @@ pub(crate) fn start_pull_request_review_comments_sync(
                 }
             };
 
-            let mut anchors = HashMap::new();
-            for comment in &comments {
-                let line = comment.line.or(comment.original_line);
-                let side = comment
-                    .side
-                    .as_ref()
-                    .map(|value| {
-                        if value.eq_ignore_ascii_case("left") {
-                            ReviewSide::Left
-                        } else {
-                            ReviewSide::Right
-                        }
-                    })
-                    .unwrap_or(ReviewSide::Right);
-                if let Some(line) = line {
-                    anchors.insert(comment.id, (line, side, comment.path.clone()));
-                }
-            }
-
-            let mut mapped = Vec::new();
-            for comment in comments {
-                let anchor = anchors.get(&comment.id).cloned().or_else(|| {
-                    comment
-                        .in_reply_to_id
-                        .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
-                });
-                let (line, side, path, anchored) = match anchor {
-                    Some((line, side, path)) => (line, side, path, true),
-                    None => (0, ReviewSide::Right, comment.path.clone(), false),
-                };
-
-                mapped.push(PullRequestReviewComment {
-                    id: comment.id,
-                    thread_id: comment.thread_id,
-                    resolved: comment.is_resolved,
-                    anchored,
-                    path,
-                    line,
-                    side,
-                    body: comment.body.unwrap_or_default(),
-                    author: comment.user.login,
-                    created_at: comment.created_at,
-                });
-            }
             let _ = event_tx.send(AppEvent::PullRequestReviewCommentsUpdated {
                 issue_id,
-                comments: mapped,
+                comments: map_review_comments(comments),
             });
         },
     );
+}
+
+fn map_review_comments(
+    comments: Vec<crate::github::ApiPullRequestReviewComment>,
+) -> Vec<PullRequestReviewComment> {
+    let mut anchors = HashMap::new();
+    for comment in &comments {
+        let line = comment.line;
+        let side = comment
+            .side
+            .as_ref()
+            .map(|value| {
+                if value.eq_ignore_ascii_case("left") {
+                    ReviewSide::Left
+                } else {
+                    ReviewSide::Right
+                }
+            })
+            .unwrap_or(ReviewSide::Right);
+        if let Some(line) = line {
+            anchors.insert(comment.id, (line, side, comment.path.clone()));
+        }
+    }
+
+    comments
+        .into_iter()
+        .map(|comment| {
+            let anchor = anchors.get(&comment.id).cloned().or_else(|| {
+                comment
+                    .in_reply_to_id
+                    .and_then(|reply_to_id| anchors.get(&reply_to_id).cloned())
+            });
+            let (line, side, path, anchored) = match anchor {
+                Some((line, side, path)) => (line, side, path, true),
+                None => (0, ReviewSide::Right, comment.path.clone(), false),
+            };
+
+            PullRequestReviewComment {
+                id: comment.id,
+                thread_id: comment.thread_id,
+                resolved: comment.is_resolved,
+                anchored,
+                path,
+                line,
+                side,
+                body: comment.body.unwrap_or_default(),
+                author: comment
+                    .user
+                    .map(|user| user.login)
+                    .unwrap_or_else(|| "unknown".to_string()),
+                created_at: comment.created_at,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outdated_review_threads_do_not_anchor_to_the_current_diff() {
+        let comment = |id, line, original_line, parent| {
+            serde_json::from_value(serde_json::json!({
+                "id": id,
+                "path": "src/main.rs",
+                "line": line,
+                "original_line": original_line,
+                "side": "LEFT",
+                "in_reply_to_id": parent,
+                "body": "Review",
+                "user": { "login": "alex" }
+            }))
+            .expect("API review comment")
+        };
+        let comments = map_review_comments(vec![
+            comment(1, None, Some(10), None),
+            comment(2, None, Some(10), Some(1)),
+            comment(3, Some(20), Some(10), None),
+            comment(4, None, None, Some(3)),
+        ]);
+
+        assert!(!comments[0].anchored);
+        assert!(!comments[1].anchored);
+        assert!(comments[2].anchored);
+        assert!(comments[3].anchored);
+        assert_eq!((comments[2].line, comments[2].side), (20, ReviewSide::Left));
+        assert_eq!((comments[3].line, comments[3].side), (20, ReviewSide::Left));
+    }
 }

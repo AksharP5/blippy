@@ -240,6 +240,10 @@ pub(crate) fn toggle_pull_request_file_viewed(
         return Ok(());
     }
 
+    if !app.begin_pull_request_file_view_update(issue_id, &path) {
+        app.set_status(format!("Updating view state for {}", path));
+        return Ok(());
+    }
     app.set_pull_request_file_viewed(path.as_str(), viewed);
     start_set_pull_request_file_viewed(
         issue_id,

@@ -25,10 +25,11 @@ impl GitHubClient {
                 .await?
                 .error_for_status()?;
             let batch = response.json::<Vec<ApiPullRequestFile>>().await?;
-            if batch.is_empty() {
+            let is_last_page = batch.len() < 100;
+            files.extend(batch);
+            if is_last_page {
                 break;
             }
-            files.extend(batch);
             page += 1;
         }
         Ok(files)
@@ -62,6 +63,7 @@ impl GitHubClient {
         let mut cursor: Option<String> = None;
         let mut pull_request_id: Option<String> = None;
         let mut viewed_files = HashSet::new();
+        let mut cursors = HashSet::new();
 
         loop {
             let payload = serde_json::json!({
@@ -101,15 +103,10 @@ impl GitHubClient {
                 }
             }
 
-            let has_next_page = pull_request["files"]["pageInfo"]["hasNextPage"]
-                .as_bool()
-                .unwrap_or(false);
-            if !has_next_page {
+            cursor = next_graphql_cursor(&pull_request["files"]["pageInfo"], &mut cursors)?;
+            if cursor.is_none() {
                 break;
             }
-            cursor = pull_request["files"]["pageInfo"]["endCursor"]
-                .as_str()
-                .map(ToString::to_string);
         }
 
         Ok((pull_request_id, viewed_files))
@@ -250,15 +247,13 @@ impl GitHubClient {
                 .await?
                 .error_for_status()?;
             let batch = response.json::<Vec<ApiPullRequestReviewComment>>().await?;
-            if batch.is_empty() {
-                break;
-            }
+            let is_last_page = batch.len() < 100;
             for mut comment in batch {
-                if let Some((thread_id, resolved)) = thread_map.get(&comment.id) {
-                    comment.thread_id = Some(thread_id.clone());
-                    comment.is_resolved = *resolved;
-                }
+                apply_review_thread_metadata(&mut comment, &thread_map);
                 comments.push(comment);
+            }
+            if is_last_page {
+                break;
             }
             page += 1;
         }
@@ -285,7 +280,7 @@ impl GitHubClient {
                       isResolved
                       comments(first: 100) {
                         nodes {
-                          databaseId
+                          fullDatabaseId
                         }
                       }
                     }
@@ -297,6 +292,7 @@ impl GitHubClient {
 
         let mut cursor: Option<String> = None;
         let mut map = HashMap::new();
+        let mut cursors = HashSet::new();
         loop {
             let payload = serde_json::json!({
                 "owner": owner,
@@ -314,43 +310,13 @@ impl GitHubClient {
                 .cloned()
                 .unwrap_or_default();
             for thread in threads {
-                let thread_id = match thread
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToString::to_string)
-                {
-                    Some(thread_id) => thread_id,
-                    None => continue,
-                };
-                let is_resolved = thread
-                    .get("isResolved")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                let thread_comments = thread["comments"]["nodes"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
-                for comment in thread_comments {
-                    let comment_id = match comment
-                        .get("databaseId")
-                        .and_then(serde_json::Value::as_i64)
-                    {
-                        Some(comment_id) => comment_id,
-                        None => continue,
-                    };
-                    map.insert(comment_id, (thread_id.clone(), is_resolved));
-                }
+                append_review_thread_metadata(&thread, &mut map)?;
             }
 
-            let has_next_page = pull_request["reviewThreads"]["pageInfo"]["hasNextPage"]
-                .as_bool()
-                .unwrap_or(false);
-            if !has_next_page {
+            cursor = next_graphql_cursor(&pull_request["reviewThreads"]["pageInfo"], &mut cursors)?;
+            if cursor.is_none() {
                 break;
             }
-            cursor = pull_request["reviewThreads"]["pageInfo"]["endCursor"]
-                .as_str()
-                .map(ToString::to_string);
         }
         Ok(map)
     }
@@ -460,6 +426,52 @@ impl GitHubClient {
     }
 }
 
+fn append_review_thread_metadata(
+    thread: &serde_json::Value,
+    map: &mut HashMap<i64, (String, bool)>,
+) -> Result<()> {
+    let Some(thread_id) = thread.get("id").and_then(serde_json::Value::as_str) else {
+        return Ok(());
+    };
+    let is_resolved = thread
+        .get("isResolved")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let Some(comments) = thread["comments"]["nodes"].as_array() else {
+        return Ok(());
+    };
+    for comment in comments {
+        let Some(value) = comment
+            .get("fullDatabaseId")
+            .filter(|value| !value.is_null())
+        else {
+            continue;
+        };
+        let comment_id = value
+            .as_str()
+            .and_then(|id| id.parse::<i64>().ok())
+            .ok_or_else(|| {
+                anyhow!("GitHub review comment returned invalid fullDatabaseId: {value}")
+            })?;
+        map.insert(comment_id, (thread_id.to_string(), is_resolved));
+    }
+    Ok(())
+}
+
+fn apply_review_thread_metadata(
+    comment: &mut ApiPullRequestReviewComment,
+    thread_map: &HashMap<i64, (String, bool)>,
+) {
+    if let Some((thread_id, resolved)) = thread_map.get(&comment.id).or_else(|| {
+        comment
+            .in_reply_to_id
+            .and_then(|parent_id| thread_map.get(&parent_id))
+    }) {
+        comment.thread_id = Some(thread_id.clone());
+        comment.is_resolved = *resolved;
+    }
+}
+
 fn preferred_merge_methods(repo: &ApiRepoMergeSettings) -> Vec<&'static str> {
     let mut methods = Vec::new();
     if repo.allow_merge_commit {
@@ -480,4 +492,70 @@ fn parse_api_error_message(payload: &str) -> Option<String> {
         .get("message")
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_thread_metadata_accepts_full_database_ids() {
+        let thread = serde_json::json!({
+            "id": "thread",
+            "isResolved": true,
+            "comments": {"nodes": [
+                {"databaseId": null, "fullDatabaseId": "2147483648"},
+            ]},
+        });
+        let mut map = HashMap::new();
+        append_review_thread_metadata(&thread, &mut map).expect("parse 64-bit comment ID");
+        let mut comment: ApiPullRequestReviewComment =
+            serde_json::from_value(serde_json::json!({"id": 2147483648i64, "path": "src/main.rs"}))
+                .expect("parse comment");
+        apply_review_thread_metadata(&mut comment, &map);
+        assert_eq!(comment.thread_id.as_deref(), Some("thread"));
+        assert!(comment.is_resolved);
+    }
+
+    #[test]
+    fn review_thread_metadata_rejects_invalid_full_database_ids() {
+        for id in [
+            serde_json::json!("not-an-id"),
+            serde_json::json!("9223372036854775808"),
+            serde_json::json!(42),
+        ] {
+            let thread = serde_json::json!({
+                "id": "thread",
+                "comments": {"nodes": [{"fullDatabaseId": id}]},
+            });
+            let error = append_review_thread_metadata(&thread, &mut HashMap::new())
+                .expect_err("invalid ID must not silently lose thread metadata");
+            assert!(error.to_string().contains("fullDatabaseId"));
+        }
+    }
+
+    #[test]
+    fn review_replies_beyond_first_thread_page_inherit_metadata() {
+        let thread_map = (1..=100)
+            .map(|id| (id, ("thread".to_string(), true)))
+            .collect::<HashMap<_, _>>();
+        let mut reply: ApiPullRequestReviewComment = serde_json::from_value(serde_json::json!({
+            "id": 101,
+            "path": "src/main.rs",
+            "in_reply_to_id": 1,
+            "user": {"login": "dev"},
+        }))
+        .expect("parse reply");
+
+        apply_review_thread_metadata(&mut reply, &thread_map);
+
+        assert_eq!(reply.thread_id.as_deref(), Some("thread"));
+        assert!(reply.is_resolved);
+
+        let mut direct_map = thread_map;
+        direct_map.insert(reply.id, ("direct-thread".to_string(), false));
+        apply_review_thread_metadata(&mut reply, &direct_map);
+        assert_eq!(reply.thread_id.as_deref(), Some("direct-thread"));
+        assert!(!reply.is_resolved);
+    }
 }

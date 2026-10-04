@@ -1,5 +1,5 @@
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -15,6 +15,29 @@ pub fn index_repo_path(conn: &rusqlite::Connection, path: &Path) -> Result<usize
     let rows = build_local_repo_rows(path, remotes);
     replace_local_repos_for_path(conn, path.to_string_lossy().as_ref(), &rows)?;
     Ok(rows.len())
+}
+
+#[derive(Debug, Default)]
+pub struct RepoIndexStats {
+    pub remotes: usize,
+    pub failures: BTreeMap<PathBuf, String>,
+}
+
+pub fn index_repo_paths<'a>(
+    conn: &rusqlite::Connection,
+    paths: impl IntoIterator<Item = &'a Path>,
+) -> Result<RepoIndexStats> {
+    let mut stats = RepoIndexStats::default();
+    for path in paths {
+        match index_repo_path(conn, path) {
+            Ok(remotes) => stats.remotes += remotes,
+            Err(error) if error.downcast_ref::<rusqlite::Error>().is_some() => return Err(error),
+            Err(error) => {
+                stats.failures.insert(path.to_path_buf(), error.to_string());
+            }
+        }
+    }
+    Ok(stats)
 }
 
 pub fn prune_missing_local_repos(conn: &rusqlite::Connection) -> Result<usize> {
@@ -167,6 +190,58 @@ mod tests {
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn batch_index_continues_after_a_broken_repo() {
+        let dir = unique_temp_dir("batch-index");
+        let broken_path = dir.join("broken");
+        fs::create_dir_all(&broken_path).expect("create broken repo");
+        fs::write(
+            broken_path.join(".git"),
+            "gitdir: /definitely/missing/blippy\n",
+        )
+        .expect("write broken git file");
+        let healthy_path = dir.join("healthy");
+        fs::create_dir_all(&healthy_path).expect("create healthy repo");
+        init_git_repo(&healthy_path);
+        run_git(
+            &healthy_path,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/healthy.git",
+            ],
+        );
+        let conn = open_db_at(&dir.join("blippy.db")).expect("open db");
+        let cached = LocalRepoRow {
+            path: broken_path.to_string_lossy().to_string(),
+            remote_name: "origin".to_string(),
+            owner: "acme".to_string(),
+            repo: "broken".to_string(),
+            url: "https://github.com/acme/broken.git".to_string(),
+            last_seen: None,
+            last_scanned: None,
+        };
+        upsert_local_repo(&conn, &cached).expect("cache remote");
+
+        let missing_schema = rusqlite::Connection::open_in_memory().expect("empty db");
+        assert!(super::index_repo_paths(&missing_schema, [healthy_path.as_path()]).is_err());
+
+        let stats = super::index_repo_paths(&conn, [broken_path.as_path(), healthy_path.as_path()])
+            .expect("index healthy repositories");
+
+        assert_eq!(stats.remotes, 1);
+        assert_eq!(stats.failures.len(), 1);
+        assert!(stats.failures.contains_key(&broken_path));
+        let repos = list_local_repos(&conn).expect("list repos");
+        assert_eq!(repos.len(), 2);
+        assert!(repos.contains(&cached));
+        assert!(repos.iter().any(|repo| repo.repo == "healthy"));
+
+        drop(conn);
+        fs::remove_dir_all(&dir).expect("remove temp dir");
     }
 
     #[test]

@@ -90,6 +90,42 @@ fn visual_mode_creates_multiline_review_target() {
 }
 
 #[test]
+fn visual_review_targets_stay_within_one_hunk() {
+    let mut app = App::new(Config::default());
+    app.set_view(View::PullRequestFiles);
+    app.set_pull_request_files(
+        1,
+        vec![PullRequestFile {
+            filename: "src/main.rs".to_string(),
+            status: "modified".to_string(),
+            additions: 2,
+            deletions: 2,
+            patch: Some("@@ -1 +1 @@\n-old\n+new\n@@ -100 +100 @@\n-old2\n+new2".to_string()),
+        }],
+    );
+    app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+
+    assert_eq!(app.selected_pull_request_review_target(), None);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+    app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+    assert_eq!(app.selected_pull_request_review_target(), None);
+
+    app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+    let target = app
+        .selected_pull_request_review_target()
+        .expect("single line target");
+    assert_eq!(target.line, 1);
+    assert_eq!(target.start_line, None);
+}
+
+#[test]
 fn l_sets_review_side_to_new_on_context_row() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);
@@ -202,7 +238,7 @@ fn slash_search_supports_qualifier_tokens() {
             state: "open".to_string(),
             title: "Auth".to_string(),
             body: String::new(),
-            labels: "bug,security".to_string(),
+            labels: vec!["bug".to_string(), "security".to_string()],
             assignees: "alex".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -215,7 +251,7 @@ fn slash_search_supports_qualifier_tokens() {
             state: "closed".to_string(),
             title: "Docs".to_string(),
             body: String::new(),
-            labels: "docs".to_string(),
+            labels: vec!["docs".to_string()],
             assignees: "sam".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -246,7 +282,7 @@ fn closed_filter_includes_merged_pull_requests() {
             state: "merged".to_string(),
             title: "Merged PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: Some("2024-01-03T00:00:00Z".to_string()),
@@ -259,7 +295,7 @@ fn closed_filter_includes_merged_pull_requests() {
             state: "closed".to_string(),
             title: "Closed PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: Some("2024-01-02T00:00:00Z".to_string()),
@@ -272,7 +308,7 @@ fn closed_filter_includes_merged_pull_requests() {
             state: "open".to_string(),
             title: "Open PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: Some("2024-01-04T00:00:00Z".to_string()),
@@ -303,7 +339,7 @@ fn is_closed_query_matches_merged_pull_requests() {
             state: "merged".to_string(),
             title: "Merged PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -316,7 +352,7 @@ fn is_closed_query_matches_merged_pull_requests() {
             state: "closed".to_string(),
             title: "Closed PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -347,7 +383,7 @@ fn is_merged_query_matches_merged_pull_requests() {
             state: "merged".to_string(),
             title: "Merged PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -360,7 +396,7 @@ fn is_merged_query_matches_merged_pull_requests() {
             state: "closed".to_string(),
             title: "Closed PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -390,7 +426,7 @@ fn assignee_qualifier_matches_exact_user() {
             state: "open".to_string(),
             title: "One".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: "alex,sam".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -403,7 +439,7 @@ fn assignee_qualifier_matches_exact_user() {
             state: "open".to_string(),
             title: "Two".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: "samiam".to_string(),
             comments_count: 0,
             updated_at: None,
@@ -432,7 +468,7 @@ fn is_pr_query_matches_pull_requests() {
             state: "open".to_string(),
             title: "Issue".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -445,7 +481,7 @@ fn is_pr_query_matches_pull_requests() {
             state: "open".to_string(),
             title: "PR".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -512,7 +548,7 @@ fn set_issues_preserves_selected_issue_when_still_present() {
             state: "open".to_string(),
             title: "One".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -525,7 +561,7 @@ fn set_issues_preserves_selected_issue_when_still_present() {
             state: "open".to_string(),
             title: "Two".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -543,7 +579,7 @@ fn set_issues_preserves_selected_issue_when_still_present() {
             state: "open".to_string(),
             title: "Two refreshed".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -556,7 +592,7 @@ fn set_issues_preserves_selected_issue_when_still_present() {
             state: "open".to_string(),
             title: "Three".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: None,
@@ -578,7 +614,7 @@ fn update_issue_state_rebuilds_filtered_view() {
         state: "open".to_string(),
         title: "One".to_string(),
         body: String::new(),
-        labels: String::new(),
+        labels: Vec::new(),
         assignees: String::new(),
         comments_count: 0,
         updated_at: None,
@@ -602,7 +638,7 @@ fn closed_filter_sorts_by_recently_closed() {
             state: "closed".to_string(),
             title: "older close".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: Some("2024-01-01T00:00:00Z".to_string()),
@@ -615,7 +651,7 @@ fn closed_filter_sorts_by_recently_closed() {
             state: "closed".to_string(),
             title: "newer close".to_string(),
             body: String::new(),
-            labels: String::new(),
+            labels: Vec::new(),
             assignees: String::new(),
             comments_count: 0,
             updated_at: Some("2024-01-02T00:00:00Z".to_string()),

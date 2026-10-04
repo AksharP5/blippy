@@ -5,21 +5,21 @@ impl App {
         self.linked
             .pull_requests
             .get(&issue_number)
-            .and_then(|pull_numbers| pull_numbers.first().copied())
+            .and_then(|items| items.numbers.first().copied())
     }
 
     pub fn linked_issue_for_pull_request(&self, pull_number: i64) -> Option<i64> {
         self.linked
             .issues
             .get(&pull_number)
-            .and_then(|issue_numbers| issue_numbers.first().copied())
+            .and_then(|items| items.numbers.first().copied())
     }
 
     pub fn linked_pull_requests_for_issue(&self, issue_number: i64) -> Vec<i64> {
         self.linked
             .pull_requests
             .get(&issue_number)
-            .cloned()
+            .map(|items| items.numbers.clone())
             .unwrap_or_default()
     }
 
@@ -27,38 +27,65 @@ impl App {
         self.linked
             .issues
             .get(&pull_number)
-            .cloned()
+            .map(|items| items.numbers.clone())
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub fn linked_pull_request_known(&self, issue_number: i64) -> bool {
-        self.linked.pull_requests.contains_key(&issue_number)
+        self.linked
+            .pull_requests
+            .get(&issue_number)
+            .is_some_and(|items| items.lookup == LinkedLookup::Complete)
     }
 
+    #[cfg(test)]
     pub fn linked_issue_known(&self, pull_number: i64) -> bool {
-        self.linked.issues.contains_key(&pull_number)
+        self.linked
+            .issues
+            .get(&pull_number)
+            .is_some_and(|items| items.lookup == LinkedLookup::Complete)
     }
 
     pub fn begin_linked_pull_request_lookup(&mut self, issue_number: i64) -> bool {
-        if self.linked_pull_request_known(issue_number) {
-            return false;
-        }
-        self.linked.pull_request_lookups.insert(issue_number)
+        self.linked
+            .pull_requests
+            .entry(issue_number)
+            .or_default()
+            .begin_lookup()
     }
 
     pub fn begin_linked_issue_lookup(&mut self, pull_number: i64) -> bool {
-        if self.linked_issue_known(pull_number) {
-            return false;
-        }
-        self.linked.issue_lookups.insert(pull_number)
+        self.linked
+            .issues
+            .entry(pull_number)
+            .or_default()
+            .begin_lookup()
     }
 
     pub fn end_linked_pull_request_lookup(&mut self, issue_number: i64) {
-        self.linked.pull_request_lookups.remove(&issue_number);
+        if let Some(items) = self.linked.pull_requests.get_mut(&issue_number) {
+            items.cancel_lookup();
+        }
     }
 
     pub fn end_linked_issue_lookup(&mut self, pull_number: i64) {
-        self.linked.issue_lookups.remove(&pull_number);
+        if let Some(items) = self.linked.issues.get_mut(&pull_number) {
+            items.cancel_lookup();
+        }
+    }
+
+    pub(super) fn retry_incomplete_linked_lookups(&mut self) {
+        for items in self
+            .linked
+            .pull_requests
+            .values_mut()
+            .chain(self.linked.issues.values_mut())
+        {
+            if items.lookup == LinkedLookup::Incomplete {
+                items.lookup = LinkedLookup::Ready;
+            }
+        }
     }
 
     #[cfg(test)]
@@ -67,31 +94,26 @@ impl App {
             Some(pull_number) => vec![pull_number],
             None => Vec::new(),
         };
-        self.set_linked_pull_requests(issue_number, pull_numbers);
+        self.set_linked_pull_requests(issue_number, pull_numbers, true);
     }
 
-    pub fn set_linked_pull_requests(&mut self, issue_number: i64, pull_numbers: Vec<i64>) {
-        self.end_linked_pull_request_lookup(issue_number);
+    pub fn set_linked_pull_requests(
+        &mut self,
+        issue_number: i64,
+        pull_numbers: Vec<i64>,
+        complete: bool,
+    ) {
         let pull_numbers = dedupe_numbers(pull_numbers);
-        if pull_numbers.is_empty()
-            && self
-                .linked
-                .pull_requests
-                .get(&issue_number)
-                .is_some_and(|existing| !existing.is_empty())
-        {
-            return;
-        }
         self.linked
             .pull_requests
-            .insert(issue_number, pull_numbers.clone());
+            .entry(issue_number)
+            .or_default()
+            .finish_lookup(pull_numbers.clone(), complete);
         for pull_number in pull_numbers {
-            self.linked
-                .issues
-                .entry(pull_number)
-                .and_modify(|issue_numbers| push_unique(issue_numbers, issue_number))
-                .or_insert_with(|| vec![issue_number]);
-            self.end_linked_issue_lookup(pull_number);
+            push_unique(
+                &mut self.linked.issues.entry(pull_number).or_default().numbers,
+                issue_number,
+            );
         }
     }
 
@@ -105,35 +127,31 @@ impl App {
             Some(issue_number) => vec![issue_number],
             None => Vec::new(),
         };
-        self.set_linked_issues_for_pull_request(pull_number, issue_numbers);
+        self.set_linked_issues_for_pull_request(pull_number, issue_numbers, true);
     }
 
     pub fn set_linked_issues_for_pull_request(
         &mut self,
         pull_number: i64,
         issue_numbers: Vec<i64>,
+        complete: bool,
     ) {
-        self.end_linked_issue_lookup(pull_number);
         let issue_numbers = dedupe_numbers(issue_numbers);
-        if issue_numbers.is_empty()
-            && self
-                .linked
-                .issues
-                .get(&pull_number)
-                .is_some_and(|existing| !existing.is_empty())
-        {
-            return;
-        }
         self.linked
             .issues
-            .insert(pull_number, issue_numbers.clone());
+            .entry(pull_number)
+            .or_default()
+            .finish_lookup(issue_numbers.clone(), complete);
         for issue_number in issue_numbers {
-            self.linked
-                .pull_requests
-                .entry(issue_number)
-                .and_modify(|pull_numbers| push_unique(pull_numbers, pull_number))
-                .or_insert_with(|| vec![pull_number]);
-            self.end_linked_pull_request_lookup(issue_number);
+            push_unique(
+                &mut self
+                    .linked
+                    .pull_requests
+                    .entry(issue_number)
+                    .or_default()
+                    .numbers,
+                pull_number,
+            );
         }
     }
 
@@ -296,20 +314,45 @@ impl App {
         };
         self.linked.navigation_origin = None;
 
-        self.set_view(View::Issues);
-        self.set_work_item_mode(mode);
-        let try_filters = [IssueFilter::Open, IssueFilter::Closed];
-        for filter in try_filters {
-            self.set_issue_filter(filter);
-            if !self.select_issue_by_number(issue_number) {
-                continue;
-            }
+        if self.reveal_issue_by_number(issue_number, mode) {
+            self.set_view(View::Issues);
             self.status = format!("Returned to #{}", issue_number);
             return true;
         }
 
         self.status = format!("Could not return to #{}", issue_number);
         false
+    }
+}
+
+impl LinkedItems {
+    fn begin_lookup(&mut self) -> bool {
+        if self.lookup != LinkedLookup::Ready {
+            return false;
+        }
+        self.lookup = LinkedLookup::Loading;
+        true
+    }
+
+    fn cancel_lookup(&mut self) {
+        if self.lookup == LinkedLookup::Loading {
+            self.lookup = LinkedLookup::Ready;
+        }
+    }
+
+    fn finish_lookup(&mut self, numbers: Vec<i64>, complete: bool) {
+        if complete && !numbers.is_empty() {
+            self.numbers = numbers;
+        } else {
+            for number in numbers {
+                push_unique(&mut self.numbers, number);
+            }
+        }
+        self.lookup = if complete {
+            LinkedLookup::Complete
+        } else {
+            LinkedLookup::Incomplete
+        };
     }
 }
 

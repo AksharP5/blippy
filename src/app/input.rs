@@ -2,6 +2,9 @@ use super::*;
 
 impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
+        if key.is_release() {
+            return;
+        }
         if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
             let Some(key) = self.keybinds.remap_text_key(key) else {
                 return;
@@ -41,6 +44,9 @@ impl App {
             && key.code == KeyCode::Char('r')
             && self.view == View::RepoPicker
         {
+            if self.sync.scanning {
+                return;
+            }
             self.sync.rescan_requested = true;
             self.sync.scanning = true;
             self.status = "Scanning".to_string();
@@ -110,6 +116,7 @@ impl App {
                 self.set_issue_filter(IssueFilter::from_key(ch).unwrap_or(IssueFilter::Open));
             }
             KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::Issues => {
+                self.retry_incomplete_linked_lookups();
                 self.request_sync();
                 self.status = "Syncing".to_string();
             }
@@ -120,6 +127,7 @@ impl App {
                         View::IssueDetail | View::IssueComments | View::PullRequestFiles
                     ) =>
             {
+                self.retry_incomplete_linked_lookups();
                 self.request_comment_sync();
                 self.request_sync();
                 if self.current_view_issue_is_pull_request() {
@@ -412,6 +420,9 @@ impl App {
     }
 
     pub fn set_view(&mut self, view: View) {
+        if self.view != view && view == View::IssueComments {
+            self.navigation.issue_comment_offsets.clear();
+        }
         if view != View::LinkedPicker {
             self.clear_linked_picker_state();
         }

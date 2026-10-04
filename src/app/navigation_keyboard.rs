@@ -438,44 +438,41 @@ impl App {
     }
 
     pub(super) fn jump_next_comment(&mut self) {
-        let offsets = self.comment_offsets();
-        if offsets.is_empty() || self.navigation.selected_comment + 1 >= offsets.len() {
+        if self.navigation.selected_comment + 1 >= self.comments.len() {
             return;
         }
         self.navigation.selected_comment += 1;
-        self.navigation.issue_comments_scroll = offsets[self.navigation.selected_comment]
+        self.navigation.issue_comments_scroll = self
+            .navigation
+            .issue_comment_offsets
+            .get(self.navigation.selected_comment)
+            .copied()
+            .unwrap_or_default()
             .min(self.navigation.issue_comments_max_scroll);
         self.status = format!(
             "Comment {}/{}",
             self.navigation.selected_comment + 1,
-            offsets.len()
+            self.comments.len()
         );
     }
 
     pub(super) fn jump_prev_comment(&mut self) {
-        let offsets = self.comment_offsets();
-        if offsets.is_empty() || self.navigation.selected_comment == 0 {
+        if self.comments.is_empty() || self.navigation.selected_comment == 0 {
             return;
         }
         self.navigation.selected_comment -= 1;
-        self.navigation.issue_comments_scroll = offsets[self.navigation.selected_comment];
+        self.navigation.issue_comments_scroll = self
+            .navigation
+            .issue_comment_offsets
+            .get(self.navigation.selected_comment)
+            .copied()
+            .unwrap_or_default()
+            .min(self.navigation.issue_comments_max_scroll);
         self.status = format!(
             "Comment {}/{}",
             self.navigation.selected_comment + 1,
-            offsets.len()
+            self.comments.len()
         );
-    }
-
-    pub(super) fn comment_offsets(&self) -> Vec<u16> {
-        let mut offsets = Vec::new();
-        let mut line = 0usize;
-        for comment in &self.comments {
-            offsets.push(line.min(u16::MAX as usize) as u16);
-            line += 1;
-            line += markdown::render(comment.body.as_str()).lines.len().max(1);
-            line += 1;
-        }
-        offsets
     }
 
     pub(super) fn handle_focus_key(&mut self, code: KeyCode) -> bool {
