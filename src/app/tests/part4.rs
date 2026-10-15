@@ -670,8 +670,9 @@ fn transient_status_clears_after_expiry() {
     );
     assert_eq!(app.status(), "Opened in browser");
 
-    app.clear_status_if_expired();
+    assert!(app.clear_status_if_expired());
     assert_eq!(app.status(), "");
+    assert!(!app.clear_status_if_expired());
 }
 
 #[test]
@@ -679,7 +680,7 @@ fn persistent_status_does_not_clear_from_expiry_check() {
     let mut app = App::new(Config::default());
 
     app.set_status("Sync failed".to_string());
-    app.clear_status_if_expired();
+    assert!(!app.clear_status_if_expired());
 
     assert_eq!(app.status(), "Sync failed");
 }
