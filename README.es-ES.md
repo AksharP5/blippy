@@ -1,8 +1,8 @@
-
-
 # blippy
 
 GitHub en tu terminal.
+
+[English](README.md) | Español
 
 blippy es una TUI (interfaz de terminal) centrada en el teclado para gestionar incidencias y pull requests de GitHub.
 
@@ -52,13 +52,15 @@ cargo install --git https://github.com/AksharP5/blippy
 
 - `blippy`: inicia la TUI
 - `blippy --version`: muestra información de la versión
+- `blippy --help`: muestra la ayuda de comandos
 - `blippy sync`: escanea repositorios locales y almacena en caché los remotos de GitHub
 - `blippy auth reset`: elimina el token de autenticación almacenado del llavero
 - `blippy cache reset`: elimina la base de datos de caché local
 
-## Qué Puedes Hacer
+## Qué puedes hacer
 
 - Explorar y gestionar incidencias y pull requests
+- Copiar las URL de repositorios, incidencias y pull requests al portapapeles del sistema
 - Crear incidencias desde la TUI con un paso de confirmación
 - Abrir incidencias/PRs vinculados en la TUI o en el navegador
 - Revisar diffs de PR con comentarios en línea y resolución de hilos
@@ -69,13 +71,15 @@ cargo install --git https://github.com/AksharP5/blippy
 
 Consulta [FEATURES.md](FEATURES.md) para un desglose completo de las características.
 
-## Teclado y Ratón
+## Teclado y ratón
 
 - blippy prioriza flujos de trabajo con teclado para mayor fiabilidad
-- Existe soporte para ratón/pantalla táctil, pero puede ser inconsistente
+- Existe soporte para ratón/panel táctil, pero puede ser inconsistente
 - Referencia completa de teclas: [KEYBINDS.md](KEYBINDS.md)
 
 ## Configuración
+
+`XDG_CONFIG_HOME` define el directorio de configuración cuando no está vacío. En caso contrario, `~` usa `HOME` o, en Windows, `USERPROFILE` si `HOME` no está disponible.
 
 - Archivo de configuración: `~/.config/blippy/config.toml`
 - Sobrescritura de atajos: `~/.config/blippy/keybinds.toml`
