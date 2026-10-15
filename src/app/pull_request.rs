@@ -26,13 +26,23 @@ impl App {
             .is_some_and(|collapsed| collapsed.contains(&hunk_start))
     }
 
-    pub fn pull_request_diff_row_hidden(
-        &self,
+    pub fn visible_pull_request_diff_rows<'a>(
+        &'a self,
         file_path: &str,
-        rows: &[crate::pr_diff::DiffRow],
-        row_index: usize,
-    ) -> bool {
-        self.pull_request_diff_row_hidden_for_file(file_path, rows, row_index)
+        rows: &'a [crate::pr_diff::DiffRow],
+    ) -> impl Iterator<Item = (usize, &'a crate::pr_diff::DiffRow)> + 'a {
+        let collapsed_hunks = self
+            .pull_request
+            .pull_request_collapsed_hunks
+            .get(file_path);
+        let mut hidden = false;
+        rows.iter().enumerate().filter(move |(index, row)| {
+            if row.kind == DiffKind::Hunk {
+                hidden = collapsed_hunks.is_some_and(|hunks| hunks.contains(index));
+                return true;
+            }
+            !hidden
+        })
     }
 
     pub fn pull_request_hunk_hidden_line_count(
@@ -405,33 +415,22 @@ impl App {
         self.pull_request.pull_request_diff_expanded = false;
     }
 
-    pub(super) fn pull_request_diff_row_hidden_for_file(
+    fn collapsed_pull_request_hunk_start(
         &self,
         file_path: &str,
         rows: &[crate::pr_diff::DiffRow],
         row_index: usize,
-    ) -> bool {
-        if row_index >= rows.len() {
-            return false;
-        }
-        let collapsed_hunks = match self
+    ) -> Option<usize> {
+        let collapsed_hunks = self
             .pull_request
             .pull_request_collapsed_hunks
             .get(file_path)
-        {
-            Some(collapsed_hunks) => collapsed_hunks,
-            None => return false,
-        };
-        for hunk_start in collapsed_hunks {
-            let hunk_end = match pull_request_hunk_end(rows, *hunk_start) {
-                Some(hunk_end) => hunk_end,
-                None => continue,
-            };
-            if row_index > *hunk_start && row_index <= hunk_end {
-                return true;
-            }
-        }
-        false
+            .filter(|hunks| !hunks.is_empty())?;
+        let hunk_start = rows
+            .get(..=row_index)?
+            .iter()
+            .rposition(|row| row.kind == DiffKind::Hunk)?;
+        collapsed_hunks.contains(&hunk_start).then_some(hunk_start)
     }
 
     pub(super) fn nearest_visible_pull_request_diff_line(
@@ -444,14 +443,8 @@ impl App {
             return 0;
         }
         let row_index = row_index.min(rows.len() - 1);
-        if !self.pull_request_diff_row_hidden_for_file(file_path, rows, row_index) {
-            return row_index;
-        }
-        let hunk_range = match pull_request_hunk_range_for_row(rows, row_index) {
-            Some(hunk_range) => hunk_range,
-            None => return row_index,
-        };
-        hunk_range.start
+        self.collapsed_pull_request_hunk_start(file_path, rows, row_index)
+            .unwrap_or(row_index)
     }
 
     pub(super) fn next_visible_pull_request_diff_line(
@@ -463,14 +456,13 @@ impl App {
         if rows.is_empty() {
             return None;
         }
-        let mut index = row_index.min(rows.len() - 1).saturating_add(1);
-        while index < rows.len() {
-            if !self.pull_request_diff_row_hidden_for_file(file_path, rows, index) {
-                return Some(index);
-            }
-            index += 1;
+        let mut index = row_index.min(rows.len() - 1) + 1;
+        if let Some(hunk_start) = self.collapsed_pull_request_hunk_start(file_path, rows, index)
+            && index > hunk_start
+        {
+            index = pull_request_hunk_end(rows, hunk_start)? + 1;
         }
-        None
+        (index < rows.len()).then_some(index)
     }
 
     pub(super) fn previous_visible_pull_request_diff_line(
@@ -482,14 +474,8 @@ impl App {
         if rows.is_empty() {
             return None;
         }
-        let mut index = row_index.min(rows.len() - 1);
-        while index > 0 {
-            index -= 1;
-            if !self.pull_request_diff_row_hidden_for_file(file_path, rows, index) {
-                return Some(index);
-            }
-        }
-        None
+        let index = row_index.min(rows.len() - 1).checked_sub(1)?;
+        Some(self.nearest_visible_pull_request_diff_line(file_path, rows, index))
     }
 
     pub(super) fn last_visible_pull_request_diff_line(
@@ -497,17 +483,8 @@ impl App {
         file_path: &str,
         rows: &[crate::pr_diff::DiffRow],
     ) -> Option<usize> {
-        if rows.is_empty() {
-            return None;
-        }
-        let mut index = rows.len();
-        while index > 0 {
-            index -= 1;
-            if !self.pull_request_diff_row_hidden_for_file(file_path, rows, index) {
-                return Some(index);
-            }
-        }
-        None
+        let index = rows.len().checked_sub(1)?;
+        Some(self.nearest_visible_pull_request_diff_line(file_path, rows, index))
     }
 
     pub(super) fn toggle_selected_pull_request_hunk_collapsed(&mut self) {
@@ -726,5 +703,154 @@ impl App {
             .selected_pull_request_review_comment()
             .map(|comment| comment.id);
         self.pull_request.selected_pull_request_review_comment_id = comment_id;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    const PATCH: &str = "diff --git a/example b/example\n@@ -1,2 +1,2 @@\n hidden first\n hidden second\n@@ -5,0 +5,0 @@\n@@ -10,2 +10,2 @@\n visible one\n visible two\n@@ -20 +20 @@\n hidden last\n";
+
+    fn collapsed_app() -> App {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            "head".into(),
+            vec![PullRequestFile {
+                filename: "example".into(),
+                status: "modified".into(),
+                additions: 0,
+                deletions: 0,
+                patch: Some(PATCH.into()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        for index in [1, 4, 8] {
+            app.pull_request.selected_pull_request_diff_line = index;
+            app.toggle_selected_pull_request_hunk_collapsed();
+        }
+        app.pull_request.selected_pull_request_diff_line = 1;
+        app
+    }
+
+    #[test]
+    fn collapsed_hunk_navigation_preserves_headers_and_file_boundaries() {
+        let app = collapsed_app();
+        let rows = parse_patch(Some(PATCH));
+        let visible = app
+            .visible_pull_request_diff_rows("example", &rows)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(visible, [0, 1, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            app.visible_pull_request_diff_rows("other", &rows).count(),
+            rows.len()
+        );
+        assert_eq!(
+            app.last_visible_pull_request_diff_line("example", &rows),
+            Some(8)
+        );
+
+        for (index, nearest, previous, next) in [
+            (0, 0, None, Some(1)),
+            (1, 1, Some(0), Some(4)),
+            (2, 1, Some(1), Some(4)),
+            (3, 1, Some(1), Some(4)),
+            (4, 4, Some(1), Some(5)),
+            (5, 5, Some(4), Some(6)),
+            (6, 6, Some(5), Some(7)),
+            (7, 7, Some(6), Some(8)),
+            (8, 8, Some(7), None),
+            (9, 8, Some(8), None),
+            (usize::MAX, 8, Some(8), None),
+        ] {
+            assert_eq!(
+                app.nearest_visible_pull_request_diff_line("example", &rows, index),
+                nearest,
+                "nearest to {index}"
+            );
+            assert_eq!(
+                app.previous_visible_pull_request_diff_line("example", &rows, index),
+                previous,
+                "previous to {index}"
+            );
+            assert_eq!(
+                app.next_visible_pull_request_diff_line("example", &rows, index),
+                next,
+                "next to {index}"
+            );
+        }
+        assert_eq!(
+            app.nearest_visible_pull_request_diff_line("example", &[], 0),
+            0
+        );
+        assert_eq!(
+            app.next_visible_pull_request_diff_line("example", &[], 0),
+            None
+        );
+        assert_eq!(
+            app.previous_visible_pull_request_diff_line("example", &[], 0),
+            None
+        );
+        assert_eq!(
+            app.last_visible_pull_request_diff_line("example", &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn collapsed_diff_renders_hidden_counts_and_keeps_row_clicks_aligned() {
+        let mut app = collapsed_app();
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(160)
+            .map(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for count in [0, 1, 2] {
+            assert!(screen.contains(&format!("[{count} lines hidden]")));
+        }
+        assert!(screen.contains("visible one"));
+        assert!(screen.contains("visible two"));
+        assert!(!screen.contains("hidden first"));
+        assert!(!screen.contains("hidden last"));
+        let visible_indices = app
+            .interaction
+            .mouse_regions
+            .iter()
+            .filter_map(|region| {
+                if let MouseTarget::PullRequestDiffRow(index, ReviewSide::Right) = region.target {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(visible_indices, [0, 1, 4, 5, 6, 7, 8]);
+        let region = *app
+            .interaction
+            .mouse_regions
+            .iter()
+            .find(|region| region.target == MouseTarget::PullRequestDiffRow(6, ReviewSide::Right))
+            .unwrap();
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: region.x,
+            row: region.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.selected_pull_request_diff_line(), 6);
+        assert_eq!(app.pull_request_review_side(), ReviewSide::Right);
     }
 }
