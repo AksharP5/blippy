@@ -20,7 +20,7 @@ pub(crate) fn start_pull_request_files_sync(
                     .await
             });
 
-            let files = match result {
+            let (head_sha, files) = match result {
                 Ok(files) => files,
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
@@ -54,6 +54,7 @@ pub(crate) fn start_pull_request_files_sync(
                 .collect::<Vec<PullRequestFile>>();
             let _ = event_tx.send(AppEvent::PullRequestFilesUpdated {
                 issue_id,
+                head_sha,
                 files: mapped,
                 pull_request_id,
                 viewed_files,

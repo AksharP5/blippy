@@ -6,6 +6,7 @@ pub(crate) fn start_create_pull_request_review_comment(
     repo: String,
     issue_id: i64,
     pull_number: i64,
+    commit_id: String,
     path: String,
     line: i64,
     side: ReviewSide,
@@ -20,23 +21,6 @@ pub(crate) fn start_create_pull_request_review_comment(
         event_tx,
         move |message| AppEvent::PullRequestReviewCommentCreateFailed { issue_id, message },
         move |services, event_tx| {
-            let head_sha = services.runtime.block_on(async {
-                services
-                    .client
-                    .pull_request_head_sha(&owner, &repo, pull_number)
-                    .await
-            });
-            let head_sha = match head_sha {
-                Ok(head_sha) => head_sha,
-                Err(error) => {
-                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
-                        issue_id,
-                        message: error.to_string(),
-                    });
-                    return;
-                }
-            };
-
             let created = services.runtime.block_on(async {
                 services
                     .client
@@ -44,7 +28,7 @@ pub(crate) fn start_create_pull_request_review_comment(
                         &owner,
                         &repo,
                         pull_number,
-                        head_sha.as_str(),
+                        commit_id.as_str(),
                         path.as_str(),
                         line,
                         side.as_api_side(),

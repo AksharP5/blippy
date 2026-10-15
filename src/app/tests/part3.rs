@@ -6,6 +6,7 @@ fn enter_toggles_pull_request_diff_expanded_mode() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -30,6 +31,7 @@ fn gg_keeps_pull_request_diff_expanded_mode() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -69,6 +71,7 @@ fn visual_mode_creates_multiline_review_target() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -95,6 +98,7 @@ fn visual_review_targets_stay_within_one_hunk() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -131,6 +135,7 @@ fn l_sets_review_side_to_new_on_context_row() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),

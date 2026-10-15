@@ -8,13 +8,14 @@ impl GitHubClient {
         owner: &str,
         repo: &str,
         pull_number: i64,
-    ) -> Result<Vec<ApiPullRequestFile>> {
+    ) -> Result<(String, Vec<ApiPullRequestFile>)> {
+        let head_sha = self.pull_request_head_sha(owner, repo, pull_number).await?;
         let mut page = 1;
         let mut files = Vec::new();
         loop {
             let url = format!(
                 "{}/repos/{}/{}/pulls/{}/files",
-                API_BASE, owner, repo, pull_number
+                self.api_base, owner, repo, pull_number
             );
             let response = self
                 .client
@@ -32,7 +33,12 @@ impl GitHubClient {
             }
             page += 1;
         }
-        Ok(files)
+        if self.pull_request_head_sha(owner, repo, pull_number).await? != head_sha {
+            return Err(anyhow!(
+                "Pull request changed while loading files; refresh to try again"
+            ));
+        }
+        Ok((head_sha, files))
     }
 
     pub async fn pull_request_file_view_state(
@@ -134,7 +140,7 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn pull_request_head_sha(
+    async fn pull_request_head_sha(
         &self,
         owner: &str,
         repo: &str,
@@ -142,7 +148,7 @@ impl GitHubClient {
     ) -> Result<String> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}",
-            API_BASE, owner, repo, pull_number
+            self.api_base, owner, repo, pull_number
         );
         let response = self
             .client
@@ -163,7 +169,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let repo_details = self
             .client
-            .get(format!("{}/repos/{}/{}", API_BASE, owner, repo))
+            .get(format!("{}/repos/{}/{}", self.api_base, owner, repo))
             .bearer_auth(&self.token)
             .send()
             .await?
@@ -177,7 +183,7 @@ impl GitHubClient {
 
         let merge_url = format!(
             "{}/repos/{}/{}/pulls/{}/merge",
-            API_BASE, owner, repo, pull_number
+            self.api_base, owner, repo, pull_number
         );
         let mut last_error = String::new();
         for merge_method in merge_methods {
@@ -236,7 +242,7 @@ impl GitHubClient {
         loop {
             let url = format!(
                 "{}/repos/{}/{}/pulls/{}/comments",
-                API_BASE, owner, repo, pull_number
+                self.api_base, owner, repo, pull_number
             );
             let response = self
                 .client
@@ -359,7 +365,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}/comments",
-            API_BASE, owner, repo, pull_number
+            self.api_base, owner, repo, pull_number
         );
         let mut payload = serde_json::json!({
             "body": body,
@@ -394,7 +400,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/pulls/comments/{}",
-            API_BASE, owner, repo, comment_id
+            self.api_base, owner, repo, comment_id
         );
         self.client
             .patch(url)
@@ -414,7 +420,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/pulls/comments/{}",
-            API_BASE, owner, repo, comment_id
+            self.api_base, owner, repo, comment_id
         );
         self.client
             .delete(url)
@@ -497,6 +503,230 @@ fn parse_api_error_message(payload: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Instant;
+
+    fn serve_responses(
+        responses: Vec<(&'static str, serde_json::Value)>,
+    ) -> (GitHubClient, thread::JoinHandle<Vec<serde_json::Value>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock GitHub");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let api_base = format!("http://{}", listener.local_addr().expect("local address"));
+        let server = thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for (request_line, response) in responses {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "missing request: {request_line}");
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("accept request: {error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .expect("read timeout");
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("request line");
+                assert_eq!(line.trim_end(), format!("{request_line} HTTP/1.1"));
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    assert!(reader.read_line(&mut line).expect("header") > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().expect("content length");
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).expect("request body");
+                bodies.push(if body.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::from_slice(&body).expect("JSON body")
+                });
+                let body = response.to_string();
+                write!(
+                    reader.get_mut(),
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(), body
+                ).expect("mock response");
+            }
+            bodies
+        });
+        let client = GitHubClient {
+            client: reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .expect("test client"),
+            token: "test-token".to_string(),
+            api_base,
+        };
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn files_snapshot_requires_the_same_head_before_and_after_all_pages() {
+        let file = serde_json::json!({
+            "filename": "src/main.rs",
+            "status": "modified",
+            "additions": 1,
+            "deletions": 1,
+            "patch": "@@ -1 +1 @@\n-old\n+new",
+        });
+        for final_head in ["head-a", "head-b"] {
+            let (client, server) = serve_responses(vec![
+                (
+                    "GET /repos/acme/blippy/pulls/7",
+                    serde_json::json!({"head": {"sha": "head-a"}}),
+                ),
+                (
+                    "GET /repos/acme/blippy/pulls/7/files?per_page=100&page=1",
+                    serde_json::json!(vec![file.clone(); 100]),
+                ),
+                (
+                    "GET /repos/acme/blippy/pulls/7/files?per_page=100&page=2",
+                    serde_json::json!([file.clone()]),
+                ),
+                (
+                    "GET /repos/acme/blippy/pulls/7",
+                    serde_json::json!({"head": {"sha": final_head}}),
+                ),
+            ]);
+
+            let result = client.list_pull_request_files("acme", "blippy", 7).await;
+            server
+                .join()
+                .expect("all pages fetched between head checks");
+            if final_head == "head-a" {
+                let (head_sha, files) = result.expect("stable snapshot");
+                assert_eq!(head_sha, "head-a");
+                assert_eq!(files.len(), 101);
+            } else {
+                assert_eq!(
+                    result
+                        .expect_err("changed head must reject all files")
+                        .to_string(),
+                    "Pull request changed while loading files; refresh to try again"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn review_request_keeps_editor_snapshot_after_files_are_replaced() {
+        use crate::app::{App, PullRequestFile, PullRequestReviewFocus, ReviewSide, View};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        for (side, multiline) in [
+            (ReviewSide::Left, false),
+            (ReviewSide::Right, false),
+            (ReviewSide::Left, true),
+            (ReviewSide::Right, true),
+        ] {
+            let mut app = App::new(crate::config::Config::default());
+            app.set_current_issue(1, 7);
+            app.set_view(View::PullRequestFiles);
+            let conn = rusqlite::Connection::open_in_memory().expect("conn");
+            let (event_tx, event_rx) = std::sync::mpsc::channel();
+            let snapshot = |head: &str, patch: &str| crate::AppEvent::PullRequestFilesUpdated {
+                issue_id: 1,
+                head_sha: head.to_string(),
+                files: vec![PullRequestFile {
+                    filename: "src/main.rs".to_string(),
+                    status: "modified".to_string(),
+                    additions: 0,
+                    deletions: 0,
+                    patch: Some(patch.to_string()),
+                }],
+                pull_request_id: None,
+                viewed_files: HashSet::new(),
+                view_state_error: None,
+            };
+            event_tx
+                .send(snapshot("head-a", "@@ -10,2 +20,2 @@\n first\n second"))
+                .expect("snapshot A");
+            crate::main_events::handle_events(&mut app, &conn, &event_rx).expect("display A");
+            app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            if side == ReviewSide::Left {
+                app.on_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+            }
+            if multiline {
+                app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+                app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            }
+            let target = app.selected_pull_request_review_target().expect("A target");
+            let start = if side == ReviewSide::Left { 10 } else { 20 };
+            let end = start + i64::from(multiline);
+            assert_eq!(target.commit_id, "head-a");
+            assert_eq!(target.line, end);
+            assert_eq!(target.side, side);
+            assert_eq!(target.start_line, multiline.then_some(start));
+            app.open_pull_request_review_comment_editor(View::PullRequestFiles, target.clone());
+
+            event_tx
+                .send(snapshot("head-b", "@@ -110,2 +120,2 @@\n first\n second"))
+                .expect("snapshot B");
+            crate::main_events::handle_events(&mut app, &conn, &event_rx).expect("display B");
+            assert_eq!(app.view(), View::CommentEditor);
+            assert!(
+                app.pull_request_files()[0]
+                    .patch
+                    .as_deref()
+                    .unwrap()
+                    .contains("120")
+            );
+            let pending = app.take_pending_review_target().expect("editor target");
+            assert_eq!(pending, target);
+
+            let (client, server) = serve_responses(vec![(
+                "POST /repos/acme/blippy/pulls/7/comments",
+                serde_json::json!({}),
+            )]);
+            client
+                .create_pull_request_review_comment(
+                    "acme",
+                    "blippy",
+                    7,
+                    &pending.commit_id,
+                    &pending.path,
+                    pending.line,
+                    pending.side.as_api_side(),
+                    pending.start_line,
+                    pending.start_side.map(ReviewSide::as_api_side),
+                    "Review A",
+                )
+                .await
+                .expect("submit captured snapshot");
+            let bodies = server.join().expect("only a comment POST, no head fetch");
+            let mut expected = serde_json::json!({
+                "body": "Review A",
+                "commit_id": "head-a",
+                "path": "src/main.rs",
+                "line": end,
+                "side": side.as_api_side(),
+            });
+            if multiline {
+                expected["start_line"] = serde_json::json!(start);
+                expected["start_side"] = serde_json::json!(side.as_api_side());
+            }
+            assert_eq!(bodies, vec![expected]);
+        }
+    }
 
     #[test]
     fn review_thread_metadata_accepts_full_database_ids() {

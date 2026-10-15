@@ -788,6 +788,7 @@ mod tests {
         app.set_view(View::PullRequestFiles);
         app.set_pull_request_files(
             1,
+            "head-a".to_string(),
             (0..30)
                 .map(|index| PullRequestFile {
                     filename: format!("file{index:02}.rs"),
