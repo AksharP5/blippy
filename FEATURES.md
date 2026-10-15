@@ -79,5 +79,6 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 ## Themes and Customization
 
 - Built-in themes: `github_dark`, `midnight`, `graphite`
+- Scrollable help overlay with keyboard and mouse wheel controls; input stays in help until it is dismissed
 - Configurable keybindings via `~/.config/blippy/keybinds.toml`
 - Configurable close-comment presets in `~/.config/blippy/config.toml`

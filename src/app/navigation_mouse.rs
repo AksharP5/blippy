@@ -2,6 +2,14 @@ use super::*;
 
 impl App {
     pub fn on_mouse(&mut self, event: MouseEvent) {
+        if self.search.help_overlay_visible {
+            match event.kind {
+                MouseEventKind::ScrollUp => self.scroll_help(-1),
+                MouseEventKind::ScrollDown => self.scroll_help(1),
+                _ => {}
+            }
+            return;
+        }
         let target = self.mouse_target_at(event.column, event.row);
         match event.kind {
             MouseEventKind::ScrollUp => {

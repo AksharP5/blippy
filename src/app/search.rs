@@ -20,6 +20,23 @@ impl App {
         self.search.help_overlay_visible
     }
 
+    pub fn help_scroll(&self) -> u16 {
+        self.search.help_scroll
+    }
+
+    pub fn set_help_max_scroll(&mut self, max_scroll: u16) {
+        self.search.help_max_scroll = max_scroll;
+        self.search.help_scroll = self.search.help_scroll.min(max_scroll);
+    }
+
+    pub(super) fn scroll_help(&mut self, delta: i16) {
+        self.search.help_scroll = self
+            .search
+            .help_scroll
+            .saturating_add_signed(delta)
+            .min(self.search.help_max_scroll);
+    }
+
     pub(super) fn rebuild_issue_filter(&mut self) {
         let query = self.search.issue_query.trim().to_ascii_lowercase();
         self.search.filtered_issue_indices = self

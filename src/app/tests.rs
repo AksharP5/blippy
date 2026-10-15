@@ -9,6 +9,7 @@ pub(super) use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
+mod help;
 mod part1;
 mod part2;
 mod part3;

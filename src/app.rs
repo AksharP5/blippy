@@ -504,6 +504,8 @@ struct SearchState {
     issue_search_mode: bool,
     filtered_issue_indices: Vec<usize>,
     help_overlay_visible: bool,
+    help_scroll: u16,
+    help_max_scroll: u16,
 }
 
 #[derive(Debug)]

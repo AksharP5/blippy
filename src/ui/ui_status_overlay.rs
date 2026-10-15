@@ -63,7 +63,7 @@ pub(super) fn draw_status(frame: &mut Frame<'_>, app: &mut App, area: Rect, them
 
 pub(super) fn draw_help_overlay(
     frame: &mut Frame<'_>,
-    app: &App,
+    app: &mut App,
     area: Rect,
     theme: &ThemePalette,
 ) {
@@ -76,26 +76,12 @@ pub(super) fn draw_help_overlay(
     });
     frame.render_widget(shell, popup);
 
-    let mut lines = vec![Line::from(vec![
-        Span::styled(
-            "View",
-            Style::default()
-                .fg(theme.accent_primary)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            primary_help_text(app),
-            Style::default().fg(theme.text_primary),
-        ),
-    ])];
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
+    let mut lines = vec![Line::from(Span::styled(
         "Common shortcuts",
         Style::default()
             .fg(theme.accent_subtle)
             .add_modifier(Modifier::BOLD),
-    )));
+    ))];
 
     for (key, action) in help_rows(app) {
         lines.push(Line::from(vec![
@@ -120,18 +106,38 @@ pub(super) fn draw_help_overlay(
         }
         lines.push(Line::from(row));
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("Press ? or {} to close", bind(app, "back_escape")),
-        Style::default()
-            .fg(theme.accent_success)
-            .add_modifier(Modifier::BOLD),
-    )));
-
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(theme.bg_popup)),
-        inner,
+    let footer = Paragraph::new(vec![
+        Line::default(),
+        Line::from(format!(
+            "{}/{} or ↑/↓ scroll • Wheel scroll",
+            bind(app, "move_down"),
+            bind(app, "move_up"),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "Home/End top/bottom • ? / {} close • {} quit",
+                bind(app, "back_escape"),
+                bind(app, "quit")
+            ),
+            Style::default().fg(theme.accent_success),
+        )),
+    ])
+    .style(Style::default().fg(theme.text_muted).bg(theme.bg_popup))
+    .wrap(Wrap { trim: false });
+    let [body_area, footer_area] = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(footer.line_count(inner.width) as u16),
+    ])
+    .areas(inner);
+    let body = Paragraph::new(lines)
+        .style(Style::default().bg(theme.bg_popup))
+        .wrap(Wrap { trim: false });
+    app.set_help_max_scroll(
+        body.line_count(body_area.width)
+            .saturating_sub(body_area.height as usize) as u16,
     );
+    frame.render_widget(body.scroll((app.help_scroll(), 0)), body_area);
+    frame.render_widget(footer, footer_area);
 }
 
 fn key_cap(key: &str, theme: &ThemePalette) -> Span<'static> {
@@ -213,7 +219,7 @@ fn help_rows(app: &App) -> Vec<(String, String)> {
             let reviewing_pr = app.work_item_mode() == crate::app::WorkItemMode::PullRequests
                 || app.selected_issue_row().is_some_and(|issue| issue.is_pr);
             let mut rows = vec![
-                (move_keys, "Move issues".to_string()),
+                (move_keys, "Move selection".to_string()),
                 (bind(app, "submit"), "Open selected item".to_string()),
                 (
                     bind(app, "cycle_issue_filter"),
@@ -1211,6 +1217,68 @@ mod tests {
             comments_count: 0,
             updated_at: None,
             is_pr,
+        }
+    }
+
+    #[test]
+    fn help_scroll_reaches_last_shortcut_with_fixed_hints_at_small_sizes() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+        use ratatui::{Terminal, backend::TestBackend};
+
+        for use_wheel in [false, true] {
+            let mut app = App::new(Config::default());
+            app.set_view(View::PullRequestFiles);
+            app.set_pull_request_review_focus(crate::app::PullRequestReviewFocus::Diff);
+            app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+            let (key, action) = super::extended_help_rows(&app).pop().unwrap();
+            let last_shortcut = format!(" {key}  {action}");
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            for _ in 0..200 {
+                if use_wheel {
+                    app.on_mouse(MouseEvent {
+                        kind: MouseEventKind::ScrollDown,
+                        column: 0,
+                        row: 0,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                } else {
+                    app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+                }
+            }
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content
+                .chunks(80)
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            for text in [
+                last_shortcut.as_str(),
+                "j/k or ↑/↓ scroll",
+                "Wheel scroll",
+                "Home/End top/bottom",
+                "? / Esc close",
+            ] {
+                assert!(rendered.contains(text), "missing {text}:\n{rendered}");
+            }
+            let small_scroll = app.help_scroll();
+            assert!(small_scroll > 0);
+            app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(app.help_scroll(), small_scroll);
+            let mut larger = Terminal::new(TestBackend::new(120, 36)).unwrap();
+            larger
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            assert!(app.help_scroll() < small_scroll);
+            app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+            assert_eq!(app.help_scroll(), 0);
         }
     }
 
