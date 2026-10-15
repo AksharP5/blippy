@@ -46,6 +46,7 @@ pub(crate) fn save_preset_from_editor(app: &mut App) -> Result<()> {
 
     app.add_comment_default(crate::config::CommentDefault { name, body });
     app.save_config()?;
+    app.set_view(View::CommentPresetPicker);
     app.set_status("Preset saved".to_string());
     Ok(())
 }

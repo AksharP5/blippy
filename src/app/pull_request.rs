@@ -15,6 +15,10 @@ impl App {
             .contains(file_path)
     }
 
+    pub fn pull_request_view_state_loaded(&self) -> bool {
+        self.pull_request.pull_request_view_state_loaded
+    }
+
     pub fn pull_request_hunk_is_collapsed(&self, file_path: &str, hunk_start: usize) -> bool {
         self.pull_request
             .pull_request_collapsed_hunks
@@ -59,7 +63,22 @@ impl App {
             .remove(file_path);
     }
 
+    pub fn begin_pull_request_file_view_update(&mut self, issue_id: i64, path: &str) -> bool {
+        self.interaction
+            .pending_file_view_updates
+            .insert((issue_id, path.to_string()))
+    }
+
+    pub fn finish_pull_request_file_view_update(&mut self, issue_id: i64, path: &str) {
+        self.interaction
+            .pending_file_view_updates
+            .remove(&(issue_id, path.to_string()));
+    }
+
     pub fn selected_pull_request_file_view_toggle(&self) -> Option<(String, bool)> {
+        if !self.pull_request_view_state_loaded() {
+            return None;
+        }
         let file = self.selected_pull_request_file_row()?;
         let viewed = self.pull_request_file_is_viewed(file.filename.as_str());
         Some((file.filename.clone(), !viewed))
@@ -71,6 +90,7 @@ impl App {
         viewed_files: HashSet<String>,
     ) {
         self.pull_request.pull_request_id = pull_request_id;
+        self.pull_request.pull_request_view_state_loaded = true;
         self.pull_request.pull_request_viewed_files = viewed_files;
         self.pull_request
             .pull_request_viewed_files
@@ -209,6 +229,7 @@ impl App {
     pub fn set_pull_request_files(&mut self, issue_id: i64, files: Vec<PullRequestFile>) {
         self.pull_request.pull_request_files_issue_id = Some(issue_id);
         self.pull_request.pull_request_id = None;
+        self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files = files;
         let mut active_file_paths = HashSet::new();
         for file in &self.pull_request.pull_request_files {
@@ -342,6 +363,7 @@ impl App {
     pub(super) fn reset_pull_request_state(&mut self) {
         self.pull_request.pull_request_files_issue_id = None;
         self.pull_request.pull_request_id = None;
+        self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files.clear();
         self.pull_request.pull_request_viewed_files.clear();
         self.pull_request.pull_request_collapsed_hunks.clear();
@@ -591,6 +613,11 @@ impl App {
         let (start_index, end_index) = self.selected_pull_request_diff_range();
         let start_index = start_index.min(rows.len() - 1);
         let end_index = end_index.min(rows.len() - 1);
+        let hunk_range = pull_request_hunk_range_for_row(rows, start_index)?;
+        // GitHub requires multiline review threads to stay within one diff hunk.
+        if end_index > hunk_range.end {
+            return None;
+        }
 
         let side = self.pull_request.pull_request_review_side;
         let mut selected_lines = Vec::new();

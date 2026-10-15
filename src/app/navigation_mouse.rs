@@ -16,7 +16,7 @@ impl App {
             MouseEventKind::ScrollRight => {
                 self.handle_mouse_scroll_horizontal(target, true);
             }
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+            MouseEventKind::Down(MouseButton::Left) => {
                 self.handle_mouse_click_target(target);
             }
             _ => {}

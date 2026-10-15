@@ -30,19 +30,23 @@ pub(super) fn draw_linked_picker(
                 .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         );
-    frame.render_stateful_widget(
-        list,
-        list_area,
-        &mut list_state(app.selected_linked_picker_index()),
-    );
+    let options_area = Rect {
+        height: list_area.height.saturating_sub(1),
+        ..list_area
+    };
+    let mut options_state = list_state(app.selected_linked_picker_index());
+    frame.render_stateful_widget(list, options_area, &mut options_state);
 
     let list_inner = list_area.inner(Margin {
         vertical: 0,
         horizontal: 1,
     });
     let max_rows = list_inner.height.saturating_sub(1) as usize;
-    for index in 0..options.len().min(max_rows) {
-        let y = list_inner.y.saturating_add(index as u16);
+    for (row, index) in (options_state.offset()..options.len())
+        .take(max_rows)
+        .enumerate()
+    {
+        let y = list_inner.y.saturating_add(row as u16);
         app.register_mouse_region(
             MouseTarget::LinkedPickerOption(index),
             list_inner.x,

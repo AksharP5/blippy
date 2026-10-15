@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSlug {
@@ -25,8 +25,17 @@ pub fn parse_remote_url(url: &str) -> Option<RepoSlug> {
         return split_owner_repo(rest);
     }
 
-    if let Some(rest) = cleaned.strip_prefix("ssh://git@github.com/") {
-        return split_owner_repo(rest);
+    if cleaned.starts_with("ssh://") {
+        let parsed = reqwest::Url::parse(cleaned).ok()?;
+        if parsed.username() != "git"
+            || parsed.password().is_some()
+            || parsed.host_str() != Some("github.com")
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+        {
+            return None;
+        }
+        return split_owner_repo(parsed.path().strip_prefix('/')?);
     }
 
     if let Some(rest) = cleaned.strip_prefix("https://github.com/") {
@@ -97,7 +106,7 @@ fn repo_root_at(path: &std::path::Path) -> Result<Option<std::path::PathBuf>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout.trim();
+    let trimmed = stdout.strip_suffix('\n').unwrap_or(&stdout);
     if trimmed.is_empty() {
         return Ok(None);
     }
@@ -110,20 +119,20 @@ pub fn list_github_remotes_at(path: &std::path::Path) -> Result<Vec<RemoteInfo>>
         .arg("-C")
         .arg(path)
         .args(["remote", "-v"])
-        .output();
-
-    let output = match output {
-        Ok(output) => output,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return Ok(Vec::new());
-            }
-            return Err(error.into());
-        }
-    };
+        .output()
+        .with_context(|| format!("failed to inspect Git remotes at {}", path.display()))?;
 
     if !output.status.success() {
-        return Ok(Vec::new());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        if message.is_empty() {
+            bail!(
+                "git remote -v failed at {} with {}",
+                path.display(),
+                output.status
+            );
+        }
+        bail!("git remote -v failed at {}: {}", path.display(), message);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -173,6 +182,26 @@ mod tests {
         let slug = parse_remote_url("ssh://git@github.com/acme/blippy.git").expect("slug");
         assert_eq!(slug.owner, "acme");
         assert_eq!(slug.repo, "blippy");
+    }
+
+    #[test]
+    fn parse_remote_url_handles_ssh_url_with_explicit_port() {
+        let slug = parse_remote_url("ssh://git@github.com:22/acme/blippy.git").expect("slug");
+        assert_eq!(slug.owner, "acme");
+        assert_eq!(slug.repo, "blippy");
+    }
+
+    #[test]
+    fn parse_remote_url_rejects_unsupported_ssh_url_components() {
+        for url in [
+            "ssh://git@github.com.evil.invalid/acme/blippy.git",
+            "ssh://git@github.com:invalid/acme/blippy.git",
+            "ssh://git:secret@github.com/acme/blippy.git",
+            "ssh://git@github.com/acme/blippy.git?query",
+            "ssh://git@github.com/acme/blippy.git#fragment",
+        ] {
+            assert!(parse_remote_url(url).is_none(), "{url}");
+        }
     }
 
     #[test]
@@ -229,6 +258,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn repo_root_preserves_trailing_whitespace_in_directory_names() {
+        let root = unique_temp_dir("git-root-whitespace");
+        for name in ["repo ", "repo\t", "repo\n"] {
+            let dir = root.join(name);
+            fs::create_dir_all(&dir).expect("create repo directory");
+            init_git_repo(&dir);
+            let actual = super::repo_root_at(&dir).expect("repo root");
+            let expected = fs::canonicalize(&dir).expect("canonicalize directory");
+            assert_eq!(actual, Some(expected));
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn list_github_remotes_reads_origin() {
         let dir = unique_temp_dir("git-remote");
         init_git_repo(&dir);
@@ -246,6 +291,18 @@ mod tests {
         assert_eq!(remotes.len(), 1);
         assert_eq!(remotes[0].name, "origin");
         assert_eq!(remotes[0].slug.owner, "acme");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_github_remotes_reports_broken_git_metadata() {
+        let dir = unique_temp_dir("broken-git-remote");
+        fs::write(dir.join(".git"), "gitdir: /definitely/missing/blippy\n")
+            .expect("write broken git file");
+
+        let error = super::list_github_remotes_at(&dir).expect_err("broken repo must fail");
+        assert!(error.to_string().contains("git remote -v failed"));
 
         let _ = fs::remove_dir_all(&dir);
     }

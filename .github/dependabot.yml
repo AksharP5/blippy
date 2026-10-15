@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: lockfile-only
+    groups:
+      compatible-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

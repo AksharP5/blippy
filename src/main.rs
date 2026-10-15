@@ -1,6 +1,7 @@
 mod app;
 mod auth;
 mod cli;
+mod clipboard;
 mod config;
 mod discovery;
 mod git;
@@ -43,16 +44,17 @@ use crate::app::{
     PullRequestFile, PullRequestReviewComment, ReviewSide, View, WorkItemMode,
 };
 use crate::auth::{SystemAuth, clear_auth_token, resolve_auth_token};
-use crate::cli::{CliCommand, parse_args};
+use crate::cli::{CliCommand, USAGE, parse_args};
+use crate::clipboard::SystemClipboard;
 use crate::config::Config;
 use crate::discovery::{home_dir, quick_scan};
 use crate::git::list_github_remotes_at;
 use crate::github::GitHubClient;
-use crate::repo_index::index_repo_path;
+use crate::repo_index::{index_repo_paths, prune_missing_local_repos};
 use crate::store::delete_db;
 use crate::store::{
     comment_now_epoch, comments_for_issue, get_repo_by_slug, list_issues, list_local_repos,
-    prune_comments, touch_comments_for_issue, update_issue_comments_count,
+    prune_comments, replace_comments_for_issue, touch_comments_for_issue,
 };
 use crate::sync::{SyncStats, sync_repo_with_progress};
 
@@ -146,15 +148,6 @@ where
     });
 }
 
-fn with_store_conn<F>(mut work: F)
-where
-    F: FnMut(&rusqlite::Connection),
-{
-    if let Ok(conn) = crate::store::open_db() {
-        work(&conn);
-    }
-}
-
 const AUTH_DEBUG_ENV: &str = "BLIPPY_AUTH_DEBUG";
 const ISSUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const COMMENT_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -178,6 +171,7 @@ fn main() -> Result<()> {
     let config = Config::load()?;
     let conn = crate::store::open_db()?;
     let mut app = App::new(config);
+    let mut clipboard = SystemClipboard::default();
     main_data::initialize_app(&mut app, &conn)?;
 
     let (event_tx, event_rx) = mpsc::channel();
@@ -190,6 +184,7 @@ fn main() -> Result<()> {
     run_app(
         terminal_guard.terminal_mut(),
         &mut app,
+        &mut clipboard,
         &conn,
         &token,
         event_rx,
@@ -202,6 +197,10 @@ fn handle_command(command: CliCommand) -> Result<()> {
     match command {
         CliCommand::AuthReset => handle_auth_reset(),
         CliCommand::CacheReset => handle_cache_reset(),
+        CliCommand::Help => {
+            println!("{}", USAGE);
+            Ok(())
+        }
         CliCommand::Sync => handle_sync(),
         CliCommand::Version => {
             println!("blippy {}", env!("CARGO_PKG_VERSION"));
@@ -234,29 +233,34 @@ fn handle_cache_reset() -> Result<()> {
 }
 
 fn handle_sync() -> Result<()> {
+    let start = Instant::now();
     let home = home_dir().unwrap_or(env::current_dir()?);
     let repos = crate::discovery::full_scan(&home)?;
     let conn = crate::store::open_db()?;
 
-    let start = Instant::now();
-    let mut indexed = 0usize;
-    for repo in &repos {
-        indexed += index_repo_path(&conn, &repo.path)?;
-    }
+    let stats = index_repo_paths(&conn, repos.iter().map(|repo| repo.path.as_path()))?;
+    prune_missing_local_repos(&conn)?;
 
     let duration = start.elapsed();
     println!(
         "Discovered {} repos ({} remotes) in {:.2?}",
         repos.len(),
-        indexed,
+        stats.remotes,
         duration
     );
+    if !stats.failures.is_empty() {
+        for message in stats.failures.values() {
+            eprintln!("{}", message);
+        }
+        anyhow::bail!("Scan skipped {} repositories", stats.failures.len());
+    }
     Ok(())
 }
 
 fn run_app(
     terminal: &mut Tui,
     app: &mut App,
+    clipboard: &mut SystemClipboard,
     conn: &rusqlite::Connection,
     token: &str,
     event_rx: Receiver<AppEvent>,
@@ -270,14 +274,6 @@ fn run_app(
 
     loop {
         if app.view() != last_view {
-            if matches!(
-                last_view,
-                View::IssueDetail | View::IssueComments | View::PullRequestFiles
-            ) {
-                app.set_comment_syncing(false);
-                app.set_pull_request_files_syncing(false);
-                app.set_pull_request_review_comments_syncing(false);
-            }
             last_view = app.view();
             last_issue_poll = Instant::now();
             last_comment_poll = Instant::now();
@@ -313,7 +309,7 @@ fn run_app(
             _ => {}
         }
 
-        main_actions::handle_actions(app, conn, token, event_tx.clone())?;
+        main_actions::handle_actions(app, clipboard, conn, token, event_tx.clone())?;
         drive_background_tasks(
             app,
             conn,
@@ -366,16 +362,35 @@ enum LinkedIssueTarget {
     Probe,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepoIdentity {
+    owner: String,
+    repo: String,
+}
+
+impl RepoIdentity {
+    fn new(owner: &str, repo: &str) -> Self {
+        Self {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+        }
+    }
+
+    fn is_current(&self, app: &App) -> bool {
+        app.repository_is_current(&self.owner, &self.repo)
+    }
+}
+
 fn load_comments_for_issue(
     app: &mut App,
     conn: &rusqlite::Connection,
     issue_id: i64,
 ) -> Result<()> {
     let comments = comments_for_issue(conn, issue_id)?;
-    app.set_comments(comments);
     let now = comment_now_epoch();
     touch_comments_for_issue(conn, issue_id, now)?;
     prune_comments(conn, COMMENT_TTL_SECONDS, COMMENT_CAP)?;
+    app.set_comments(comments);
     Ok(())
 }
 
@@ -389,7 +404,12 @@ enum ScanMode {
 #[derive(Debug, Clone)]
 enum AppEvent {
     ReposUpdated,
-    ScanFinished,
+    ScanFinished {
+        failures: Vec<String>,
+    },
+    ScanFailed {
+        message: String,
+    },
     SyncProgress {
         owner: String,
         repo: String,
@@ -399,6 +419,7 @@ enum AppEvent {
     SyncFinished {
         owner: String,
         repo: String,
+        resolved_repo: crate::store::RepoRow,
         stats: SyncStats,
     },
     SyncFailed {
@@ -419,6 +440,7 @@ enum AppEvent {
         files: Vec<PullRequestFile>,
         pull_request_id: Option<String>,
         viewed_files: HashSet<String>,
+        view_state_error: Option<String>,
     },
     PullRequestFilesFailed {
         issue_id: i64,
@@ -476,52 +498,63 @@ enum AppEvent {
         message: String,
     },
     LinkedPullRequestResolved {
+        repo: RepoIdentity,
         issue_number: i64,
         pull_requests: Vec<(i64, String)>,
         target: LinkedPullRequestTarget,
     },
     LinkedPullRequestLookupFailed {
+        repo: RepoIdentity,
         issue_number: i64,
         message: String,
         target: LinkedPullRequestTarget,
     },
     LinkedIssueResolved {
+        repo: RepoIdentity,
         pull_number: i64,
-        issues: Vec<(i64, String)>,
+        issues: crate::github::LinkedIssues,
         target: LinkedIssueTarget,
     },
     LinkedIssueLookupFailed {
+        repo: RepoIdentity,
         pull_number: i64,
         message: String,
         target: LinkedIssueTarget,
     },
     IssueUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         message: String,
     },
     IssueCreated {
-        issue_number: i64,
+        repo: RepoIdentity,
+        issue: crate::store::IssueRow,
     },
     IssueCreateFailed {
+        repo: RepoIdentity,
         message: String,
     },
     IssueLabelsUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
-        labels: String,
+        labels: Vec<String>,
     },
     IssueAssigneesUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         assignees: String,
     },
     IssueCommentUpdated {
+        repo: RepoIdentity,
         issue_number: i64,
         comment_id: i64,
         body: String,
     },
     IssueCommentDeleted {
+        repo: RepoIdentity,
         issue_number: i64,
+        issue_id: i64,
         comment_id: i64,
-        count: usize,
     },
     RepoLabelsSuggested {
         owner: String,
@@ -532,6 +565,16 @@ enum AppEvent {
         owner: String,
         repo: String,
         assignees: Vec<String>,
+    },
+    RepoLabelsFailed {
+        owner: String,
+        repo: String,
+        message: String,
+    },
+    RepoAssigneesFailed {
+        owner: String,
+        repo: String,
+        message: String,
     },
     RepoPermissionsResolved {
         owner: String,
@@ -559,6 +602,7 @@ fn refresh_current_repo_issues(app: &mut App, conn: &rusqlite::Connection) -> Re
         }
     };
     let issues = list_issues(conn, repo_row.id)?;
+    app.set_current_repo_id(repo_row.id);
     app.set_issues(issues);
     Ok(())
 }
@@ -571,10 +615,21 @@ impl TerminalGuard {
     fn init() -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        if let Err(error) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+            let _ = disable_raw_mode();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+            return Err(error.into());
+        }
 
         let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                let _ = disable_raw_mode();
+                let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+                return Err(error.into());
+            }
+        };
 
         Ok(Self { terminal })
     }

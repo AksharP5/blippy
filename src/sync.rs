@@ -9,6 +9,13 @@ pub struct SyncStats {
     pub issues: usize,
     pub comments: usize,
     pub not_modified: bool,
+    pub incomplete_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncResult {
+    pub repo: RepoRow,
+    pub stats: SyncStats,
 }
 
 #[async_trait]
@@ -53,13 +60,12 @@ pub fn map_repo_to_row(repo: &ApiRepo) -> RepoRow {
     }
 }
 
-pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
+pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> IssueRow {
     let labels = issue
         .labels
         .iter()
-        .map(|label| label.name.as_str())
-        .collect::<Vec<&str>>()
-        .join(",");
+        .map(|label| label.name.clone())
+        .collect();
     let assignees = issue
         .assignees
         .iter()
@@ -79,7 +85,7 @@ pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
     } else {
         issue.state.clone()
     };
-    Some(IssueRow {
+    IssueRow {
         id: issue.id,
         repo_id,
         number: issue.number,
@@ -91,14 +97,18 @@ pub fn map_issue_to_row(repo_id: i64, issue: &ApiIssue) -> Option<IssueRow> {
         comments_count: issue.comments,
         updated_at: issue.updated_at.clone(),
         is_pr,
-    })
+    }
 }
 
 pub fn map_comment_to_row(issue_id: i64, comment: &ApiComment) -> CommentRow {
     CommentRow {
         id: comment.id,
         issue_id,
-        author: comment.user.login.clone(),
+        author: comment
+            .user
+            .as_ref()
+            .map(|user| user.login.clone())
+            .unwrap_or_else(|| "unknown".to_string()),
         body: comment.body.clone().unwrap_or_default(),
         created_at: comment.created_at.clone(),
         last_accessed_at: Some(crate::store::comment_now_epoch()),
@@ -111,20 +121,18 @@ pub async fn sync_repo_with_progress<F>(
     _owner: &str,
     _repo: &str,
     mut _on_progress: F,
-) -> Result<SyncStats>
+) -> Result<SyncResult>
 where
     F: FnMut(u32, &SyncStats),
 {
-    let stored_repo = crate::store::get_repo_by_slug(_conn, _owner, _repo)?;
-    let repo_row = match stored_repo.as_ref() {
-        Some(repo_row) => repo_row.clone(),
-        None => {
-            let repo = _client.get_repo(_owner, _repo).await?;
-            let repo_row = map_repo_to_row(&repo);
-            crate::store::upsert_repo(_conn, &repo_row)?;
-            repo_row
-        }
-    };
+    let repo = _client.get_repo(_owner, _repo).await?;
+    let stored_repo = crate::store::get_repo_by_id(_conn, repo.id)?;
+    let mut repo_row = map_repo_to_row(&repo);
+    if let Some(stored) = &stored_repo {
+        repo_row.updated_at = stored.updated_at.clone();
+        repo_row.etag = stored.etag.clone();
+    }
+    crate::store::upsert_repo(_conn, &repo_row)?;
 
     let previous_cursor = stored_repo
         .as_ref()
@@ -136,10 +144,8 @@ where
     let mut stats = SyncStats::default();
     let mut page = 1u32;
     let mut fetched_any_page = false;
-    let mut sync_completed = true;
     let mut latest_seen_updated_at = previous_cursor.clone();
-    let mut first_page_etag = None;
-    const PROGRESS_BATCH: usize = 10;
+    let mut first_page_etag = previous_etag.clone();
     loop {
         let if_none_match = if page == 1 {
             previous_etag.as_deref()
@@ -148,8 +154,8 @@ where
         };
         let page_result = _client
             .list_issues_page(
-                _owner,
-                _repo,
+                &repo_row.owner,
+                &repo_row.name,
                 page,
                 if_none_match,
                 previous_cursor.as_deref(),
@@ -157,8 +163,11 @@ where
             .await;
         let (issues, etag) = match page_result {
             Ok(ApiIssuesPageResult::NotModified) => {
+                // The ETag certifies only this page, including when the cache is sparse.
                 stats.not_modified = true;
-                return Ok(stats);
+                fetched_any_page = true;
+                page += 1;
+                continue;
             }
             Ok(ApiIssuesPageResult::Page(page_result)) => {
                 fetched_any_page = true;
@@ -166,7 +175,8 @@ where
             }
             Err(error) => {
                 if fetched_any_page {
-                    sync_completed = false;
+                    stats.not_modified = false;
+                    stats.incomplete_reason = Some(error.to_string());
                     break;
                 }
                 return Err(error);
@@ -178,8 +188,8 @@ where
         if issues.is_empty() {
             break;
         }
-        let mut persisted_since_update = 0usize;
-        let mut emitted_for_page = false;
+        let is_last_page = issues.len() < 100;
+        let mut rows = Vec::new();
         let mut reached_previous_cursor = false;
         for issue in issues {
             if let (Some(cursor), Some(issue_updated_at)) =
@@ -190,10 +200,7 @@ where
                 break;
             }
 
-            let row = match map_issue_to_row(repo_row.id, &issue) {
-                Some(row) => row,
-                None => continue,
-            };
+            let row = map_issue_to_row(repo_row.id, &issue);
 
             if let Some(updated_at) = row.updated_at.as_deref() {
                 let should_replace = latest_seen_updated_at
@@ -204,33 +211,42 @@ where
                 }
             }
 
-            crate::store::upsert_issue(_conn, &row)?;
+            rows.push(row);
+        }
+
+        let transaction = _conn.unchecked_transaction()?;
+        for row in &rows {
+            crate::store::upsert_issue(&transaction, row)?;
             stats.issues += 1;
-            persisted_since_update += 1;
-            if persisted_since_update >= PROGRESS_BATCH {
-                _on_progress(page, &stats);
-                emitted_for_page = true;
-                persisted_since_update = 0;
-            }
+            stats.not_modified = false;
         }
-        if persisted_since_update > 0 || !emitted_for_page {
-            _on_progress(page, &stats);
-        }
-        if reached_previous_cursor {
+        transaction.commit()?;
+        _on_progress(page, &stats);
+        if reached_previous_cursor || is_last_page {
             break;
         }
         page += 1;
     }
 
-    if sync_completed {
+    if stats.incomplete_reason.is_none() {
         let next_cursor = latest_seen_updated_at
             .as_deref()
             .or(previous_cursor.as_deref());
-        let next_etag = first_page_etag.as_deref().or(previous_etag.as_deref());
+        // Changing `since` changes the request the ETag belongs to.
+        let next_etag = if next_cursor == previous_cursor.as_deref() {
+            first_page_etag.as_deref()
+        } else {
+            None
+        };
         crate::store::update_repo_sync_state(_conn, repo_row.id, next_cursor, next_etag)?;
+        repo_row.updated_at = next_cursor.map(ToString::to_string);
+        repo_row.etag = next_etag.map(ToString::to_string);
     }
 
-    Ok(stats)
+    Ok(SyncResult {
+        repo: repo_row,
+        stats,
+    })
 }
 
 #[cfg(test)]

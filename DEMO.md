@@ -236,6 +236,7 @@ Issue closed with preset comment:
 | Edit assignees | `Shift+A` |
 | Close item | `dd` |
 | Open in browser | `o` |
+| Copy URL | `y` |
 | Checkout PR | `v` |
 | Mark file viewed | `w` |
 | Collapse hunk | `c` |

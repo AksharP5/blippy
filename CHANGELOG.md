@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12](https://github.com/AksharP5/blippy/compare/v0.1.11...v0.1.12) - 2026-10-04
+
+### Fixed
+
+- prevent stale GitHub state and lost updates ([#36](https://github.com/AksharP5/blippy/pull/36))
+
+## [0.1.11](https://github.com/AksharP5/blippy/compare/v0.1.10...v0.1.11) - 2026-08-19
+
+### Fixed
+
+- harden sync and failure handling
+
+## [0.1.10](https://github.com/AksharP5/blippy/compare/v0.1.9...v0.1.10) - 2026-08-18
+
+### Added
+
+- copy GitHub URLs to clipboard ([#31](https://github.com/AksharP5/blippy/pull/31))
+
+## [0.1.9](https://github.com/AksharP5/blippy/compare/v0.1.8...v0.1.9) - 2026-08-18
+
+### Fixed
+
+- remove vulnerable Rust dependencies ([#25](https://github.com/AksharP5/blippy/pull/25))
+
+### Other
+
+- limit Dependabot to lockfile updates ([#30](https://github.com/AksharP5/blippy/pull/30))
+
+## [0.1.8](https://github.com/AksharP5/blippy/compare/v0.1.7...v0.1.8) - 2026-08-18
+
+### Fixed
+
+- let space toggle metadata picker items ([#23](https://github.com/AksharP5/blippy/pull/23))
+
+### Other
+
+- *(ci)* update release actions ([#22](https://github.com/AksharP5/blippy/pull/22))
+
 ## [0.1.7](https://github.com/AksharP5/blippy/compare/v0.1.6...v0.1.7) - 2026-03-08
 
 ### Fixed

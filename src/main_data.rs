@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 pub(super) fn initialize_app(app: &mut App, conn: &rusqlite::Connection) -> Result<()> {
     let repo_root = crate::git::repo_root()?;
@@ -55,6 +56,7 @@ pub(super) fn load_issues_for_slug(
         }
     };
     let issues = list_issues(conn, repo_row.id)?;
+    app.set_current_repo_id(repo_row.id);
     app.set_issues(issues);
     app.set_status(format!("{}/{}", owner, repo));
     Ok(())
@@ -90,29 +92,42 @@ pub(super) fn start_scan(event_tx: Sender<AppEvent>, mode: ScanMode) -> Result<(
     let cwd = env::current_dir()?;
     let home = home_dir().unwrap_or(cwd.clone());
     thread::spawn(move || {
-        let conn = match crate::store::open_db() {
-            Ok(conn) => conn,
-            Err(_) => return,
+        let result = run_scan(&cwd, &home, mode, &event_tx);
+        let event = match result {
+            Ok(failures) => AppEvent::ScanFinished { failures },
+            Err(error) => AppEvent::ScanFailed {
+                message: error.to_string(),
+            },
         };
-
-        if matches!(mode, ScanMode::QuickOnly | ScanMode::QuickAndFull) {
-            let quick = quick_scan(&cwd, 4, 2).unwrap_or_default();
-            for repo in &quick {
-                let _ = index_repo_path(&conn, &repo.path);
-            }
-            let _ = event_tx.send(AppEvent::ReposUpdated);
-        }
-
-        if matches!(mode, ScanMode::FullOnly | ScanMode::QuickAndFull) {
-            let full = crate::discovery::full_scan(&home).unwrap_or_default();
-            for repo in &full {
-                let _ = index_repo_path(&conn, &repo.path);
-            }
-            let _ = event_tx.send(AppEvent::ReposUpdated);
-        }
-
-        let _ = event_tx.send(AppEvent::ScanFinished);
+        let _ = event_tx.send(event);
     });
 
     Ok(())
+}
+
+fn run_scan(
+    cwd: &Path,
+    home: &Path,
+    mode: ScanMode,
+    event_tx: &Sender<AppEvent>,
+) -> Result<Vec<String>> {
+    let conn = crate::store::open_db()?;
+    let mut failures = std::collections::BTreeMap::new();
+
+    if matches!(mode, ScanMode::QuickOnly | ScanMode::QuickAndFull) {
+        let repos = quick_scan(cwd, 4, 2)?;
+        let stats = index_repo_paths(&conn, repos.iter().map(|repo| repo.path.as_path()))?;
+        failures.extend(stats.failures);
+        let _ = event_tx.send(AppEvent::ReposUpdated);
+    }
+
+    if matches!(mode, ScanMode::FullOnly | ScanMode::QuickAndFull) {
+        let repos = crate::discovery::full_scan(home)?;
+        let stats = index_repo_paths(&conn, repos.iter().map(|repo| repo.path.as_path()))?;
+        failures.extend(stats.failures);
+    }
+
+    prune_missing_local_repos(&conn)?;
+    let _ = event_tx.send(AppEvent::ReposUpdated);
+    Ok(failures.into_values().collect())
 }

@@ -8,6 +8,7 @@
 # - single chars: "q", "/", "1"
 # - named keys: "enter", "esc", "tab", "space", "left", "right", "home", "end", "up", "down", "pageup", "pagedown", "backspace"
 # - modifiers: "ctrl+...", "alt+...", "shift+..."
+# Plain characters remain text in editors and search fields. Use a modified or named key there.
 
 [keybinds]
 quit = "ctrl+c"
@@ -50,6 +51,7 @@ back_escape = "esc"
 move_up = "k"
 move_down = "j"
 open_browser = "o"
+copy_url = "y"
 open_linked_pr_browser = "shift+o"
 open_linked_pr_tui = "shift+p"
 checkout_pr = "v"

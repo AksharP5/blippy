@@ -23,7 +23,7 @@ pub(crate) fn maybe_start_repo_sync(
     };
 
     super::repo_sync::start_repo_sync(owner, repo, token.to_string(), event_tx);
-    app.set_syncing(true);
+    app.begin_repo_sync();
     app.set_status("Syncing".to_string());
     Ok(())
 }
@@ -46,7 +46,7 @@ pub(crate) fn maybe_start_repo_permissions_sync(
     };
 
     super::repo_sync::start_fetch_repo_permissions(owner, repo, token.to_string(), event_tx);
-    app.set_repo_permissions_syncing(true);
+    app.begin_repo_permissions_sync();
 }
 
 pub(crate) fn maybe_start_repo_labels_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) {
@@ -63,7 +63,7 @@ pub(crate) fn maybe_start_repo_labels_sync(app: &mut App, token: &str, event_tx:
     };
 
     super::repo_sync::start_fetch_labels(owner, repo, token.to_string(), event_tx);
-    app.set_repo_labels_syncing(true);
+    app.begin_repo_labels_sync();
 }
 
 pub(crate) fn maybe_start_issue_poll(app: &mut App, last_poll: &mut Instant) {
@@ -123,7 +123,7 @@ pub(crate) fn maybe_start_comment_poll(
         token.to_string(),
         event_tx,
     );
-    app.set_comment_syncing(true);
+    app.begin_comment_sync();
     *last_poll = Instant::now();
     Ok(())
 }
@@ -169,7 +169,7 @@ pub(crate) fn maybe_start_pull_request_files_sync(
         token.to_string(),
         event_tx,
     );
-    app.set_pull_request_files_syncing(true);
+    app.begin_pull_request_files_sync();
     app.set_status("Loading pull request changes".to_string());
     Ok(())
 }
@@ -215,6 +215,6 @@ pub(crate) fn maybe_start_pull_request_review_comments_sync(
         token.to_string(),
         event_tx,
     );
-    app.set_pull_request_review_comments_syncing(true);
+    app.begin_pull_request_review_comments_sync();
     Ok(())
 }

@@ -88,7 +88,7 @@ pub(super) fn fit_inline(value: &str, max: usize) -> String {
     if max == 0 {
         return String::new();
     }
-    if value.chars().count() <= max {
+    if Span::raw(value).width() <= max {
         return value.to_string();
     }
     ellipsize(value, max)
@@ -218,15 +218,15 @@ pub(super) fn split_diff_horizontal_limit(
     let mut max_offset = 0usize;
     for row in rows {
         if matches!(row.kind, DiffKind::Hunk | DiffKind::Meta) {
-            let raw_width = row.raw.chars().count();
+            let raw_width = Span::raw(row.raw.as_str()).width();
             max_offset = max_offset.max(raw_width.saturating_sub(hunk_width));
             continue;
         }
-        let left = row.left.chars().count().saturating_sub(left_content_width);
-        let right = row
-            .right
-            .chars()
-            .count()
+        let left = Span::raw(row.left.as_str())
+            .width()
+            .saturating_sub(left_content_width);
+        let right = Span::raw(row.right.as_str())
+            .width()
             .saturating_sub(right_content_width);
         max_offset = max_offset.max(left.max(right));
     }
@@ -352,8 +352,8 @@ pub(super) fn render_split_diff_row(
 
     let left_cell = format!("{}{}", left_prefix, left_text);
     let right_cell = format!("{}{}", right_prefix, right_text);
-    let left_cell = format!("{:width$}", left_cell, width = ctx.left_width);
-    let right_cell = format!("{:width$}", right_cell, width = ctx.right_width);
+    let left_cell = fit_cell(left_cell.as_str(), ctx.left_width);
+    let right_cell = fit_cell(right_cell.as_str(), ctx.right_width);
 
     let indicator = if ctx.selected {
         match ctx.selected_side {
@@ -431,21 +431,21 @@ pub(super) fn render_inline_review_comment(
 
     let muted_left = " ".repeat(ctx.left_width);
     let muted_right = " ".repeat(ctx.right_width);
-    let comment_width = ctx.width.saturating_sub(8);
-    let text = ellipsize(text.as_str(), comment_width);
     let comment_style = Style::default()
         .fg(theme.border_popup)
         .bg(theme.bg_panel_alt);
     if ctx.side == ReviewSide::Left {
-        let left_text = format!("{:width$}", text, width = ctx.left_width);
+        let left_text = fit_cell(text.as_str(), ctx.left_width);
         Line::from(vec![
+            Span::raw("  "),
             Span::styled(left_text, comment_style),
             Span::styled(" | ", Style::default().fg(theme.border_panel)),
             Span::styled(muted_right, Style::default().fg(theme.text_muted)),
         ])
     } else {
-        let right_text = format!("{:width$}", text, width = ctx.right_width);
+        let right_text = fit_cell(text.as_str(), ctx.right_width);
         Line::from(vec![
+            Span::raw("  "),
             Span::styled(muted_left, Style::default().fg(theme.text_muted)),
             Span::styled(" | ", Style::default().fg(theme.border_panel)),
             Span::styled(right_text, comment_style),
@@ -499,15 +499,10 @@ pub(super) fn pending_issue_span(pending: Option<&str>, theme: &ThemePalette) ->
 
 pub(super) fn label_chip_spans(
     app: &App,
-    labels_csv: &str,
+    labels: &[String],
     max_labels: usize,
     theme: &ThemePalette,
 ) -> Vec<Span<'static>> {
-    let labels = labels_csv
-        .split(',')
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .collect::<Vec<&str>>();
     if labels.is_empty() {
         return vec![Span::styled("none", Style::default().fg(theme.text_muted))];
     }
@@ -574,50 +569,47 @@ pub(super) fn parse_hex_color(value: Option<&str>) -> Option<(u8, u8, u8)> {
 }
 
 pub(super) fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
-    if lines.is_empty() {
-        return 0;
-    }
-    let content_width = width.max(1) as usize;
-    lines
-        .iter()
-        .map(|line| {
-            let line_width = line
-                .spans
-                .iter()
-                .map(|span| span.content.chars().count())
-                .sum::<usize>()
-                .max(1);
-            line_width.div_ceil(content_width)
-        })
-        .sum()
+    Paragraph::new(Text::from(lines.to_vec()))
+        .wrap(Wrap { trim: false })
+        .line_count(width)
 }
 
 pub(super) fn ellipsize(input: &str, max: usize) -> String {
-    if max == 0 {
-        return String::new();
-    }
-    if input.chars().count() <= max {
-        return input.to_string();
-    }
-    input.chars().take(max).collect::<String>()
+    clip_horizontal(input, 0, max)
 }
 
 pub(super) fn clip_horizontal(input: &str, offset: usize, max: usize) -> String {
     if max == 0 {
         return String::new();
     }
-    let chars = input.chars().collect::<Vec<char>>();
-    if chars.len() <= max && offset == 0 {
+    let span = Span::raw(input);
+    if span.width() <= max && offset == 0 {
         return input.to_string();
     }
-    if offset >= chars.len() {
-        return String::new();
+    let mut column = 0usize;
+    let end = offset.saturating_add(max);
+    let mut visible = String::new();
+    for grapheme in span.styled_graphemes(Style::default()) {
+        if column >= end {
+            break;
+        }
+        let next = column.saturating_add(Span::raw(grapheme.symbol).width());
+        if column >= offset && next <= end {
+            visible.push_str(grapheme.symbol);
+        } else if next > offset {
+            let overlap = next.min(end).saturating_sub(column.max(offset));
+            visible.extend(std::iter::repeat_n(' ', overlap));
+        }
+        column = next;
     }
-    let visible = chars.iter().skip(offset).take(max).collect::<String>();
-    if visible.chars().count() <= max {
-        return visible;
-    }
-    ellipsize(visible.as_str(), max)
+    visible
+}
+
+fn fit_cell(input: &str, width: usize) -> String {
+    let mut content = clip_horizontal(input, 0, width);
+    let padding = width.saturating_sub(Span::raw(content.as_str()).width());
+    content.extend(std::iter::repeat_n(' ', padding));
+    content
 }
 
 pub(super) fn comment_header(
@@ -670,16 +662,222 @@ pub(super) fn format_datetime(value: Option<&str>) -> Option<String> {
     Some(raw.to_string())
 }
 
-pub(super) fn editor_cursor_position(text: &str) -> (u16, u16) {
-    let mut row = 0u16;
-    let mut col = 0u16;
-    for ch in text.chars() {
-        if ch == '\n' {
-            row = row.saturating_add(1);
-            col = 0;
-            continue;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{LinkedPickerTarget, PullRequestFile};
+    use crate::config::{CommentDefault, Config};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn wrapped_line_count_matches_word_wrap_and_terminal_width() {
+        for (text, width, expected) in [("aaaaaa bbbbbb cccccc dddddd", 10, 4), ("界界界界", 4, 2)]
+        {
+            assert_eq!(wrapped_line_count(&[Line::from(text)], width), expected);
         }
-        col = col.saturating_add(1);
     }
-    (row, col)
+
+    #[test]
+    fn search_cursor_uses_unicode_display_width() {
+        for view in [View::RepoPicker, View::Issues] {
+            for query in ["界", "e\u{301}"] {
+                let mut app = App::new(Config::default());
+                app.set_view(view);
+                app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+                for ch in query.chars() {
+                    app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+                }
+                let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("test terminal");
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, &mut app))
+                    .expect("draw search input");
+                let (x, y) = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .position(|cell| cell.symbol() == query)
+                    .map(|index| (index as u16 % 80, index as u16 / 80))
+                    .expect("search query rendered");
+                let cursor = terminal.get_cursor_position().expect("search cursor");
+                assert_eq!(
+                    (cursor.x, cursor.y),
+                    (x + Span::raw(query).width() as u16, y)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn split_diff_rows_fit_wide_text_within_their_columns() {
+        let row =
+            crate::pr_diff::parse_patch(Some("@@ -1 +1 @@\n-界界界界界\n+界界界界界")).remove(1);
+        let ctx = DiffRowContext {
+            selected: false,
+            in_visual_range: false,
+            selected_side: ReviewSide::Right,
+            left_width: 10,
+            right_width: 10,
+            horizontal_offset: 0,
+        };
+        let line = render_split_diff_row(&row, &ctx, resolve_theme(None));
+        assert_eq!(line.width(), 25);
+        assert_eq!(wrapped_line_count(&[line], 25), 1);
+        assert_eq!(clip_horizontal("界a", 1, 2), " a");
+        assert_eq!(ellipsize("e\u{301}ab", 2), "e\u{301}a");
+    }
+
+    #[test]
+    fn inline_review_comments_fit_their_diff_side_without_wrapping() {
+        for side in [ReviewSide::Left, ReviewSide::Right] {
+            let ctx = CommentContext {
+                side,
+                resolved: false,
+                width: 25,
+                left_width: 10,
+                right_width: 10,
+                selected: false,
+            };
+            let line = render_inline_review_comment(
+                "author",
+                "a long review comment",
+                &ctx,
+                resolve_theme(None),
+            );
+            assert_eq!(line.width(), 25);
+            assert_eq!(wrapped_line_count(std::slice::from_ref(&line), 25), 1);
+            let mut terminal = Terminal::new(TestBackend::new(25, 1)).expect("test terminal");
+            terminal
+                .draw(|frame| frame.render_widget(Paragraph::new(line), frame.area()))
+                .expect("draw review comment");
+            assert_eq!(terminal.backend().buffer()[(13, 0)].symbol(), "|");
+        }
+    }
+
+    fn click_visible_item(app: &mut App, text: &str) {
+        app.on_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        let mut terminal = Terminal::new(TestBackend::new(120, 24)).expect("test terminal");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, app))
+            .expect("draw UI");
+        let (column, row) = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(120)
+            .enumerate()
+            .find_map(|(row, cells)| {
+                let line = cells.iter().map(|cell| cell.symbol()).collect::<String>();
+                line.find(text).map(|column| (column as u16, row as u16))
+            })
+            .expect("item visible in rendered list");
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    #[test]
+    fn clicking_scrolled_pr_file_selects_the_displayed_file() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            (0..30)
+                .map(|index| PullRequestFile {
+                    filename: format!("file{index:02}.rs"),
+                    status: "modified".to_string(),
+                    additions: 0,
+                    deletions: 0,
+                    patch: None,
+                })
+                .collect(),
+        );
+        click_visible_item(&mut app, "file28.rs");
+        assert_eq!(app.selected_pull_request_file(), 28);
+    }
+
+    #[test]
+    fn clicking_scrolled_issue_selects_the_displayed_issue() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.set_issues(
+            (1..=30)
+                .map(|number| crate::store::IssueRow {
+                    id: number,
+                    repo_id: 1,
+                    number,
+                    state: "open".to_string(),
+                    title: format!("issue{number:02}"),
+                    body: String::new(),
+                    labels: Vec::new(),
+                    assignees: String::new(),
+                    comments_count: 0,
+                    updated_at: None,
+                    is_pr: false,
+                })
+                .collect(),
+        );
+        click_visible_item(&mut app, "issue02");
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(2));
+    }
+
+    #[test]
+    fn clicking_scrolled_label_toggles_the_displayed_label() {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            (0..30).map(|index| format!("label{index:02}")).collect(),
+            &[],
+        );
+        click_visible_item(&mut app, "label28");
+        assert_eq!(app.selected_labels(), vec!["label28"]);
+    }
+
+    #[test]
+    fn clicking_scrolled_assignee_toggles_the_displayed_assignee() {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            (0..30).map(|index| format!("user{index:02}")).collect(),
+            "",
+        );
+        click_visible_item(&mut app, "user28");
+        assert_eq!(app.selected_assignees(), vec!["user28"]);
+    }
+
+    #[test]
+    fn clicking_scrolled_preset_selects_the_displayed_preset() {
+        let mut app = App::new(Config {
+            comment_defaults: (0..30)
+                .map(|index| CommentDefault {
+                    name: format!("preset{index:02}"),
+                    body: String::new(),
+                })
+                .collect(),
+            ..Config::default()
+        });
+        app.set_view(View::CommentPresetPicker);
+        click_visible_item(&mut app, "preset28");
+        assert_eq!(app.selected_preset(), 30);
+    }
+
+    #[test]
+    fn clicking_scrolled_linked_item_selects_the_displayed_number() {
+        let mut app = App::new(Config::default());
+        app.open_linked_picker(
+            View::Issues,
+            LinkedPickerTarget::IssueTui,
+            (1..=30).collect(),
+        );
+        click_visible_item(&mut app, "#29");
+        assert_eq!(app.selected_linked_picker_number(), Some(29));
+        click_visible_item(&mut app, "#30");
+        assert_eq!(app.selected_linked_picker_number(), Some(30));
+    }
 }

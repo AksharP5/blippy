@@ -50,6 +50,7 @@ cargo install --git https://github.com/AksharP5/blippy
 
 - `blippy`: launch the TUI
 - `blippy --version`: show version information
+- `blippy --help`: show command help
 - `blippy sync`: scan local repos and cache GitHub remotes
 - `blippy auth reset`: remove stored auth token from keychain
 - `blippy cache reset`: remove local cache database
@@ -57,6 +58,7 @@ cargo install --git https://github.com/AksharP5/blippy
 ## What You Can Do
 
 - Browse and manage issues and pull requests
+- Copy repository, issue, and pull request URLs to the system clipboard
 - Create issues from the TUI with a confirmation step
 - Open linked issues/PRs in TUI or browser
 - Review PR diffs with inline comments and thread resolution
@@ -74,6 +76,8 @@ See [FEATURES.md](FEATURES.md) for a full feature breakdown.
 - Full key reference: [KEYBINDS.md](KEYBINDS.md)
 
 ## Configuration
+
+`XDG_CONFIG_HOME` overrides the config directory when nonempty. Otherwise, `~` uses `HOME`, falling back to `USERPROFILE` on Windows.
 
 - Config file: `~/.config/blippy/config.toml`
 - Keybind overrides: `~/.config/blippy/keybinds.toml`

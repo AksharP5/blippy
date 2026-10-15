@@ -70,7 +70,7 @@ impl App {
 
         let title = issue.title.to_ascii_lowercase();
         let body = issue.body.to_ascii_lowercase();
-        let labels = issue.labels.to_ascii_lowercase();
+        let labels = issue.labels.join(",").to_ascii_lowercase();
         let assignees = issue.assignees.to_ascii_lowercase();
         let number = issue.number.to_string();
         let state = issue.state.to_ascii_lowercase();

@@ -37,6 +37,7 @@ struct RenderState {
     list_depth: usize,
     blockquote_depth: usize,
     in_code_block: bool,
+    table_column: usize,
 }
 
 impl RenderState {
@@ -47,6 +48,7 @@ impl RenderState {
             list_depth: 0,
             blockquote_depth: 0,
             in_code_block: false,
+            table_column: 0,
         }
     }
 
@@ -119,6 +121,16 @@ impl RenderState {
             Tag::Paragraph => {
                 self.ensure_blank_line();
             }
+            Tag::TableHead | Tag::TableRow => {
+                self.new_line();
+                self.table_column = 0;
+            }
+            Tag::TableCell => {
+                if self.table_column > 0 {
+                    self.push_text(" | ");
+                }
+                self.table_column += 1;
+            }
             _ => {}
         }
     }
@@ -155,6 +167,7 @@ impl RenderState {
             TagEnd::Paragraph => {
                 self.new_line();
             }
+            TagEnd::TableHead | TagEnd::TableRow => self.new_line(),
             _ => {}
         }
     }
@@ -205,7 +218,14 @@ impl RenderState {
         }
 
         let style = self.current_style();
-        self.push_span(Span::styled(text.to_string(), style));
+        for (index, line) in text.split('\n').enumerate() {
+            if index > 0 {
+                self.new_line();
+            }
+            if !line.is_empty() {
+                self.push_span(Span::styled(line.to_string(), style));
+            }
+        }
     }
 
     fn push_span(&mut self, span: Span<'static>) {
@@ -236,6 +256,11 @@ fn heading_style(level: HeadingLevel) -> Style {
 #[cfg(test)]
 mod tests {
     use super::render;
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        widgets::{Paragraph, Wrap},
+    };
 
     #[test]
     fn renders_heading_and_list() {
@@ -251,5 +276,46 @@ mod tests {
         assert!(text.contains("Title"));
         assert!(text.contains("- one"));
         assert!(text.contains("- two"));
+    }
+
+    #[test]
+    fn renders_table_rows_and_empty_cells_separately() {
+        let rendered = render(
+            "| Name | Status | Notes |\n| --- | --- | --- |\n| blippy | open | |\n| other | closed | done |",
+        );
+        let rows = rendered
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert!(rows.contains(&"Name | Status | Notes".to_string()));
+        assert!(rows.contains(&"blippy | open | ".to_string()));
+        assert!(rows.contains(&"other | closed | done".to_string()));
+    }
+
+    #[test]
+    fn renders_code_block_line_breaks_blank_lines_and_indentation() {
+        let rendered = render("```rust\nfirst();\n  second();\n\nthird();\n```");
+        let mut terminal = Terminal::new(TestBackend::new(30, 6)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Paragraph::new(rendered.lines.clone()).wrap(Wrap { trim: false }),
+                    frame.area(),
+                );
+            })
+            .expect("render code block");
+
+        let rows = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(30)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            ["", "first();", "  second();", "", "third();", ""].map(|line| format!("{line:30}")),
+        );
     }
 }

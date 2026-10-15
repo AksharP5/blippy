@@ -1,5 +1,7 @@
 use anyhow::{Result, anyhow};
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
+use std::collections::HashSet;
+use std::time::Duration;
 
 mod comments;
 mod issues;
@@ -32,6 +34,7 @@ impl GitHubClient {
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            .timeout(Duration::from_secs(30))
             .build()?;
         Ok(Self {
             client,
@@ -60,5 +63,52 @@ impl GitHubClient {
             return Err(anyhow!("graphql error: {}", errors));
         }
         Ok(payload)
+    }
+}
+
+fn next_graphql_cursor(
+    page_info: &serde_json::Value,
+    seen: &mut HashSet<String>,
+) -> Result<Option<String>> {
+    if !page_info["hasNextPage"].as_bool().unwrap_or(false) {
+        return Ok(None);
+    }
+    let cursor = page_info["endCursor"]
+        .as_str()
+        .ok_or_else(|| anyhow!("GitHub pagination returned hasNextPage without an end cursor"))?;
+    if !seen.insert(cursor.to_string()) {
+        return Err(anyhow!("GitHub pagination repeated an end cursor"));
+    }
+    Ok(Some(cursor.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graphql_pagination_rejects_missing_or_repeated_cursors() {
+        let mut seen = HashSet::new();
+        assert!(
+            next_graphql_cursor(
+                &serde_json::json!({
+                    "hasNextPage": true,
+                    "endCursor": null,
+                }),
+                &mut seen
+            )
+            .is_err()
+        );
+        let page_info = serde_json::json!({"hasNextPage": true, "endCursor": "next"});
+        assert_eq!(
+            next_graphql_cursor(&page_info, &mut seen).expect("next cursor"),
+            Some("next".to_string())
+        );
+        assert!(next_graphql_cursor(&page_info, &mut seen).is_err());
+        assert_eq!(
+            next_graphql_cursor(&serde_json::json!({"hasNextPage": false}), &mut seen)
+                .expect("last page"),
+            None
+        );
     }
 }

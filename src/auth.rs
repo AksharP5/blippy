@@ -132,7 +132,7 @@ impl AuthSources for SystemAuth {
 
     fn clear_token(&self) -> Result<bool> {
         let entry = self.keyring_entry()?;
-        match entry.delete_password() {
+        match entry.delete_credential() {
             Ok(()) => Ok(true),
             Err(error) => {
                 if matches!(error, keyring::Error::NoEntry) {

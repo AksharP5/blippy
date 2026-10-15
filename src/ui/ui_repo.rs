@@ -69,7 +69,7 @@ pub(super) fn draw_repo_picker(
         if content.width > 0 && content.height > 1 {
             let cursor_x = content
                 .x
-                .saturating_add((8 + query_display.chars().count()) as u16)
+                .saturating_add((8 + Span::raw(query_display.as_str()).width()) as u16)
                 .min(content.x.saturating_add(content.width.saturating_sub(1)));
             let cursor_y = content.y.saturating_add(1);
             frame.set_cursor_position((cursor_x, cursor_y));

@@ -6,6 +6,7 @@ pub(super) use super::main_action_utils::issue_url;
 
 pub(super) fn handle_actions(
     app: &mut App,
+    clipboard: &mut crate::clipboard::SystemClipboard,
     conn: &rusqlite::Connection,
     token: &str,
     event_tx: Sender<AppEvent>,
@@ -44,7 +45,6 @@ pub(super) fn handle_actions(
             app.reset_issue_detail_scroll();
             load_comments_for_issue(app, conn, issue_id)?;
             app.set_view(View::IssueDetail);
-            app.set_comment_syncing(false);
             app.request_comment_sync();
             if is_pr {
                 app.request_pull_request_files_sync();
@@ -88,6 +88,9 @@ pub(super) fn handle_actions(
             } else {
                 app.set_status("No issue selected".to_string());
             }
+        }
+        AppAction::CopyUrl => {
+            copy_selected_url(app, |url| clipboard.set_text(url));
         }
         AppAction::CheckoutPullRequest => {
             checkout_pull_request(app)?;
@@ -242,7 +245,7 @@ pub(super) fn handle_actions(
             app.set_current_issue(issue_id, issue_number);
             let labels = selected_issue_labels(app).unwrap_or_default();
             let options = label_options_for_repo(app);
-            app.open_label_picker(return_view, options, labels.as_str());
+            app.open_label_picker(return_view, options, &labels);
             app.request_repo_labels_sync();
         }
         AppAction::EditAssignees => {
@@ -288,6 +291,9 @@ pub(super) fn handle_actions(
         }
         AppAction::CloseIssue => {
             if let Some((issue_id, issue_number, _)) = selected_issue_for_action(app) {
+                if !ensure_issue_action_available(app, issue_number) {
+                    return Ok(());
+                }
                 app.set_current_issue(issue_id, issue_number);
             }
             app.set_selected_preset(0);
@@ -303,8 +309,24 @@ pub(super) fn handle_actions(
         }
         AppAction::SavePreset => {
             save_preset_from_editor(app)?;
-            app.set_view(View::CommentPresetPicker);
         }
     }
     Ok(())
+}
+
+pub(super) fn copy_selected_url(app: &mut App, set_text: impl FnOnce(&str) -> Result<()>) {
+    let url = match selected_url(app) {
+        Some(url) => url,
+        None => {
+            app.set_status("No URL available".to_string());
+            return;
+        }
+    };
+
+    if let Err(error) = set_text(&url) {
+        app.set_status(format!("Copy failed: {}", error));
+        return;
+    }
+
+    app.set_transient_status("URL copied".to_string(), Duration::from_secs(2));
 }
