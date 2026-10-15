@@ -5,6 +5,31 @@ impl App {
         if key.is_release() {
             return;
         }
+        if self.search.help_overlay_visible {
+            let key = match key.code {
+                KeyCode::Home | KeyCode::End => Some(key),
+                _ => self.keybinds.remap_key(key),
+            };
+            let Some(key) = key else {
+                return;
+            };
+            match key.code {
+                KeyCode::Char('?') | KeyCode::Esc => self.search.help_overlay_visible = false,
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.should_quit = true;
+                }
+                KeyCode::Char('j') | KeyCode::Down if key.modifiers.is_empty() => {
+                    self.scroll_help(1)
+                }
+                KeyCode::Char('k') | KeyCode::Up if key.modifiers.is_empty() => {
+                    self.scroll_help(-1)
+                }
+                KeyCode::Home => self.search.help_scroll = 0,
+                KeyCode::End => self.search.help_scroll = self.search.help_max_scroll,
+                _ => {}
+            }
+            return;
+        }
         if matches!(self.view, View::CommentPresetName | View::CommentEditor) {
             let Some(key) = self.keybinds.remap_text_key(key) else {
                 return;
@@ -64,11 +89,8 @@ impl App {
         }
 
         if key.code == KeyCode::Char('?') {
-            self.search.help_overlay_visible = !self.search.help_overlay_visible;
-            return;
-        }
-        if self.search.help_overlay_visible && key.code == KeyCode::Esc {
-            self.search.help_overlay_visible = false;
+            self.search.help_overlay_visible = true;
+            self.search.help_scroll = 0;
             return;
         }
 

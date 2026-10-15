@@ -11,6 +11,18 @@ blippy is keyboard-first. Mouse/trackpad support exists, but it can be finicky a
 - `j` / `k` (or arrow down/up): Move selection or scroll
 - `gg` / `G`: Jump to top/bottom
 
+## Help overlay
+
+While help is open, keyboard and mouse input stay in the overlay.
+
+- `j` / `k` or arrow down/up: Scroll help
+- Mouse wheel: Scroll help
+- `Home` / `End`: Jump to the top/bottom of help
+- `?` or `Esc`: Close help
+- `Ctrl+c`: Quit
+
+Configured movement, escape and quit bindings also apply. Scroll and close hints stay visible at the bottom.
+
 ## Repo Picker
 
 - `/`: Start repository search
