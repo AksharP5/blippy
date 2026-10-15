@@ -437,6 +437,7 @@ enum AppEvent {
     },
     PullRequestFilesUpdated {
         issue_id: i64,
+        head_sha: String,
         files: Vec<PullRequestFile>,
         pull_request_id: Option<String>,
         viewed_files: HashSet<String>,

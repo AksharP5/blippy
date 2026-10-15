@@ -192,6 +192,7 @@ fn m_triggers_pull_request_review_comment_in_review_view() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -223,6 +224,7 @@ fn review_comment_editor_submit_action_is_emitted() {
     app.open_pull_request_review_comment_editor(
         View::PullRequestFiles,
         PullRequestReviewTarget {
+            commit_id: "head-a".to_string(),
             path: "src/main.rs".to_string(),
             line: 10,
             side: ReviewSide::Right,
@@ -301,6 +303,7 @@ fn w_emits_toggle_pull_request_file_viewed_action() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -451,6 +454,7 @@ fn diff_horizontal_scroll_uses_keyboard_and_mouse() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -593,6 +597,7 @@ fn mouse_click_pr_file_row_selects_file() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![
             PullRequestFile {
                 filename: "src/a.rs".to_string(),
@@ -628,6 +633,7 @@ fn mouse_click_diff_row_sets_side_and_line() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -664,6 +670,7 @@ fn selected_pull_request_file_view_toggle_flips_current_state() {
     let mut app = App::new(Config::default());
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),
@@ -695,6 +702,7 @@ fn c_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
             1,
+            "head-a".to_string(),
             vec![PullRequestFile {
                 filename: "src/main.rs".to_string(),
                 status: "modified".to_string(),

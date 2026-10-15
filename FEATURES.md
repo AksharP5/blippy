@@ -51,6 +51,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Horizontal diff panning for long lines
 - Mark files viewed/unviewed, ignoring repeat toggles until GitHub responds
 - Visual multiline range selection within one diff hunk for review comments
+- Review comments keep the commit shown when the editor opened. If the PR changes while files load, refresh with `r` to retry.
 
 ## Comments and Review Threads
 

@@ -226,8 +226,14 @@ impl App {
         }
     }
 
-    pub fn set_pull_request_files(&mut self, issue_id: i64, files: Vec<PullRequestFile>) {
+    pub fn set_pull_request_files(
+        &mut self,
+        issue_id: i64,
+        head_sha: String,
+        files: Vec<PullRequestFile>,
+    ) {
         self.pull_request.pull_request_files_issue_id = Some(issue_id);
+        self.pull_request.pull_request_files_head_sha = Some(head_sha);
         self.pull_request.pull_request_id = None;
         self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files = files;
@@ -362,6 +368,7 @@ impl App {
 
     pub(super) fn reset_pull_request_state(&mut self) {
         self.pull_request.pull_request_files_issue_id = None;
+        self.pull_request.pull_request_files_head_sha = None;
         self.pull_request.pull_request_id = None;
         self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files.clear();
@@ -607,6 +614,7 @@ impl App {
         file_path: &str,
         rows: &[crate::pr_diff::DiffRow],
     ) -> Option<PullRequestReviewTarget> {
+        let commit_id = self.pull_request.pull_request_files_head_sha.as_ref()?;
         if rows.is_empty() {
             return None;
         }
@@ -637,6 +645,7 @@ impl App {
             match row.kind {
                 DiffKind::Added | DiffKind::Context => {
                     return Some(PullRequestReviewTarget {
+                        commit_id: commit_id.clone(),
                         path: file_path.to_string(),
                         line: row.new_line?,
                         side: ReviewSide::Right,
@@ -646,6 +655,7 @@ impl App {
                 }
                 DiffKind::Removed => {
                     return Some(PullRequestReviewTarget {
+                        commit_id: commit_id.clone(),
                         path: file_path.to_string(),
                         line: row.old_line?,
                         side: ReviewSide::Left,
@@ -665,6 +675,7 @@ impl App {
         };
 
         Some(PullRequestReviewTarget {
+            commit_id: commit_id.clone(),
             path: file_path.to_string(),
             line,
             side,

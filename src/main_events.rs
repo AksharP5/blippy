@@ -207,6 +207,7 @@ pub(super) fn handle_events(
             }
             AppEvent::PullRequestFilesUpdated {
                 issue_id,
+                head_sha,
                 files,
                 pull_request_id,
                 viewed_files,
@@ -215,7 +216,7 @@ pub(super) fn handle_events(
                 app.finish_pull_request_files_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
                     let count = files.len();
-                    app.set_pull_request_files(issue_id, files);
+                    app.set_pull_request_files(issue_id, head_sha, files);
                     if let Some(message) = view_state_error {
                         app.set_status(format!(
                             "Loaded {} changed files; view state unavailable: {}",

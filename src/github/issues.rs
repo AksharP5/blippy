@@ -11,7 +11,7 @@ impl GitHubClient {
         title: &str,
         body: Option<&str>,
     ) -> Result<ApiIssue> {
-        let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
+        let url = format!("{}/repos/{}/{}/issues", self.api_base, owner, repo);
         let mut payload = serde_json::json!({ "title": title });
         if let Some(body) = body {
             payload["body"] = serde_json::Value::String(body.to_string());
@@ -36,7 +36,7 @@ impl GitHubClient {
         if_none_match: Option<&str>,
         since: Option<&str>,
     ) -> Result<ApiIssuesPageResult> {
-        let url = format!("{}/repos/{}/{}/issues", API_BASE, owner, repo);
+        let url = format!("{}/repos/{}/{}/issues", self.api_base, owner, repo);
         let mut request = self.client.get(url).bearer_auth(&self.token).query(&[
             ("state", "all"),
             ("sort", "updated"),
@@ -81,7 +81,7 @@ impl GitHubClient {
         loop {
             let url = format!(
                 "{}/repos/{}/{}/issues/{}/timeline",
-                API_BASE, owner, repo, issue_number
+                self.api_base, owner, repo, issue_number
             );
             let response = self
                 .client
@@ -185,7 +185,7 @@ impl GitHubClient {
                 loop {
                     let url = format!(
                         "{}/repos/{}/{}/issues/{}/timeline",
-                        API_BASE, owner, repo, pull_number
+                        self.api_base, owner, repo, pull_number
                     );
                     let response = self
                         .client
@@ -222,7 +222,7 @@ impl GitHubClient {
     pub async fn close_issue(&self, owner: &str, repo: &str, issue_number: i64) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}",
-            API_BASE, owner, repo, issue_number
+            self.api_base, owner, repo, issue_number
         );
         self.client
             .patch(url)
@@ -237,7 +237,7 @@ impl GitHubClient {
     pub async fn reopen_issue(&self, owner: &str, repo: &str, issue_number: i64) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}",
-            API_BASE, owner, repo, issue_number
+            self.api_base, owner, repo, issue_number
         );
         self.client
             .patch(url)
@@ -258,7 +258,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}/labels",
-            API_BASE, owner, repo, issue_number
+            self.api_base, owner, repo, issue_number
         );
         self.client
             .put(url)
@@ -279,7 +279,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}",
-            API_BASE, owner, repo, issue_number
+            self.api_base, owner, repo, issue_number
         );
         self.client
             .patch(url)
@@ -295,7 +295,7 @@ impl GitHubClient {
         let mut page = 1u32;
         let mut labels = Vec::new();
         loop {
-            let url = format!("{}/repos/{}/{}/labels", API_BASE, owner, repo);
+            let url = format!("{}/repos/{}/{}/labels", self.api_base, owner, repo);
             let response = self
                 .client
                 .get(url)
@@ -319,7 +319,7 @@ impl GitHubClient {
         let mut page = 1u32;
         let mut assignees = Vec::new();
         loop {
-            let url = format!("{}/repos/{}/{}/assignees", API_BASE, owner, repo);
+            let url = format!("{}/repos/{}/{}/assignees", self.api_base, owner, repo);
             let response = self
                 .client
                 .get(url)
