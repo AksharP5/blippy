@@ -27,6 +27,22 @@ pub(super) fn draw_pull_request_files(
             .split(content)
     };
 
+    let diff_area = if diff_expanded { panes[0] } else { panes[1] };
+    let selected_file = app
+        .selected_pull_request_file_row()
+        .map(|file| (file.filename.clone(), file.patch.clone()));
+    let rows = selected_file
+        .as_ref()
+        .filter(|_| !app.pull_request_files_syncing())
+        .map(|(_, patch)| parse_patch(patch.as_deref()))
+        .unwrap_or_default();
+    let panel_width = diff_area.width.saturating_sub(2) as usize;
+    let cells_width = panel_width.saturating_sub(2);
+    let left_width = cells_width.saturating_sub(5) / 2;
+    let right_width = cells_width.saturating_sub(left_width + 3);
+    let horizontal_max = split_diff_horizontal_limit(&rows, left_width, right_width);
+    app.set_pull_request_diff_horizontal_max(horizontal_max.min(u16::MAX as usize) as u16);
+
     let title = match app.current_issue_row() {
         Some(issue) => format!("PR review #{}", issue.number),
         None => "PR review".to_string(),
@@ -241,21 +257,15 @@ pub(super) fn draw_pull_request_files(
     }
 
     let diff_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Diff;
-    let diff_area = if diff_expanded { panes[0] } else { panes[1] };
-    let selected_file = app
-        .selected_pull_request_file_row()
-        .map(|file| (file.filename.clone(), file.patch.clone()));
     let mut lines = Vec::new();
     let mut row_offsets = Vec::new();
-    let mut horizontal_max = 0usize;
 
     if app.pull_request_files_syncing() {
         lines.push(Line::from("Loading pull request changes"));
     } else if selected_file.is_none() {
         lines.push(Line::from("Select a file to start reviewing."));
     } else {
-        let (file_name, patch) = selected_file.clone().expect("selected file exists");
-        let rows = parse_patch(patch.as_deref());
+        let (file_name, _) = selected_file.as_ref().expect("selected file exists");
         if rows.is_empty() {
             lines.push(Line::from(Span::styled(
                 "No textual patch available for this file.",
@@ -263,12 +273,7 @@ pub(super) fn draw_pull_request_files(
             )));
         } else {
             row_offsets = vec![None; rows.len()];
-            let panel_width = diff_area.width.saturating_sub(2) as usize;
-            let cells_width = panel_width.saturating_sub(2);
-            let left_width = cells_width.saturating_sub(5) / 2;
-            let right_width = cells_width.saturating_sub(left_width + 3);
             let horizontal_offset = app.pull_request_diff_horizontal_scroll() as usize;
-            horizontal_max = split_diff_horizontal_limit(rows.as_slice(), left_width, right_width);
             let visual_range = app.pull_request_visual_range();
             for (index, row) in rows.iter().enumerate() {
                 if app.pull_request_diff_row_hidden(file_name.as_str(), rows.as_slice(), index) {
@@ -392,7 +397,6 @@ pub(super) fn draw_pull_request_files(
     let total_lines = wrapped_line_count(&lines, content_width);
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_pull_request_diff_max_scroll(max_scroll);
-    app.set_pull_request_diff_horizontal_max(horizontal_max.min(u16::MAX as usize) as u16);
 
     let selected_row_offset = row_offsets
         .get(app.selected_pull_request_diff_line())
@@ -488,4 +492,49 @@ fn pull_request_header_hint(app: &App) -> String {
         "Ctrl+h/l pane • j/k diff • {} • c collapse hunk • h/l side • [/ ] pan • 0 reset • m add • n/p thread • e edit • x delete • Shift+R resolve • Shift+V visual",
         toggle_hint
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{app::PullRequestFile, config::Config};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn resizing_a_panned_diff_renders_correctly_on_the_first_frame() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            "head".to_string(),
+            vec![PullRequestFile {
+                filename: "wide.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 1,
+                deletions: 0,
+                patch: Some(format!("@@ -1 +1 @@\n {}END", "content ".repeat(10))),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        for _ in 0..30 {
+            app.on_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        }
+        assert!(app.pull_request_diff_horizontal_scroll() > 0);
+
+        terminal.backend_mut().resize(320, 36);
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        assert_eq!(app.pull_request_diff_horizontal_scroll(), 0);
+        let first_frame = terminal.backend().buffer().clone();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        assert_eq!(&first_frame, terminal.backend().buffer());
+    }
 }

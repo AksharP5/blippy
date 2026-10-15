@@ -5,6 +5,32 @@ use crate::store::{IssueRow, LocalRepoRow};
 use std::sync::mpsc::channel;
 
 #[test]
+fn worker_events_request_one_redraw_per_batch() {
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let mut app = crate::app::App::new(Config::default());
+    let (event_tx, event_rx) = channel();
+    assert!(!super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap());
+
+    event_tx
+        .send(super::AppEvent::IssueCreateFailed {
+            repo: super::RepoIdentity::new("other", "repo"),
+            message: "Offscreen failure".to_string(),
+        })
+        .unwrap();
+    assert!(super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap());
+    assert!(!super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap());
+
+    event_tx
+        .send(super::AppEvent::ScanFailed {
+            message: "Scan unavailable".to_string(),
+        })
+        .unwrap();
+    assert!(super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap());
+    assert_eq!(app.status(), "Scan failed: Scan unavailable");
+    assert!(!super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap());
+}
+
+#[test]
 fn invalid_presets_keep_the_editor_open() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

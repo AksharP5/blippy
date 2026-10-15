@@ -31,7 +31,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, MouseButton, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -271,6 +273,7 @@ fn run_app(
     let mut last_issue_poll = Instant::now();
     let mut last_comment_poll = Instant::now();
     let mut last_view = app.view();
+    let mut needs_redraw = true;
 
     loop {
         if app.view() != last_view {
@@ -279,8 +282,8 @@ fn run_app(
             last_comment_poll = Instant::now();
         }
 
-        main_events::handle_events(app, conn, &event_rx)?;
-        drive_background_tasks(
+        needs_redraw |= main_events::handle_events(app, conn, &event_rx)?;
+        needs_redraw |= drive_background_tasks(
             app,
             conn,
             token,
@@ -288,8 +291,11 @@ fn run_app(
             &mut last_issue_poll,
             &mut last_comment_poll,
         )?;
-        app.clear_status_if_expired();
-        terminal.draw(|frame| ui::draw(frame, app))?;
+        needs_redraw |= app.clear_status_if_expired();
+        if needs_redraw {
+            terminal.draw(|frame| ui::draw(frame, app))?;
+            needs_redraw = false;
+        }
 
         if app.should_quit() {
             return Ok(());
@@ -304,13 +310,29 @@ fn run_app(
         }
 
         match event::read()? {
-            Event::Key(key) => app.on_key(key),
-            Event::Mouse(mouse) => app.on_mouse(mouse),
+            Event::Key(key) if !key.is_release() => {
+                app.on_key(key);
+                needs_redraw = true;
+            }
+            Event::Mouse(mouse)
+                if matches!(
+                    mouse.kind,
+                    MouseEventKind::Down(MouseButton::Left)
+                        | MouseEventKind::ScrollUp
+                        | MouseEventKind::ScrollDown
+                        | MouseEventKind::ScrollLeft
+                        | MouseEventKind::ScrollRight
+                ) =>
+            {
+                app.on_mouse(mouse);
+                needs_redraw = true;
+            }
+            Event::Resize(..) | Event::FocusGained => needs_redraw = true,
             _ => {}
         }
 
         main_actions::handle_actions(app, clipboard, conn, token, event_tx.clone())?;
-        drive_background_tasks(
+        needs_redraw |= drive_background_tasks(
             app,
             conn,
             token,
@@ -332,7 +354,8 @@ fn drive_background_tasks(
     event_tx: Sender<AppEvent>,
     last_issue_poll: &mut Instant,
     last_comment_poll: &mut Instant,
-) -> Result<()> {
+) -> Result<bool> {
+    let previous_poll_times = (*last_issue_poll, *last_comment_poll);
     main_sync::maybe_start_issue_poll(app, last_issue_poll);
     main_sync::maybe_start_repo_sync(app, token, event_tx.clone())?;
     main_sync::maybe_start_repo_permissions_sync(app, token, event_tx.clone());
@@ -341,11 +364,13 @@ fn drive_background_tasks(
     main_sync::maybe_start_pull_request_files_sync(app, token, event_tx.clone())?;
     main_sync::maybe_start_pull_request_review_comments_sync(app, token, event_tx.clone())?;
     main_linked_actions::maybe_probe_visible_linked_items(app, token, event_tx.clone());
+    let mut repos_loaded = false;
     if app.view() == View::RepoPicker && app.repos().is_empty() {
         app.set_repos(main_data::load_repos(conn)?);
+        repos_loaded = !app.repos().is_empty();
     }
     main_data::maybe_start_rescan(app, event_tx)?;
-    Ok(())
+    Ok(repos_loaded || previous_poll_times != (*last_issue_poll, *last_comment_poll))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

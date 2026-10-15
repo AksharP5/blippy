@@ -4,8 +4,10 @@ pub(super) fn handle_events(
     app: &mut App,
     conn: &rusqlite::Connection,
     event_rx: &Receiver<AppEvent>,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut handled_events = false;
     while let Ok(event) = event_rx.try_recv() {
+        handled_events = true;
         match event {
             AppEvent::ReposUpdated => {
                 if app.view() == View::RepoPicker {
@@ -766,5 +768,5 @@ pub(super) fn handle_events(
             }
         }
     }
-    Ok(())
+    Ok(handled_events)
 }
