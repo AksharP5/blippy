@@ -275,10 +275,7 @@ pub(super) fn draw_pull_request_files(
             row_offsets = vec![None; rows.len()];
             let horizontal_offset = app.pull_request_diff_horizontal_scroll() as usize;
             let visual_range = app.pull_request_visual_range();
-            for (index, row) in rows.iter().enumerate() {
-                if app.pull_request_diff_row_hidden(file_name.as_str(), rows.as_slice(), index) {
-                    continue;
-                }
+            for (index, row) in app.visible_pull_request_diff_rows(file_name.as_str(), &rows) {
                 row_offsets[index] = Some(lines.len() as u16);
                 let selected = index == app.selected_pull_request_diff_line();
                 let in_visual_range =
