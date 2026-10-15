@@ -308,11 +308,9 @@ impl App {
                 self.toggle_selected_assignee();
             }
             KeyCode::Enter if self.view == View::LabelPicker => {
-                self.toggle_selected_label();
                 self.interaction.action = Some(AppAction::SubmitLabels);
             }
             KeyCode::Enter if self.view == View::AssigneePicker => {
-                self.toggle_selected_assignee();
                 self.interaction.action = Some(AppAction::SubmitAssignees);
             }
             KeyCode::Char('b') if self.view == View::IssueDetail => {

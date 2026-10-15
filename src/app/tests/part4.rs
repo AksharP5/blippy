@@ -299,114 +299,71 @@ fn shift_a_triggers_edit_assignees_action_in_issues() {
 }
 
 #[test]
-fn labels_picker_enter_submits() {
-    let mut app = App::new(Config::default());
-    app.open_label_picker(
-        View::Issues,
-        vec!["bug".to_string(), "triage".to_string()],
-        &["bug".to_string(), "triage".to_string()],
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+fn label_picker_enter_submits_selection_unchanged() {
+    for selected in [vec![], vec!["bug".to_string()]] {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "docs".to_string()],
+            &selected,
+        );
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+        assert_eq!(app.selected_labels(), selected);
+    }
 }
 
 #[test]
-fn labels_picker_enter_selects_highlighted_when_none_selected() {
-    let mut app = App::new(Config::default());
-    app.open_label_picker(
-        View::Issues,
-        vec!["bug".to_string(), "docs".to_string()],
-        &[],
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
-    assert_eq!(app.selected_labels(), vec!["bug".to_string()]);
+fn assignee_picker_enter_submits_selection_unchanged() {
+    for selected in ["", "alex"] {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            vec!["alex".to_string(), "sam".to_string()],
+            selected,
+        );
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+        assert_eq!(app.selected_assignees_csv(), selected);
+    }
 }
 
 #[test]
-fn labels_picker_enter_adds_highlighted_when_existing_labels_present() {
-    let mut app = App::new(Config::default());
-    app.open_label_picker(
-        View::Issues,
-        vec!["bug".to_string(), "docs".to_string()],
-        &["bug".to_string()],
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
-    assert_eq!(
-        app.selected_labels(),
-        vec!["bug".to_string(), "docs".to_string()]
-    );
+fn label_picker_space_then_enter_preserves_additions_and_removals() {
+    for (selected, expected) in [
+        (vec![], vec!["bug".to_string()]),
+        (
+            vec!["bug".to_string(), "docs".to_string()],
+            vec!["docs".to_string()],
+        ),
+    ] {
+        let mut app = App::new(Config::default());
+        app.open_label_picker(
+            View::Issues,
+            vec!["bug".to_string(), "docs".to_string()],
+            &selected,
+        );
+        app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+        assert_eq!(app.selected_labels(), expected);
+    }
 }
 
 #[test]
-fn assignee_picker_enter_selects_highlighted_when_none_selected() {
-    let mut app = App::new(Config::default());
-    app.open_assignee_picker(
-        View::Issues,
-        vec!["alex".to_string(), "sam".to_string()],
-        "",
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
-    assert_eq!(app.selected_assignees(), vec!["alex".to_string()]);
-}
-
-#[test]
-fn assignee_picker_enter_adds_highlighted_when_existing_assignees_present() {
-    let mut app = App::new(Config::default());
-    app.open_assignee_picker(
-        View::Issues,
-        vec!["alex".to_string(), "sam".to_string()],
-        "alex",
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
-    assert_eq!(
-        app.selected_assignees(),
-        vec!["alex".to_string(), "sam".to_string()]
-    );
-}
-
-#[test]
-fn labels_picker_enter_removes_highlighted_when_already_selected() {
-    let mut app = App::new(Config::default());
-    app.open_label_picker(
-        View::Issues,
-        vec!["bug".to_string(), "docs".to_string()],
-        &["bug".to_string(), "docs".to_string()],
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
-    assert_eq!(app.selected_labels(), vec!["docs".to_string()]);
-}
-
-#[test]
-fn assignee_picker_enter_removes_highlighted_when_already_selected() {
-    let mut app = App::new(Config::default());
-    app.open_assignee_picker(
-        View::Issues,
-        vec!["alex".to_string(), "sam".to_string()],
-        "alex,sam",
-    );
-
-    app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
-    assert_eq!(app.selected_assignees(), vec!["sam".to_string()]);
+fn assignee_picker_space_then_enter_preserves_additions_and_removals() {
+    for (selected, expected) in [("", "alex"), ("alex,sam", "sam")] {
+        let mut app = App::new(Config::default());
+        app.open_assignee_picker(
+            View::Issues,
+            vec!["alex".to_string(), "sam".to_string()],
+            selected,
+        );
+        app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+        assert_eq!(app.selected_assignees_csv(), expected);
+    }
 }
 
 #[test]
