@@ -236,20 +236,21 @@ impl App {
         self.status_expires_at = Some(Instant::now() + duration);
     }
 
-    pub fn clear_status_if_expired(&mut self) {
-        self.clear_status_if_expired_at(Instant::now());
+    pub fn clear_status_if_expired(&mut self) -> bool {
+        self.clear_status_if_expired_at(Instant::now())
     }
 
-    pub fn clear_status_if_expired_at(&mut self, now: Instant) {
+    pub fn clear_status_if_expired_at(&mut self, now: Instant) -> bool {
         let expires_at = match self.status_expires_at {
             Some(expires_at) => expires_at,
-            None => return,
+            None => return false,
         };
         if now < expires_at {
-            return;
+            return false;
         }
         self.status.clear();
         self.status_expires_at = None;
+        true
     }
 
     pub fn set_scanning(&mut self, scanning: bool) {
