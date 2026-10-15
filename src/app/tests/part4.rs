@@ -505,6 +505,7 @@ fn back_from_expanded_diff_returns_to_split_review() {
     app.set_view(View::PullRequestFiles);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),

@@ -12,7 +12,7 @@ impl GitHubClient {
         loop {
             let url = format!(
                 "{}/repos/{}/{}/issues/{}/comments",
-                API_BASE, owner, repo, issue_number
+                self.api_base, owner, repo, issue_number
             );
             let response = self
                 .client
@@ -42,7 +42,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}/comments",
-            API_BASE, owner, repo, issue_number
+            self.api_base, owner, repo, issue_number
         );
         self.client
             .post(url)
@@ -63,7 +63,7 @@ impl GitHubClient {
     ) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/comments/{}",
-            API_BASE, owner, repo, comment_id
+            self.api_base, owner, repo, comment_id
         );
         self.client
             .patch(url)
@@ -78,7 +78,7 @@ impl GitHubClient {
     pub async fn delete_comment(&self, owner: &str, repo: &str, comment_id: i64) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/issues/comments/{}",
-            API_BASE, owner, repo, comment_id
+            self.api_base, owner, repo, comment_id
         );
         self.client
             .delete(url)

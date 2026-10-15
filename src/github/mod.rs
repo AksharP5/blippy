@@ -17,6 +17,7 @@ const API_VERSION: &str = "2022-11-28";
 pub struct GitHubClient {
     client: reqwest::Client,
     token: String,
+    api_base: String,
 }
 
 impl GitHubClient {
@@ -39,6 +40,7 @@ impl GitHubClient {
         Ok(Self {
             client,
             token: token.to_string(),
+            api_base: API_BASE.to_string(),
         })
     }
 
@@ -49,7 +51,7 @@ impl GitHubClient {
     ) -> Result<serde_json::Value> {
         let response = self
             .client
-            .post(format!("{}/graphql", API_BASE))
+            .post(format!("{}/graphql", self.api_base))
             .bearer_auth(&self.token)
             .json(&serde_json::json!({
                 "query": query,

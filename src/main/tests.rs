@@ -487,6 +487,7 @@ fn completed_file_view_changes_refresh_after_an_older_snapshot() {
     event_tx
         .send(super::AppEvent::PullRequestFilesUpdated {
             issue_id: 1,
+            head_sha: "head-a".to_string(),
             files: vec![file.clone()],
             pull_request_id: Some("PR".into()),
             viewed_files: Default::default(),
@@ -500,6 +501,7 @@ fn completed_file_view_changes_refresh_after_an_older_snapshot() {
     event_tx
         .send(super::AppEvent::PullRequestFilesUpdated {
             issue_id: 1,
+            head_sha: "head-a".to_string(),
             files: vec![file],
             pull_request_id: Some("PR".into()),
             viewed_files: ["src/main.rs".to_string()].into(),
@@ -1062,6 +1064,7 @@ fn pull_request_view_state_failure_stays_unknown() {
     event_tx
         .send(super::AppEvent::PullRequestFilesUpdated {
             issue_id: 33,
+            head_sha: "head-a".to_string(),
             files: vec![crate::app::PullRequestFile {
                 filename: "src/main.rs".to_string(),
                 status: "modified".to_string(),
@@ -1339,6 +1342,7 @@ fn file_view_updates_block_duplicate_toggles_and_allow_retry_after_failure() {
     app.set_current_issue(1, 7);
     app.set_pull_request_files(
         1,
+        "head-a".to_string(),
         vec![crate::app::PullRequestFile {
             filename: "src/main.rs".to_string(),
             status: "modified".to_string(),

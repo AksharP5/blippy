@@ -200,6 +200,7 @@ pub struct PullRequestReviewComment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestReviewTarget {
+    pub commit_id: String,
     pub path: String,
     pub line: i64,
     pub side: ReviewSide,
@@ -416,6 +417,7 @@ struct RepoContextState {
 #[derive(Debug)]
 struct PullRequestState {
     pull_request_files_issue_id: Option<i64>,
+    pull_request_files_head_sha: Option<String>,
     pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
     pull_request_view_state_loaded: bool,
@@ -442,6 +444,7 @@ impl Default for PullRequestState {
     fn default() -> Self {
         Self {
             pull_request_files_issue_id: None,
+            pull_request_files_head_sha: None,
             pull_request_id: None,
             pull_request_files: Vec::new(),
             pull_request_view_state_loaded: false,

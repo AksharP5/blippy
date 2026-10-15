@@ -46,6 +46,7 @@ pub(crate) fn submit_pull_request_review_comment(
         repo,
         issue_id,
         pull_number,
+        target.commit_id,
         target.path,
         target.line,
         target.side,
