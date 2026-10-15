@@ -15,11 +15,7 @@ pub(super) fn draw_issues(
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
         .split(sections[1]);
 
-    let visible_issues = app
-        .issues_for_view()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let visible_issues = app.issues_for_view();
     let (open_count, closed_count) = app.issue_counts();
     let item_mode = app.work_item_mode();
     let item_label = item_mode.label();
@@ -101,25 +97,6 @@ pub(super) fn draw_issues(
         vertical: 1,
         horizontal: 1,
     });
-    let open_label = format!("1 Open ({})", open_count);
-    let closed_label = format!("2 Closed ({})", closed_count);
-    app.register_mouse_region(
-        MouseTarget::IssueTabOpen,
-        header_content.x,
-        header_content.y,
-        (open_label.len() as u16).saturating_add(3),
-        1,
-    );
-    let closed_x = header_content
-        .x
-        .saturating_add((open_label.len() as u16).saturating_add(5));
-    app.register_mouse_region(
-        MouseTarget::IssueTabClosed,
-        closed_x,
-        header_content.y,
-        (closed_label.len() as u16).saturating_add(3),
-        1,
-    );
     if app.issue_search_mode() {
         let content = header_area.inner(Margin {
             vertical: 1,
@@ -259,6 +236,25 @@ pub(super) fn draw_issues(
             })
             .collect()
     };
+    let open_label = format!("1 Open ({})", open_count);
+    let closed_label = format!("2 Closed ({})", closed_count);
+    app.register_mouse_region(
+        MouseTarget::IssueTabOpen,
+        header_content.x,
+        header_content.y,
+        (open_label.len() as u16).saturating_add(3),
+        1,
+    );
+    let closed_x = header_content
+        .x
+        .saturating_add((open_label.len() as u16).saturating_add(5));
+    app.register_mouse_region(
+        MouseTarget::IssueTabClosed,
+        closed_x,
+        header_content.y,
+        (closed_label.len() as u16).saturating_add(3),
+        1,
+    );
     let list = List::new(items)
         .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
         .block(block)
@@ -273,10 +269,7 @@ pub(super) fn draw_issues(
         vertical: 1,
         horizontal: 2,
     });
-    let mut issues_state = list_state(selected_for_list(
-        app.selected_issue(),
-        visible_issues.len(),
-    ));
+    let mut issues_state = list_state(selected_for_list(app.selected_issue(), visible_count));
     frame.render_stateful_widget(list, issues_list_area, &mut issues_state);
     register_mouse_region(app, MouseTarget::IssuesListPane, issues_list_area);
     let issues_list_inner = issues_list_area.inner(Margin {
@@ -284,7 +277,7 @@ pub(super) fn draw_issues(
         horizontal: 1,
     });
     let max_rows = (issues_list_inner.height as usize) / 2;
-    for (row, index) in (issues_state.offset()..visible_issues.len())
+    for (row, index) in (issues_state.offset()..visible_count)
         .take(max_rows)
         .enumerate()
     {
