@@ -538,6 +538,8 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
             FOREIGN KEY(repo_id) REFERENCES repos(id) ON DELETE CASCADE
         );
 
+        CREATE INDEX IF NOT EXISTS issues_repo_number ON issues(repo_id, number DESC);
+
         CREATE TABLE IF NOT EXISTS comments (
             id INTEGER PRIMARY KEY,
             issue_id INTEGER NOT NULL,

@@ -107,6 +107,55 @@ fn open_db_removes_legacy_search_index() {
 }
 
 #[test]
+fn reopening_existing_cache_indexes_issues_by_repo_and_number() {
+    let dir = unique_temp_dir("issue-index");
+    let db_path = dir.join("blippy.db");
+    let conn = open_db_at(&db_path).expect("open db");
+    conn.execute("DROP INDEX issues_repo_number", [])
+        .expect("simulate cache without issue index");
+    for id in [10, 20, 30] {
+        seed_issue(&conn, id);
+        conn.execute("UPDATE issues SET number = ?1 WHERE id = ?1", [id])
+            .expect("set issue number");
+    }
+    upsert_repo(
+        &conn,
+        &RepoRow {
+            id: 2,
+            owner: "acme".into(),
+            name: "other".into(),
+            updated_at: None,
+            etag: None,
+        },
+    )
+    .expect("other repo");
+    conn.execute("UPDATE issues SET repo_id = 2 WHERE id = 20", [])
+        .expect("move issue to other repo");
+    drop(conn);
+
+    for _ in 0..2 {
+        let conn = open_db_at(&db_path).expect("reopen existing cache");
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA index_info(issues_repo_number)")
+            .expect("inspect issue index")
+            .query_map([], |row| row.get(2))
+            .expect("index columns")
+            .collect::<Result<_, _>>()
+            .expect("read index columns");
+        assert_eq!(columns, ["repo_id", "number"]);
+        let issues = list_issues(&conn, 1).expect("indexed issue list");
+        assert_eq!(
+            issues.iter().map(|issue| issue.number).collect::<Vec<_>>(),
+            [30, 10]
+        );
+        assert_eq!(list_issues(&conn, 2).expect("other repo")[0].number, 20);
+        assert!(list_issues(&conn, 3).expect("uncached repo").is_empty());
+    }
+
+    fs::remove_dir_all(&dir).expect("remove test cache");
+}
+
+#[test]
 fn upsert_issue_inserts_and_updates() {
     let dir = unique_temp_dir("issue-upsert");
     let db_path = dir.join("blippy.db");
