@@ -2,8 +2,6 @@
 
 GitHub in your terminal.
 
-English | [Español](README.es-ES.md)
-
 blippy is a keyboard-first TUI for GitHub issues and pull requests.
 
 https://github.com/user-attachments/assets/14daa99b-c39a-43d9-b32d-9d5a6840819f
