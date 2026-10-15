@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13](https://github.com/AksharP5/blippy/compare/v0.1.12...v0.1.13) - 2026-10-15
+
+### Added
+
+- make keyboard help scrollable and keep input inside it ([#42](https://github.com/AksharP5/blippy/pull/42))
+
+### Fixed
+
+- *(review)* pin comments to the displayed PR commit ([#40](https://github.com/AksharP5/blippy/pull/40))
+- preserve metadata selections and show picker controls ([#39](https://github.com/AksharP5/blippy/pull/39))
+
+### Other
+
+- *(issues)* avoid copying offscreen issue bodies ([#47](https://github.com/AksharP5/blippy/pull/47))
+- *(review)* speed up rendering and navigating collapsed hunks ([#46](https://github.com/AksharP5/blippy/pull/46))
+- *(store)* avoid full-cache scans when loading issues ([#45](https://github.com/AksharP5/blippy/pull/45))
+- stop redrawing the terminal while idle ([#44](https://github.com/AksharP5/blippy/pull/44))
+- Revert "docs: add Spanish README ([#18](https://github.com/AksharP5/blippy/pull/18))" ([#43](https://github.com/AksharP5/blippy/pull/43))
+- add Spanish README ([#18](https://github.com/AksharP5/blippy/pull/18))
+
 ## [0.1.12](https://github.com/AksharP5/blippy/compare/v0.1.11...v0.1.12) - 2026-10-04
 
 ### Fixed
