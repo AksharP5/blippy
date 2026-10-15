@@ -6,7 +6,11 @@ impl App {
             return;
         }
         if self.search.help_overlay_visible {
-            let Some(key) = self.keybinds.remap_key(key) else {
+            let key = match key.code {
+                KeyCode::Home | KeyCode::End => Some(key),
+                _ => self.keybinds.remap_key(key),
+            };
+            let Some(key) = key else {
                 return;
             };
             match key.code {

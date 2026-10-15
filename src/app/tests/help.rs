@@ -146,6 +146,8 @@ fn help_uses_configured_movement_escape_and_quit_bindings() {
             ("move_up", "ctrl+p"),
             ("back_escape", "ctrl+e"),
             ("quit", "ctrl+q"),
+            ("jump_bottom", "end"),
+            ("jump_prefix", "home"),
         ]
         .into_iter()
         .map(|(action, key)| (action.to_string(), key.to_string()))
@@ -171,6 +173,8 @@ fn help_uses_configured_movement_escape_and_quit_bindings() {
     assert_eq!(app.help_scroll(), 0);
     app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
     assert_eq!(app.help_scroll(), 20);
+    app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+    assert_eq!(app.help_scroll(), 0);
     app.on_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
     assert!(!app.help_overlay_visible());
     app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
