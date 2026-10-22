@@ -42,6 +42,28 @@ pub(super) fn handle_events(
                 stats,
             } => {
                 app.finish_repo_sync(&owner, &repo);
+                if owner.eq_ignore_ascii_case(&resolved_repo.owner)
+                    && repo.eq_ignore_ascii_case(&resolved_repo.name)
+                    && app
+                        .current_owner()
+                        .is_some_and(|value| value.eq_ignore_ascii_case(&owner))
+                    && app
+                        .current_repo()
+                        .is_some_and(|value| value.eq_ignore_ascii_case(&repo))
+                    && let Some(old_id) = app.current_repo_id()
+                    && old_id != resolved_repo.id
+                    && crate::store::get_repo_by_id(conn, old_id)?.is_none()
+                    && get_repo_by_slug(conn, &owner, &repo)?
+                        .is_some_and(|cached| cached.id == resolved_repo.id)
+                {
+                    // The cache confirms a new repository at this name, not a late redirect.
+                    let path = app.current_repo_path().map(ToString::to_string);
+                    app.set_current_repo_with_path(&owner, &repo, path.as_deref());
+                    app.set_comments(Vec::new());
+                    if !matches!(app.view(), View::RepoPicker | View::RemoteChooser) {
+                        app.set_view(View::Issues);
+                    }
+                }
                 if app.resolve_repository_alias(&owner, &repo, &resolved_repo) {
                     refresh_current_repo_issues(app, conn)?;
                     let (open_count, closed_count) = app.issue_counts();

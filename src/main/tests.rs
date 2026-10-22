@@ -296,6 +296,113 @@ fn offscreen_repository_redirect_keeps_pending_operations_visible_under_both_nam
 }
 
 #[test]
+fn recreated_repository_sync_replaces_the_current_tui_context() {
+    let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+    let mut app = linked_navigation_app(true);
+    app.set_current_repo_id(1);
+    app.set_linked_pull_request(7, Some(8));
+    app.set_comments(vec![crate::store::CommentRow {
+        id: 10,
+        issue_id: 1,
+        author: "alex".into(),
+        body: "Previous repository comment".into(),
+        created_at: None,
+        last_accessed_at: None,
+    }]);
+    let replacement = crate::store::RepoRow {
+        id: 2,
+        owner: "Acme".into(),
+        name: "blippy".into(),
+        updated_at: None,
+        etag: None,
+    };
+    crate::store::upsert_repo(&conn, &replacement).expect("replacement repository cache");
+    let issue = IssueRow {
+        id: 100,
+        repo_id: 2,
+        title: "Replacement repository issue".into(),
+        ..app.issues()[0].clone()
+    };
+    crate::store::upsert_issue(&conn, &issue).expect("replacement issue");
+    app.begin_repo_sync();
+    let (event_tx, event_rx) = channel();
+    event_tx
+        .send(super::AppEvent::SyncFinished {
+            owner: "acme".into(),
+            repo: "blippy".into(),
+            resolved_repo: replacement,
+            stats: Default::default(),
+        })
+        .expect("replacement sync completed");
+
+    super::main_events::handle_events(&mut app, &conn, &event_rx).expect("replace context");
+
+    assert_eq!(app.issues(), &[issue]);
+    assert_eq!(app.current_repo_id(), Some(2));
+    assert_eq!(app.current_issue_id(), None);
+    assert!(app.comments().is_empty());
+    assert!(app.linked_pull_requests_for_issue(7).is_empty());
+    assert_eq!(app.view(), View::Issues);
+    assert_eq!(app.issue_query(), "");
+    assert!(!app.has_assignee_filter());
+    assert!(!app.syncing());
+    assert!(app.status().starts_with("Synced"));
+}
+
+#[test]
+fn repository_replacement_requires_the_matching_cache_and_missing_old_identity() {
+    for (cached_id, keep_old_identity) in [(3, false), (2, true)] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = linked_navigation_app(true);
+        app.set_current_repo_id(1);
+        let previous_issues = app.issues().to_vec();
+        let resolved = crate::store::RepoRow {
+            id: 2,
+            owner: "acme".into(),
+            name: "blippy".into(),
+            updated_at: None,
+            etag: None,
+        };
+        crate::store::upsert_repo(
+            &conn,
+            &crate::store::RepoRow {
+                id: cached_id,
+                ..resolved.clone()
+            },
+        )
+        .expect("current cache identity");
+        if keep_old_identity {
+            crate::store::upsert_repo(
+                &conn,
+                &crate::store::RepoRow {
+                    id: 1,
+                    name: "renamed".into(),
+                    ..resolved.clone()
+                },
+            )
+            .expect("old repository still exists");
+        }
+        let (event_tx, event_rx) = channel();
+        event_tx
+            .send(super::AppEvent::SyncFinished {
+                owner: "acme".into(),
+                repo: "blippy".into(),
+                resolved_repo: resolved,
+                stats: Default::default(),
+            })
+            .expect("late sync event");
+
+        super::main_events::handle_events(&mut app, &conn, &event_rx)
+            .expect("ignore stale identity");
+
+        assert_eq!(app.current_repo_id(), Some(1));
+        assert_eq!(app.issues(), previous_issues);
+        assert_eq!(app.current_issue_id(), Some(1));
+        assert_eq!(app.view(), View::IssueDetail);
+    }
+}
+
+#[test]
 fn late_sync_does_not_select_a_repository_after_its_old_name_is_reused() {
     for (cached, requested) in [(false, "new"), (true, "new"), (true, "old")] {
         let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");

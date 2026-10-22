@@ -229,6 +229,10 @@ impl App {
         self.context.repo.as_deref()
     }
 
+    pub fn current_repo_id(&self) -> Option<i64> {
+        self.context.id
+    }
+
     pub fn scanning(&self) -> bool {
         self.sync.scanning
     }

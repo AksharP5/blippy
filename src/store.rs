@@ -67,7 +67,14 @@ pub fn open_db() -> Result<Connection> {
 }
 
 pub fn upsert_repo(conn: &Connection, repo: &RepoRow) -> Result<()> {
-    conn.execute(
+    let transaction = conn.unchecked_transaction()?;
+    // A recreated repository can reuse a cached slug, but not its previous GitHub ID.
+    transaction.execute(
+        "DELETE FROM repos
+         WHERE owner = ?1 COLLATE NOCASE AND name = ?2 COLLATE NOCASE AND id != ?3",
+        (repo.owner.as_str(), repo.name.as_str(), repo.id),
+    )?;
+    transaction.execute(
         "
         INSERT INTO repos (id, owner, name, updated_at, etag)
         VALUES (?1, ?2, ?3, ?4, ?5)
@@ -85,6 +92,7 @@ pub fn upsert_repo(conn: &Connection, repo: &RepoRow) -> Result<()> {
             repo.etag.as_deref(),
         ),
     )?;
+    transaction.commit()?;
     Ok(())
 }
 

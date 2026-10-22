@@ -641,6 +641,53 @@ async fn sync_repo_fetches_later_same_timestamp_changes_despite_first_page_etag(
 }
 
 #[tokio::test]
+async fn sync_repo_replaces_a_deleted_repository_recreated_at_the_same_name() {
+    for owner in ["acme", "Acme"] {
+        let conn = open_db_at(std::path::Path::new(":memory:")).expect("open db");
+        let existing = crate::store::RepoRow {
+            id: 1,
+            owner: "acme".into(),
+            name: "blippy".into(),
+            updated_at: Some("2024-01-05T00:00:00Z".into()),
+            etag: Some("deleted-repo-etag".into()),
+        };
+        crate::store::upsert_repo(&conn, &existing).expect("cache original repo");
+        let old_issue = map_issue_to_row(1, &issue_fixture(1, existing.updated_at.as_deref()));
+        crate::store::upsert_issue(&conn, &old_issue).expect("cache original issue");
+        let client = FakeGitHub {
+            repo: serde_json::from_value(serde_json::json!({
+                "id": 2,
+                "name": "blippy",
+                "owner": {"login": owner},
+            }))
+            .expect("replacement repo"),
+            issues: vec![issue_fixture(2, Some("2024-01-02T00:00:00Z"))],
+            fail_get_repo: false,
+            fail_issue_page: None,
+            issue_page_size: 100,
+            page_etag: Some("replacement-etag".into()),
+            not_modified_when_etag_matches: false,
+        };
+
+        let result = sync_repo_with_progress(&client, &conn, "acme", "blippy", |_, _| {})
+            .await
+            .expect("sync replacement repository");
+
+        assert_eq!(result.repo.id, 2);
+        assert_eq!(result.stats.issues, 1);
+        assert_eq!(
+            get_repo_by_slug(&conn, "acme", "blippy").expect("current repository"),
+            Some(result.repo)
+        );
+        assert_eq!(
+            list_issues(&conn, 2).expect("replacement issues"),
+            vec![map_issue_to_row(2, &client.issues[0])]
+        );
+        assert!(list_issues(&conn, 1).expect("obsolete issues").is_empty());
+    }
+}
+
+#[tokio::test]
 async fn sync_repo_preserves_cache_and_cursor_when_repository_is_renamed_or_transferred() {
     for (owner, name) in [("old-owner", "old-name"), ("new-owner", "new-name")] {
         let conn = open_db_at(std::path::Path::new(":memory:")).expect("open db");
