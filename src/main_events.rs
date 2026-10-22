@@ -57,6 +57,7 @@ pub(super) fn handle_events(
                         .is_some_and(|cached| cached.id == resolved_repo.id)
                 {
                     // The cache confirms a new repository at this name, not a late redirect.
+                    app.clear_repository_requests(old_id);
                     let path = app.current_repo_path().map(ToString::to_string);
                     app.set_current_repo_with_path(&owner, &repo, path.as_deref());
                     app.set_comments(Vec::new());
@@ -94,7 +95,7 @@ pub(super) fn handle_events(
                 page,
                 stats,
             } => {
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+                if app.repository_is_current(&owner, &repo) {
                     app.set_status(format!(
                         "Syncing page {}: {} issues cached",
                         page, stats.issues
@@ -107,7 +108,7 @@ pub(super) fn handle_events(
                 message,
             } => {
                 app.finish_repo_sync(&owner, &repo);
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+                if app.repository_is_current(&owner, &repo) {
                     app.set_status(format!("Sync failed: {}", message));
                 }
             }
@@ -141,7 +142,7 @@ pub(super) fn handle_events(
                     || message.starts_with("label update failed")
                     || message.starts_with("assignee update failed")
                 {
-                    app.clear_pending_issue_action(&repo.owner, &repo.repo, issue_number);
+                    app.clear_pending_issue_action(&repo.owner, &repo.repo, repo.id, issue_number);
                 }
                 if !repo.is_current(app) {
                     continue;
@@ -164,7 +165,9 @@ pub(super) fn handle_events(
             AppEvent::IssueCreated { repo, issue } => {
                 let issue_number = issue.number;
                 let cache_result = crate::store::upsert_issue(conn, &issue);
-                if !repo.is_current(app) {
+                if !repo.is_current(app)
+                    || app.current_repo_id().is_some_and(|id| id != issue.repo_id)
+                {
                     if let Err(error) = cache_result {
                         app.set_status(format!(
                             "Created issue {}/{} #{}; cache update failed: {}",
@@ -208,7 +211,7 @@ pub(super) fn handle_events(
                 issue_number,
                 labels,
             } => {
-                app.clear_pending_issue_action(&repo.owner, &repo.repo, issue_number);
+                app.clear_pending_issue_action(&repo.owner, &repo.repo, repo.id, issue_number);
                 if !repo.is_current(app) {
                     continue;
                 }
@@ -221,7 +224,7 @@ pub(super) fn handle_events(
                 issue_number,
                 assignees,
             } => {
-                app.clear_pending_issue_action(&repo.owner, &repo.repo, issue_number);
+                app.clear_pending_issue_action(&repo.owner, &repo.repo, repo.id, issue_number);
                 if !repo.is_current(app) {
                     continue;
                 }
@@ -712,13 +715,9 @@ pub(super) fn handle_events(
                 app.request_comment_sync();
                 app.request_sync();
             }
-            AppEvent::RepoLabelsSuggested {
-                owner,
-                repo,
-                labels,
-            } => {
-                app.finish_repo_labels_sync(&owner, &repo);
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+            AppEvent::RepoLabelsSuggested { repo, labels } => {
+                app.finish_repo_labels_sync(&repo.owner, &repo.repo, repo.id);
+                if repo.is_current(app) {
                     app.merge_repo_label_colors(labels.clone());
                     if app.view() == View::LabelPicker {
                         let options = labels
@@ -729,44 +728,29 @@ pub(super) fn handle_events(
                     }
                 }
             }
-            AppEvent::RepoAssigneesSuggested {
-                owner,
-                repo,
-                assignees,
-            } => {
-                if RepoIdentity::new(&owner, &repo).is_current(app)
-                    && app.view() == View::AssigneePicker
-                {
+            AppEvent::RepoAssigneesSuggested { repo, assignees } => {
+                if repo.is_current(app) && app.view() == View::AssigneePicker {
                     app.merge_assignee_options(assignees);
                 }
             }
-            AppEvent::RepoLabelsFailed {
-                owner,
-                repo,
-                message,
-            } => {
-                app.finish_repo_labels_sync(&owner, &repo);
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+            AppEvent::RepoLabelsFailed { repo, message } => {
+                app.finish_repo_labels_sync(&repo.owner, &repo.repo, repo.id);
+                if repo.is_current(app) {
                     app.set_status(format!("Repo labels unavailable: {}", message));
                 }
             }
-            AppEvent::RepoAssigneesFailed {
-                owner,
-                repo,
-                message,
-            } => {
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+            AppEvent::RepoAssigneesFailed { repo, message } => {
+                if repo.is_current(app) {
                     app.set_status(format!("Repo assignees unavailable: {}", message));
                 }
             }
             AppEvent::RepoPermissionsResolved {
-                owner,
                 repo,
                 can_edit_issue_metadata,
                 can_merge_pull_request,
             } => {
-                app.finish_repo_permissions_sync(&owner, &repo);
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+                app.finish_repo_permissions_sync(&repo.owner, &repo.repo, repo.id);
+                if repo.is_current(app) {
                     app.set_repo_issue_metadata_editable(Some(can_edit_issue_metadata));
                     app.set_repo_pull_request_mergeable(Some(can_merge_pull_request));
                     if !can_edit_issue_metadata {
@@ -776,13 +760,9 @@ pub(super) fn handle_events(
                     }
                 }
             }
-            AppEvent::RepoPermissionsFailed {
-                owner,
-                repo,
-                message,
-            } => {
-                app.finish_repo_permissions_sync(&owner, &repo);
-                if RepoIdentity::new(&owner, &repo).is_current(app) {
+            AppEvent::RepoPermissionsFailed { repo, message } => {
+                app.finish_repo_permissions_sync(&repo.owner, &repo.repo, repo.id);
+                if repo.is_current(app) {
                     app.set_repo_issue_metadata_editable(None);
                     app.set_repo_pull_request_mergeable(None);
                     app.set_status(format!("Repo permission check failed: {}", message));

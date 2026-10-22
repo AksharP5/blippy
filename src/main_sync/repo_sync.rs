@@ -112,19 +112,18 @@ pub(crate) fn start_comment_sync(
 }
 
 pub(crate) fn start_fetch_labels(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let error_owner = owner.clone();
-    let error_repo = repo.clone();
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
+    let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
         event_tx,
         move |message| AppEvent::RepoLabelsFailed {
-            owner: error_owner,
-            repo: error_repo,
+            repo: setup_repo,
             message,
         },
         move |services, event_tx| {
@@ -135,8 +134,7 @@ pub(crate) fn start_fetch_labels(
                 Ok(labels) => labels,
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::RepoLabelsFailed {
-                        owner,
-                        repo,
+                        repo: event_repo,
                         message: error.to_string(),
                     });
                     return;
@@ -147,8 +145,7 @@ pub(crate) fn start_fetch_labels(
                 .map(|label| (label.name, label.color))
                 .collect::<Vec<(String, String)>>();
             let _ = event_tx.send(AppEvent::RepoLabelsSuggested {
-                owner,
-                repo,
+                repo: event_repo,
                 labels,
             });
         },
@@ -156,19 +153,18 @@ pub(crate) fn start_fetch_labels(
 }
 
 pub(crate) fn start_fetch_assignees(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let error_owner = owner.clone();
-    let error_repo = repo.clone();
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
+    let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
         event_tx,
         move |message| AppEvent::RepoAssigneesFailed {
-            owner: error_owner,
-            repo: error_repo,
+            repo: setup_repo,
             message,
         },
         move |services, event_tx| {
@@ -177,13 +173,11 @@ pub(crate) fn start_fetch_assignees(
                 .block_on(async { services.client.list_assignees(&owner, &repo).await });
             let event = match assignees {
                 Ok(assignees) => AppEvent::RepoAssigneesSuggested {
-                    owner,
-                    repo,
+                    repo: event_repo,
                     assignees,
                 },
                 Err(error) => AppEvent::RepoAssigneesFailed {
-                    owner,
-                    repo,
+                    repo: event_repo,
                     message: error.to_string(),
                 },
             };
@@ -193,19 +187,18 @@ pub(crate) fn start_fetch_assignees(
 }
 
 pub(crate) fn start_fetch_repo_permissions(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let error_owner = owner.clone();
-    let error_repo = repo.clone();
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
+    let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
         event_tx,
         move |message| AppEvent::RepoPermissionsFailed {
-            owner: error_owner,
-            repo: error_repo,
+            repo: setup_repo,
             message,
         },
         move |services, event_tx| {
@@ -222,16 +215,14 @@ pub(crate) fn start_fetch_repo_permissions(
                     let can_merge_pull_request =
                         permissions.push || permissions.maintain || permissions.admin;
                     let _ = event_tx.send(AppEvent::RepoPermissionsResolved {
-                        owner,
-                        repo,
+                        repo: event_repo,
                         can_edit_issue_metadata,
                         can_merge_pull_request,
                     });
                 }
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::RepoPermissionsFailed {
-                        owner,
-                        repo,
+                        repo: event_repo,
                         message: error.to_string(),
                     });
                 }

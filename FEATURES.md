@@ -15,7 +15,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Stalled GitHub API requests time out after 30 seconds
 - Background sync avoids duplicate requests during repository and issue navigation
 - Renamed and transferred repositories retain their cached issues and linked items
-- Recreated repositories sync with a fresh cache instead of reusing the previous repository's issues
+- Recreated repositories sync with a fresh cache and clear old pending actions; late action, metadata, and linked-item results cannot change the replacement repository
 - Cache write failures report successful GitHub actions and keep the terminal session open
 
 ## Issues and Pull Requests in One Flow

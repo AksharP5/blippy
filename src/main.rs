@@ -391,18 +391,20 @@ enum LinkedIssueTarget {
 struct RepoIdentity {
     owner: String,
     repo: String,
+    id: Option<i64>,
 }
 
 impl RepoIdentity {
-    fn new(owner: &str, repo: &str) -> Self {
+    fn new(owner: &str, repo: &str, id: Option<i64>) -> Self {
         Self {
             owner: owner.to_string(),
             repo: repo.to_string(),
+            id,
         }
     }
 
     fn is_current(&self, app: &App) -> bool {
-        app.repository_is_current(&self.owner, &self.repo)
+        app.repository_request_is_current(&self.owner, &self.repo, self.id)
     }
 }
 
@@ -583,34 +585,28 @@ enum AppEvent {
         comment_id: i64,
     },
     RepoLabelsSuggested {
-        owner: String,
-        repo: String,
+        repo: RepoIdentity,
         labels: Vec<(String, String)>,
     },
     RepoAssigneesSuggested {
-        owner: String,
-        repo: String,
+        repo: RepoIdentity,
         assignees: Vec<String>,
     },
     RepoLabelsFailed {
-        owner: String,
-        repo: String,
+        repo: RepoIdentity,
         message: String,
     },
     RepoAssigneesFailed {
-        owner: String,
-        repo: String,
+        repo: RepoIdentity,
         message: String,
     },
     RepoPermissionsResolved {
-        owner: String,
-        repo: String,
+        repo: RepoIdentity,
         can_edit_issue_metadata: bool,
         can_merge_pull_request: bool,
     },
     RepoPermissionsFailed {
-        owner: String,
-        repo: String,
+        repo: RepoIdentity,
         message: String,
     },
 }

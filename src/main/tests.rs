@@ -13,7 +13,7 @@ fn worker_events_request_one_redraw_per_batch() {
 
     event_tx
         .send(super::AppEvent::IssueCreateFailed {
-            repo: super::RepoIdentity::new("other", "repo"),
+            repo: super::RepoIdentity::new("other", "repo", None),
             message: "Offscreen failure".to_string(),
         })
         .unwrap();
@@ -126,13 +126,11 @@ fn offscreen_sync_completions_release_only_their_original_targets() {
             message: "old".into(),
         },
         super::AppEvent::RepoPermissionsFailed {
-            owner: "ACME".into(),
-            repo: "One".into(),
+            repo: super::RepoIdentity::new("ACME", "One", None),
             message: "old".into(),
         },
         super::AppEvent::RepoLabelsFailed {
-            owner: "ACME".into(),
-            repo: "One".into(),
+            repo: super::RepoIdentity::new("ACME", "One", None),
             message: "old".into(),
         },
         super::AppEvent::CommentsFailed {
@@ -179,8 +177,7 @@ fn repository_event_identity_is_case_insensitive() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::RepoPermissionsResolved {
-            owner: "acme".into(),
-            repo: "blippy".into(),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             can_edit_issue_metadata: true,
             can_merge_pull_request: true,
         })
@@ -195,6 +192,7 @@ fn repository_event_identity_is_case_insensitive() {
 fn redirected_repository_sync_keeps_its_cache_and_navigation() {
     let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
     let mut app = linked_navigation_app(true);
+    app.set_current_repo_id(1);
     let resolved = crate::store::RepoRow {
         id: 1,
         owner: "new-acme".into(),
@@ -230,22 +228,20 @@ fn redirected_repository_sync_keeps_its_cache_and_navigation() {
 
     event_tx
         .send(super::AppEvent::RepoPermissionsResolved {
-            owner: "acme".into(),
-            repo: "blippy".into(),
+            repo: super::RepoIdentity::new("acme", "blippy", Some(1)),
             can_edit_issue_metadata: true,
             can_merge_pull_request: true,
         })
         .expect("old permission request completed");
     event_tx
         .send(super::AppEvent::RepoLabelsSuggested {
-            owner: "acme".into(),
-            repo: "blippy".into(),
+            repo: super::RepoIdentity::new("acme", "blippy", Some(1)),
             labels: vec![("bug".into(), "ff0000".into())],
         })
         .expect("old label request completed");
     event_tx
         .send(super::AppEvent::IssueUpdated {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", Some(1)),
             issue_number: 7,
             message: "closed".into(),
         })
@@ -300,6 +296,7 @@ fn recreated_repository_sync_replaces_the_current_tui_context() {
     let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
     let mut app = linked_navigation_app(true);
     app.set_current_repo_id(1);
+    app.set_pending_issue_action(7, PendingIssueAction::Closing);
     app.set_linked_pull_request(7, Some(8));
     app.set_comments(vec![crate::store::CommentRow {
         id: 10,
@@ -325,6 +322,8 @@ fn recreated_repository_sync_replaces_the_current_tui_context() {
     };
     crate::store::upsert_issue(&conn, &issue).expect("replacement issue");
     app.begin_repo_sync();
+    app.begin_repo_permissions_sync();
+    app.begin_repo_labels_sync();
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::SyncFinished {
@@ -339,6 +338,7 @@ fn recreated_repository_sync_replaces_the_current_tui_context() {
 
     assert_eq!(app.issues(), &[issue]);
     assert_eq!(app.current_repo_id(), Some(2));
+    assert_eq!(app.pending_issue_badge(7), None);
     assert_eq!(app.current_issue_id(), None);
     assert!(app.comments().is_empty());
     assert!(app.linked_pull_requests_for_issue(7).is_empty());
@@ -346,7 +346,188 @@ fn recreated_repository_sync_replaces_the_current_tui_context() {
     assert_eq!(app.issue_query(), "");
     assert!(!app.has_assignee_filter());
     assert!(!app.syncing());
+    assert!(!app.repo_permissions_syncing());
+    assert!(!app.repo_labels_syncing());
     assert!(app.status().starts_with("Synced"));
+}
+
+#[test]
+fn repository_metadata_waits_for_a_known_repository_id() {
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    let (event_tx, event_rx) = channel();
+
+    super::main_sync::maybe_start_repo_permissions_sync(&mut app, "token", event_tx.clone());
+    super::main_sync::maybe_start_repo_labels_sync(&mut app, "token", event_tx);
+
+    assert!(app.take_repo_permissions_sync_request());
+    assert!(app.take_repo_labels_sync_request());
+    assert!(!app.repo_permissions_syncing());
+    assert!(!app.repo_labels_syncing());
+    assert!(event_rx.try_recv().is_err());
+}
+
+#[test]
+fn recreated_repository_rejects_old_completions_without_clearing_new_pending() {
+    for action in [
+        "close",
+        "labels",
+        "assignees",
+        "failure",
+        "metadata",
+        "links",
+    ] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = linked_navigation_app(true);
+        app.set_current_repo_id(1);
+        app.set_pending_issue_action(7, PendingIssueAction::Closing);
+        app.begin_repo_permissions_sync();
+        app.begin_repo_labels_sync();
+        let old_request = super::RepoIdentity::new("acme", "blippy", app.current_repo_id());
+        let replacement = crate::store::RepoRow {
+            id: 2,
+            owner: "acme".into(),
+            name: "blippy".into(),
+            updated_at: None,
+            etag: None,
+        };
+        crate::store::upsert_repo(&conn, &replacement).expect("replacement repository");
+        let issue = IssueRow {
+            id: 100,
+            repo_id: 2,
+            ..app.issues()[0].clone()
+        };
+        crate::store::upsert_issue(&conn, &issue).expect("replacement issue");
+        let (event_tx, event_rx) = channel();
+        event_tx
+            .send(super::AppEvent::SyncFinished {
+                owner: "acme".into(),
+                repo: "blippy".into(),
+                resolved_repo: replacement,
+                stats: Default::default(),
+            })
+            .unwrap();
+        super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap();
+        app.set_pending_issue_action(7, PendingIssueAction::UpdatingLabels);
+        app.begin_repo_permissions_sync();
+        app.begin_repo_labels_sync();
+        app.set_repo_issue_metadata_editable(Some(true));
+        app.set_repo_pull_request_mergeable(Some(true));
+        if action == "metadata" {
+            app.open_assignee_picker(View::Issues, vec!["current".into()], "");
+        }
+        if action == "links" {
+            assert!(app.begin_linked_pull_request_lookup(7));
+            assert!(app.begin_linked_issue_lookup(7));
+        }
+        app.set_status("New repository action");
+        app.take_sync_request();
+        let events = match action {
+            "labels" => vec![super::AppEvent::IssueLabelsUpdated {
+                repo: old_request,
+                issue_number: 7,
+                labels: vec!["stale".into()],
+            }],
+            "assignees" => vec![super::AppEvent::IssueAssigneesUpdated {
+                repo: old_request,
+                issue_number: 7,
+                assignees: "stale".into(),
+            }],
+            "metadata" => vec![
+                super::AppEvent::RepoPermissionsResolved {
+                    repo: old_request.clone(),
+                    can_edit_issue_metadata: false,
+                    can_merge_pull_request: false,
+                },
+                super::AppEvent::RepoPermissionsFailed {
+                    repo: old_request.clone(),
+                    message: "old".into(),
+                },
+                super::AppEvent::RepoLabelsSuggested {
+                    repo: old_request.clone(),
+                    labels: vec![("stale".into(), "ff0000".into())],
+                },
+                super::AppEvent::RepoLabelsFailed {
+                    repo: old_request.clone(),
+                    message: "old".into(),
+                },
+                super::AppEvent::RepoAssigneesFailed {
+                    repo: old_request.clone(),
+                    message: "old".into(),
+                },
+                super::AppEvent::RepoAssigneesSuggested {
+                    repo: old_request,
+                    assignees: vec!["stale".into()],
+                },
+            ],
+            "links" => vec![
+                super::AppEvent::LinkedPullRequestResolved {
+                    repo: old_request.clone(),
+                    issue_number: 7,
+                    pull_requests: vec![(8, String::new())],
+                    target: super::LinkedPullRequestTarget::Probe,
+                },
+                super::AppEvent::LinkedIssueResolved {
+                    repo: old_request.clone(),
+                    pull_number: 7,
+                    issues: crate::github::LinkedIssues {
+                        issues: vec![(8, String::new())],
+                        incomplete_reason: None,
+                    },
+                    target: super::LinkedIssueTarget::Probe,
+                },
+                super::AppEvent::LinkedPullRequestLookupFailed {
+                    repo: old_request.clone(),
+                    issue_number: 7,
+                    message: "old".into(),
+                    target: super::LinkedPullRequestTarget::Probe,
+                },
+                super::AppEvent::LinkedIssueLookupFailed {
+                    repo: old_request,
+                    pull_number: 7,
+                    message: "old".into(),
+                    target: super::LinkedIssueTarget::Probe,
+                },
+            ],
+            _ => vec![super::AppEvent::IssueUpdated {
+                repo: old_request,
+                issue_number: 7,
+                message: if action == "close" {
+                    "closed"
+                } else {
+                    "close failed: old"
+                }
+                .into(),
+            }],
+        };
+        for event in events {
+            event_tx.send(event).unwrap();
+        }
+        super::main_events::handle_events(&mut app, &conn, &event_rx).unwrap();
+
+        assert_eq!(app.issues(), &[issue], "{action}");
+        assert_eq!(
+            app.pending_issue_badge(7),
+            Some("updating labels"),
+            "{action}"
+        );
+        assert_eq!(app.status(), "New repository action", "{action}");
+        assert!(app.repo_permissions_syncing(), "{action}");
+        assert!(app.repo_labels_syncing(), "{action}");
+        assert_eq!(app.repo_issue_metadata_editable(), Some(true), "{action}");
+        assert_eq!(app.repo_pull_request_mergeable(), Some(true), "{action}");
+        assert_eq!(app.repo_label_color("stale"), None, "{action}");
+        assert!(app.linked_pull_requests_for_issue(7).is_empty(), "{action}");
+        assert!(app.linked_issues_for_pull_request(7).is_empty(), "{action}");
+        if action == "metadata" {
+            assert_eq!(app.assignee_options(), &["current"], "{action}");
+        }
+        if action == "links" {
+            assert!(!app.begin_linked_pull_request_lookup(7));
+            assert!(!app.begin_linked_issue_lookup(7));
+        }
+        assert!(!app.take_sync_request(), "{action}");
+    }
 }
 
 #[test]
@@ -482,7 +663,7 @@ fn successful_github_mutations_survive_cache_write_failures() {
         app.set_comments(vec![comment]);
         conn.pragma_update(None, "query_only", true)
             .expect("read-only cache");
-        let repo = super::RepoIdentity::new("acme", "blippy");
+        let repo = super::RepoIdentity::new("acme", "blippy", None);
         let event = match action {
             "create" => super::AppEvent::IssueCreated {
                 repo,
@@ -505,8 +686,7 @@ fn successful_github_mutations_survive_cache_write_failures() {
         event_tx.send(event).expect("successful GitHub mutation");
         event_tx
             .send(super::AppEvent::RepoPermissionsResolved {
-                owner: "acme".into(),
-                repo: "blippy".into(),
+                repo: super::RepoIdentity::new("acme", "blippy", None),
                 can_edit_issue_metadata: true,
                 can_merge_pull_request: true,
             })
@@ -701,15 +881,17 @@ fn offscreen_completion_clears_only_its_repository_action() {
     let conn = rusqlite::Connection::open_in_memory().expect("conn");
     let mut app = crate::app::App::new(Config::default());
     app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_current_repo_id(1);
     app.set_pending_issue_action(7, PendingIssueAction::Closing);
     app.set_current_repo_with_path("acme", "other", None);
+    app.set_current_repo_id(2);
     app.set_pending_issue_action(7, PendingIssueAction::Merging);
     app.set_status("Other repository");
 
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::IssueUpdated {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", Some(1)),
             issue_number: 7,
             message: "closed".to_string(),
         })
@@ -719,6 +901,7 @@ fn offscreen_completion_clears_only_its_repository_action() {
     assert_eq!(app.pending_issue_badge(7), Some("merging"));
     assert_eq!(app.status(), "Other repository");
     app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_current_repo_id(1);
     assert_eq!(app.pending_issue_badge(7), None);
 }
 
@@ -1028,7 +1211,7 @@ fn issue_updated_marks_pull_request_merged() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::IssueUpdated {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             issue_number: 92,
             message: "merged".to_string(),
         })
@@ -1067,7 +1250,7 @@ fn issue_events_from_another_repo_do_not_change_current_repo() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::IssueUpdated {
-            repo: super::RepoIdentity::new("acme", "previous"),
+            repo: super::RepoIdentity::new("acme", "previous", None),
             issue_number: 92,
             message: "closed".to_string(),
         })
@@ -1089,7 +1272,7 @@ fn failed_link_probe_retries_only_after_refresh() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::LinkedPullRequestLookupFailed {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             issue_number: 7,
             message: "offline".to_string(),
             target: super::LinkedPullRequestTarget::Probe,
@@ -1133,7 +1316,7 @@ fn partial_linked_issues_remain_visible_and_refresh_discovers_missing_links() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::LinkedIssueResolved {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             pull_number: 9,
             issues: crate::github::LinkedIssues {
                 issues: vec![(100, "https://github.com/acme/blippy/issues/100".to_string())],
@@ -1158,7 +1341,7 @@ fn partial_linked_issues_remain_visible_and_refresh_discovers_missing_links() {
     );
     event_tx
         .send(super::AppEvent::LinkedIssueResolved {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             pull_number: 9,
             issues: crate::github::LinkedIssues {
                 issues: vec![
@@ -1454,7 +1637,7 @@ fn created_issue_is_opened_even_when_hidden_by_filters() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::IssueCreated {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             issue: created.clone(),
         })
         .expect("created event");
@@ -1541,7 +1724,7 @@ fn comment_deletion_preserves_the_total_when_the_cache_is_partial() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::IssueCommentDeleted {
-            repo: super::RepoIdentity::new("acme", "blippy"),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             issue_number: 7,
             issue_id: 1,
             comment_id: 50,
@@ -1571,8 +1754,7 @@ fn metadata_fetch_failures_report_errors_and_release_the_request() {
     let (event_tx, event_rx) = channel();
     event_tx
         .send(super::AppEvent::RepoLabelsFailed {
-            owner: "acme".to_string(),
-            repo: "other".to_string(),
+            repo: super::RepoIdentity::new("acme", "other", None),
             message: "wrong repo".to_string(),
         })
         .expect("unrelated event");
@@ -1583,8 +1765,7 @@ fn metadata_fetch_failures_report_errors_and_release_the_request() {
 
     event_tx
         .send(super::AppEvent::RepoLabelsFailed {
-            owner: "acme".to_string(),
-            repo: "blippy".to_string(),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             message: "offline".to_string(),
         })
         .expect("failed labels event");
@@ -1594,8 +1775,7 @@ fn metadata_fetch_failures_report_errors_and_release_the_request() {
 
     event_tx
         .send(super::AppEvent::RepoAssigneesFailed {
-            owner: "acme".to_string(),
-            repo: "blippy".to_string(),
+            repo: super::RepoIdentity::new("acme", "blippy", None),
             message: "forbidden".to_string(),
         })
         .expect("failed assignees event");

@@ -124,7 +124,7 @@ fn pending_issue_actions_survive_navigation_and_clear_for_the_original_repo() {
     assert_eq!(app.pending_issue_badge(7), Some("closing"));
 
     app.set_current_repo_with_path("Other", "One", None);
-    app.clear_pending_issue_action("ACME", "one", 7);
+    app.clear_pending_issue_action("ACME", "one", None, 7);
     assert_eq!(app.pending_issue_badge(7), Some("updating labels"));
 
     app.set_current_repo_with_path("Acme", "One", None);
@@ -157,8 +157,8 @@ fn repository_aliases_follow_repeated_renames_without_cycles() {
     for alias in ["one", "two", "three"] {
         assert!(app.repository_is_current("ACME", alias));
     }
-    app.finish_repo_permissions_sync("acme", "one");
-    app.clear_pending_issue_action("acme", "one", 7);
+    app.finish_repo_permissions_sync("acme", "one", None);
+    app.clear_pending_issue_action("acme", "one", None, 7);
     assert!(!app.repo_permissions_syncing());
     assert_eq!(app.pending_issue_badge(7), None);
 }
@@ -186,17 +186,17 @@ fn aliased_requests_keep_independent_completion_guards() {
         },
     );
     app.finish_repo_sync("acme", "old");
-    app.finish_repo_permissions_sync("acme", "old");
-    app.finish_repo_labels_sync("acme", "old");
-    app.clear_pending_issue_action("acme", "old", 7);
+    app.finish_repo_permissions_sync("acme", "old", None);
+    app.finish_repo_labels_sync("acme", "old", None);
+    app.clear_pending_issue_action("acme", "old", None, 7);
     assert!(app.syncing());
     assert!(app.repo_permissions_syncing());
     assert!(app.repo_labels_syncing());
     assert_eq!(app.pending_issue_badge(7), Some("closing"));
     app.finish_repo_sync("acme", "new");
-    app.finish_repo_permissions_sync("acme", "new");
-    app.finish_repo_labels_sync("acme", "new");
-    app.clear_pending_issue_action("acme", "new", 7);
+    app.finish_repo_permissions_sync("acme", "new", None);
+    app.finish_repo_labels_sync("acme", "new", None);
+    app.clear_pending_issue_action("acme", "new", None, 7);
     assert!(!app.syncing());
     assert!(!app.repo_permissions_syncing());
     assert!(!app.repo_labels_syncing());

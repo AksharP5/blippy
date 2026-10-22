@@ -31,8 +31,7 @@ pub(super) fn maybe_probe_visible_linked_items(
                 continue;
             }
             start_linked_issue_lookup(
-                owner.clone(),
-                repo.clone(),
+                RepoIdentity::new(&owner, &repo, app.current_repo_id()),
                 number,
                 token.to_string(),
                 event_tx.clone(),
@@ -45,8 +44,7 @@ pub(super) fn maybe_probe_visible_linked_items(
             continue;
         }
         start_linked_pull_request_lookup(
-            owner.clone(),
-            repo.clone(),
+            RepoIdentity::new(&owner, &repo, app.current_repo_id()),
             number,
             token.to_string(),
             event_tx.clone(),
@@ -214,8 +212,7 @@ pub(super) fn open_linked_pull_request(
     };
 
     start_linked_pull_request_lookup(
-        owner,
-        repo,
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         token.to_string(),
         event_tx,
@@ -257,8 +254,7 @@ pub(super) fn open_linked_issue(
     };
 
     start_linked_issue_lookup(
-        owner,
-        repo,
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         pull_number,
         token.to_string(),
         event_tx,
@@ -391,14 +387,14 @@ pub(super) fn open_linked_item_in_tui(
 }
 
 pub(super) fn start_linked_pull_request_lookup(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     token: String,
     event_tx: Sender<AppEvent>,
     target: LinkedPullRequestTarget,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -440,14 +436,14 @@ pub(super) fn start_linked_pull_request_lookup(
 }
 
 pub(super) fn start_linked_issue_lookup(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     pull_number: i64,
     token: String,
     event_tx: Sender<AppEvent>,
     target: LinkedIssueTarget,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
