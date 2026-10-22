@@ -113,6 +113,11 @@ impl App {
     }
 
     pub fn merge_label_options(&mut self, labels: Vec<String>) {
+        let highlighted = self
+            .metadata_picker
+            .label_options
+            .get(self.metadata_picker.selected_label_option)
+            .cloned();
         let mut merged = self.metadata_picker.label_options.clone();
         for label in labels {
             if label.trim().is_empty() {
@@ -128,7 +133,13 @@ impl App {
         }
         merged.sort_by_key(|value| value.to_ascii_lowercase());
         self.metadata_picker.label_options = merged;
-        if let Some(index) = self.filtered_label_indices().first() {
+        let filtered = self.filtered_label_indices();
+        let highlighted_index = highlighted.and_then(|highlighted| {
+            filtered.iter().find(|&&index| {
+                self.metadata_picker.label_options[index].eq_ignore_ascii_case(&highlighted)
+            })
+        });
+        if let Some(index) = highlighted_index.or_else(|| filtered.first()) {
             self.metadata_picker.selected_label_option = *index;
         }
     }
@@ -145,6 +156,11 @@ impl App {
     }
 
     pub fn merge_assignee_options(&mut self, assignees: Vec<String>) {
+        let highlighted = self
+            .metadata_picker
+            .assignee_options
+            .get(self.metadata_picker.selected_assignee_option)
+            .cloned();
         let mut merged = self.metadata_picker.assignee_options.clone();
         for assignee in assignees {
             if assignee.trim().is_empty() {
@@ -160,7 +176,13 @@ impl App {
         }
         merged.sort_by_key(|value| value.to_ascii_lowercase());
         self.metadata_picker.assignee_options = merged;
-        if let Some(index) = self.filtered_assignee_indices().first() {
+        let filtered = self.filtered_assignee_indices();
+        let highlighted_index = highlighted.and_then(|highlighted| {
+            filtered.iter().find(|&&index| {
+                self.metadata_picker.assignee_options[index].eq_ignore_ascii_case(&highlighted)
+            })
+        });
+        if let Some(index) = highlighted_index.or_else(|| filtered.first()) {
             self.metadata_picker.selected_assignee_option = *index;
         }
     }
