@@ -684,3 +684,90 @@ fn persistent_status_does_not_clear_from_expiry_check() {
 
     assert_eq!(app.status(), "Sync failed");
 }
+
+#[test]
+fn metadata_pickers_ignore_background_mouse_targets() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    for labels in [true, false] {
+        let mut app = App::new(Config::default());
+        app.set_issues(
+            (1..=3)
+                .map(|id| IssueRow {
+                    id,
+                    repo_id: 1,
+                    number: id,
+                    state: "open".into(),
+                    title: format!("Issue {id}"),
+                    body: String::new(),
+                    labels: vec![],
+                    assignees: String::new(),
+                    comments_count: 0,
+                    updated_at: None,
+                    is_pr: false,
+                })
+                .collect(),
+        );
+        app.set_current_issue(3, 3);
+        if labels {
+            app.open_label_picker(View::Issues, vec!["bug".into(), "feature".into()], &[]);
+        } else {
+            app.open_assignee_picker(View::Issues, vec!["alex".into(), "sam".into()], "");
+        }
+        let view = app.view();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .expect("draw picker");
+
+        for target in [
+            MouseTarget::IssueRow(1),
+            MouseTarget::IssueTabClosed,
+            MouseTarget::RepoPicker,
+        ] {
+            let region = app
+                .interaction
+                .mouse_regions
+                .iter()
+                .find(|region| region.target == target)
+                .copied()
+                .expect("rendered background target");
+            assert_eq!(app.mouse_target_at(region.x, region.y), Some(target));
+            app.on_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: region.x,
+                row: region.y,
+                modifiers: KeyModifiers::NONE,
+            });
+            assert_eq!(app.take_action(), None, "background target {target:?}");
+            assert_eq!(app.view(), view);
+            assert_eq!(app.current_issue_number(), Some(3));
+            assert_eq!(app.selected_issue(), 0);
+            assert_eq!(app.issue_filter(), IssueFilter::Open);
+        }
+
+        let option = if labels {
+            MouseTarget::LabelOption(0)
+        } else {
+            MouseTarget::AssigneeOption(0)
+        };
+        let region = app
+            .interaction
+            .mouse_regions
+            .iter()
+            .find(|region| region.target == option)
+            .copied()
+            .expect("rendered picker option");
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: region.x,
+            row: region.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        if labels {
+            assert_eq!(app.selected_labels(), vec!["bug"]);
+        } else {
+            assert_eq!(app.selected_assignees(), vec!["alex"]);
+        }
+    }
+}
