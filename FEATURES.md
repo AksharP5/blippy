@@ -39,6 +39,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Jump from a PR to its linked issue (and back)
 - Includes issues closed by the pull request
 - Open linked items in TUI or browser
+- Linked-item lookups follow the selected row when scrolling through the issue or PR list
 - Linked metadata is cached to reduce repeated lookups; partial results remain usable, and refresh retries incomplete or failed lookups
 - Opening a linked item clears list search and assignee filters to reveal the target
 
