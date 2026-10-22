@@ -14,6 +14,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Broken local repositories are reported while scanning continues for healthy repositories
 - Stalled GitHub API requests time out after 30 seconds
 - Background sync avoids duplicate requests during repository and issue navigation
+- Background refresh preserves the reading position of the selected issue and comment
 - Renamed and transferred repositories retain their cached issues and linked items
 - Cache write failures report successful GitHub actions and keep the terminal session open
 
