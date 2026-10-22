@@ -56,6 +56,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 ## Comments and Review Threads
 
 - Add, edit, and delete issue comments
+- Read long comments with arrow-key or mouse-wheel scrolling; `j`/`k` still jump between comments
 - Add, edit, and delete inline PR review comments
 - Resolve or reopen PR review threads
 - Navigate comment threads on selected diff lines

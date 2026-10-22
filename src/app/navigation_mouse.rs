@@ -35,6 +35,15 @@ impl App {
         let Some(target) = target else {
             return;
         };
+        if self.view == View::IssueComments
+            && matches!(
+                target,
+                MouseTarget::CommentsPane | MouseTarget::CommentRow(_)
+            )
+        {
+            self.scroll_issue_comments(if down { 1 } else { -1 });
+            return;
+        }
         if matches!(target, MouseTarget::RepoListPane | MouseTarget::RepoRow(_)) {
             if self.view == View::RepoPicker {
                 if down {

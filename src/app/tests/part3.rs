@@ -1,6 +1,76 @@
 use super::*;
 
 #[test]
+fn long_comments_can_be_read_with_arrows_and_mouse_wheel() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    for mouse in [false, true] {
+        let mut app = App::new(Config::default());
+        app.set_current_issue(10, 1);
+        app.set_view(View::IssueComments);
+        app.set_comments(vec![CommentRow {
+            id: 1,
+            issue_id: 10,
+            author: "dev".into(),
+            body: format!(
+                "```\n{}\n```",
+                (1..=80)
+                    .map(|line| format!("content line {line:02}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            created_at: None,
+            last_accessed_at: None,
+        }]);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .expect("draw comments");
+        let mut saw_middle = false;
+        for _ in 0..45 {
+            if mouse {
+                let pane = app
+                    .interaction
+                    .mouse_regions
+                    .iter()
+                    .find(|region| region.target == MouseTarget::CommentsPane)
+                    .copied()
+                    .expect("comments pane");
+                app.on_mouse(MouseEvent {
+                    kind: MouseEventKind::ScrollDown,
+                    column: pane.x + 1,
+                    row: pane.y + 1,
+                    modifiers: KeyModifiers::NONE,
+                });
+            } else {
+                app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            }
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw scrolled comments");
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            saw_middle |= text.contains("content line 40");
+            assert_eq!(app.selected_comment(), 0);
+        }
+        assert!(
+            saw_middle,
+            "middle of a long comment is reachable with mouse={mouse}"
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        let bottom = app.issue_comments_scroll();
+        app.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.issue_comments_scroll(), bottom - 1);
+    }
+}
+
+#[test]
 fn enter_toggles_pull_request_diff_expanded_mode() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);
