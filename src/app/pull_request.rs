@@ -173,24 +173,22 @@ impl App {
         side: ReviewSide,
         line: i64,
     ) -> Vec<&PullRequestReviewComment> {
-        self.pull_request
-            .pull_request_review_comments
+        let comments = &self.pull_request.pull_request_review_comments;
+        // set_pull_request_review_comments keeps comments sorted by path, line, and ID.
+        let start = comments
+            .partition_point(|comment| (comment.path.as_str(), comment.line) < (path, line));
+        comments[start..]
             .iter()
-            .filter(|comment| {
-                comment.anchored
-                    && comment.path == path
-                    && comment.side == side
-                    && comment.line == line
-            })
-            .collect::<Vec<&PullRequestReviewComment>>()
+            .take_while(|comment| comment.path == path && comment.line == line)
+            .filter(|comment| comment.anchored && comment.side == side)
+            .collect()
     }
 
     pub fn pull_request_comments_count_for_path(&self, path: &str) -> usize {
-        self.pull_request
-            .pull_request_review_comments
-            .iter()
-            .filter(|comment| comment.path == path)
-            .count()
+        let comments = &self.pull_request.pull_request_review_comments;
+        let start = comments.partition_point(|comment| comment.path.as_str() < path);
+        let end = comments.partition_point(|comment| comment.path.as_str() <= path);
+        end - start
     }
 
     pub fn selected_pull_request_review_comment(&self) -> Option<&PullRequestReviewComment> {
@@ -736,6 +734,67 @@ mod tests {
         }
         app.pull_request.selected_pull_request_diff_line = 1;
         app
+    }
+
+    #[test]
+    fn review_comment_lookups_preserve_paths_sides_and_id_order() {
+        let comment = |id, path: &str, line, side, anchored| PullRequestReviewComment {
+            id,
+            thread_id: None,
+            resolved: false,
+            anchored,
+            path: path.to_string(),
+            line,
+            side,
+            body: String::new(),
+            author: "reviewer".to_string(),
+            created_at: None,
+        };
+        let mut app = App::new(Config::default());
+        app.set_pull_request_review_comments(vec![
+            comment(3, "b.rs", 10, ReviewSide::Right, true),
+            comment(9, "a.rs", 10, ReviewSide::Right, true),
+            comment(5, "a.rs", 10, ReviewSide::Left, true),
+            comment(1, "a.rs", 9, ReviewSide::Right, true),
+            comment(2, "a.rs", 10, ReviewSide::Right, true),
+            comment(4, "a.rs", 10, ReviewSide::Right, false),
+            comment(6, "a.rs", 11, ReviewSide::Right, true),
+            comment(8, "c.rs", 10, ReviewSide::Right, true),
+        ]);
+        for (path, line, side, expected) in [
+            ("a.rs", 10, ReviewSide::Right, vec![2, 9]),
+            ("a.rs", 10, ReviewSide::Left, vec![5]),
+            ("a.rs", 9, ReviewSide::Right, vec![1]),
+            ("a.rs", 11, ReviewSide::Right, vec![6]),
+            ("b.rs", 10, ReviewSide::Right, vec![3]),
+            ("c.rs", 10, ReviewSide::Right, vec![8]),
+            ("", 10, ReviewSide::Right, vec![]),
+            ("a.rs", 12, ReviewSide::Right, vec![]),
+            ("z.rs", 10, ReviewSide::Right, vec![]),
+        ] {
+            let ids = app
+                .pull_request_comments_for_path_and_line(path, side, line)
+                .iter()
+                .map(|comment| comment.id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected);
+        }
+        assert_eq!(app.pull_request_comments_count_for_path("a.rs"), 6);
+        assert_eq!(app.pull_request_comments_count_for_path("b.rs"), 1);
+        assert_eq!(app.pull_request_comments_count_for_path("absent.rs"), 0);
+        app.remove_pull_request_review_comment_by_id(2);
+        app.update_pull_request_review_comment_body_by_id(9, "updated");
+        let remaining = app.pull_request_comments_for_path_and_line("a.rs", ReviewSide::Right, 10);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, 9);
+        assert_eq!(remaining[0].body, "updated");
+        assert_eq!(app.pull_request_comments_count_for_path("a.rs"), 5);
+        app.set_pull_request_review_comments(vec![]);
+        assert!(
+            app.pull_request_comments_for_path_and_line("a.rs", ReviewSide::Right, 10)
+                .is_empty()
+        );
+        assert_eq!(app.pull_request_comments_count_for_path("a.rs"), 0);
     }
 
     #[test]
