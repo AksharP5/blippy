@@ -20,7 +20,13 @@ pub(crate) fn close_issue_with_comment(
     if !ensure_issue_action_available(app, issue_number) {
         return Ok(());
     }
-    start_close_issue(owner, repo, issue_number, token.to_string(), body, event_tx);
+    start_close_issue(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        issue_number,
+        token.to_string(),
+        body,
+        event_tx,
+    );
     app.set_pending_issue_action(issue_number, PendingIssueAction::Closing);
     app.set_view(View::Issues);
     app.set_status("Closing issue".to_string());
@@ -64,7 +70,13 @@ pub(crate) fn submit_created_issue(
         }
     };
 
-    start_create_issue(owner, repo, token.to_string(), title, body, event_tx);
+    start_create_issue(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        token.to_string(),
+        title,
+        body,
+        event_tx,
+    );
     app.set_view(app.editor_cancel_view());
     app.set_status("Creating issue".to_string());
     Ok(())
@@ -92,7 +104,13 @@ pub(crate) fn post_issue_comment(
             }
         };
 
-    start_add_comment(owner, repo, issue_number, token.to_string(), body, event_tx);
+    start_add_comment(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        issue_number,
+        token.to_string(),
+        body,
+        event_tx,
+    );
     app.set_view(app.editor_cancel_view());
     app.set_status("Posting comment".to_string());
     Ok(())
@@ -134,8 +152,7 @@ pub(crate) fn update_issue_comment(
     };
 
     start_update_comment(
-        owner,
-        repo,
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         comment_id,
         token.to_string(),
@@ -176,8 +193,7 @@ pub(crate) fn delete_issue_comment(
     };
 
     start_delete_comment(
-        owner,
-        repo,
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         comment.id,
         comment.issue_id,
@@ -213,8 +229,7 @@ pub(crate) fn update_issue_labels(
         return Ok(());
     }
     start_update_labels(
-        owner,
-        repo,
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         token.to_string(),
         labels,
@@ -252,8 +267,7 @@ pub(crate) fn update_issue_assignees(
     }
     let assignees_display = assignees.join(",");
     start_update_assignees(
-        owner,
-        repo,
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         token.to_string(),
         assignees,
@@ -303,7 +317,12 @@ pub(crate) fn reopen_issue(app: &mut App, token: &str, event_tx: Sender<AppEvent
         }
     };
 
-    start_reopen_issue(owner, repo, issue_number, token.to_string(), event_tx);
+    start_reopen_issue(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        issue_number,
+        token.to_string(),
+        event_tx,
+    );
     app.set_pending_issue_action(issue_number, PendingIssueAction::Reopening);
     app.set_status("Reopening issue".to_string());
     Ok(())
@@ -356,7 +375,12 @@ pub(crate) fn merge_pull_request(
         }
     };
 
-    start_merge_pull_request(owner, repo, issue_number, token.to_string(), event_tx);
+    start_merge_pull_request(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        issue_number,
+        token.to_string(),
+        event_tx,
+    );
     app.set_pending_issue_action(issue_number, PendingIssueAction::Merging);
     app.set_status(format!("Merging pull request #{}", issue_number));
     Ok(())

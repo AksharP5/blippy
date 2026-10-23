@@ -52,8 +52,7 @@ pub(super) fn handle_actions(
                 if app.begin_linked_issue_lookup(issue_number) {
                     if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                         super::main_linked_actions::start_linked_issue_lookup(
-                            owner.to_string(),
-                            repo.to_string(),
+                            RepoIdentity::new(owner, repo, app.current_repo_id()),
                             issue_number,
                             token.to_string(),
                             event_tx.clone(),
@@ -66,8 +65,7 @@ pub(super) fn handle_actions(
             } else if app.begin_linked_pull_request_lookup(issue_number) {
                 if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                     super::main_linked_actions::start_linked_pull_request_lookup(
-                        owner.to_string(),
-                        repo.to_string(),
+                        RepoIdentity::new(owner, repo, app.current_repo_id()),
                         issue_number,
                         token.to_string(),
                         event_tx.clone(),
@@ -266,8 +264,7 @@ pub(super) fn handle_actions(
             app.open_assignee_picker(return_view, options, assignees.as_str());
             if let (Some(owner), Some(repo)) = (app.current_owner(), app.current_repo()) {
                 start_fetch_assignees(
-                    owner.to_string(),
-                    repo.to_string(),
+                    RepoIdentity::new(owner, repo, app.current_repo_id()),
                     token.to_string(),
                     event_tx.clone(),
                 );

@@ -364,11 +364,11 @@ impl WorkItemMode {
 struct SyncState {
     scanning: bool,
     syncing: HashSet<String>,
-    repo_permissions_syncing: HashSet<String>,
+    repo_permissions_syncing: HashMap<String, Option<i64>>,
     repo_permissions_sync_requested: bool,
     repo_issue_metadata_editable: Option<bool>,
     repo_pull_request_mergeable: Option<bool>,
-    repo_labels_syncing: HashSet<String>,
+    repo_labels_syncing: HashMap<String, Option<i64>>,
     repo_labels_sync_requested: bool,
     comment_syncing: HashSet<i64>,
     pull_request_files_syncing: HashSet<i64>,
@@ -536,7 +536,7 @@ impl Default for LinkedPickerState {
 #[derive(Debug, Default)]
 struct InteractionState {
     action: Option<AppAction>,
-    pending_issue_actions: HashMap<String, HashMap<i64, PendingIssueAction>>,
+    pending_issue_actions: HashMap<String, HashMap<i64, (Option<i64>, PendingIssueAction)>>,
     pending_file_view_updates: HashSet<(i64, String)>,
     pending_g: bool,
     pending_d: bool,

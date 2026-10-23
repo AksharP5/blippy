@@ -34,6 +34,30 @@ impl App {
         self.repository_key_is_current(&repository_key(owner, repo))
     }
 
+    pub fn repository_request_is_current(&self, owner: &str, repo: &str, id: Option<i64>) -> bool {
+        self.repository_request_key_is_current(&repository_key(owner, repo), id)
+    }
+
+    pub(super) fn repository_request_key_is_current(&self, key: &str, id: Option<i64>) -> bool {
+        match id {
+            Some(requested) => self.context.id == Some(requested),
+            None => self.repository_key_is_current(key),
+        }
+    }
+
+    pub fn clear_repository_requests(&mut self, repo_id: i64) {
+        self.interaction.pending_issue_actions.retain(|_, actions| {
+            actions.retain(|_, (id, _)| *id != Some(repo_id));
+            !actions.is_empty()
+        });
+        self.sync
+            .repo_permissions_syncing
+            .retain(|_, id| *id != Some(repo_id));
+        self.sync
+            .repo_labels_syncing
+            .retain(|_, id| *id != Some(repo_id));
+    }
+
     pub fn set_current_repo_id(&mut self, id: i64) {
         self.context.id = Some(id);
         if let Some(key) = self.current_repository_request_key() {
@@ -299,26 +323,30 @@ impl App {
 
     pub fn begin_repo_permissions_sync(&mut self) {
         if let Some(key) = self.current_repository_request_key() {
-            self.sync.repo_permissions_syncing.insert(key);
+            self.sync
+                .repo_permissions_syncing
+                .insert(key, self.context.id);
         }
     }
 
-    pub fn finish_repo_permissions_sync(&mut self, owner: &str, repo: &str) {
-        self.sync
-            .repo_permissions_syncing
-            .remove(&repository_key(owner, repo));
+    pub fn finish_repo_permissions_sync(&mut self, owner: &str, repo: &str, id: Option<i64>) {
+        let key = repository_key(owner, repo);
+        if self.sync.repo_permissions_syncing.get(&key) == Some(&id) {
+            self.sync.repo_permissions_syncing.remove(&key);
+        }
     }
 
     pub fn begin_repo_labels_sync(&mut self) {
         if let Some(key) = self.current_repository_request_key() {
-            self.sync.repo_labels_syncing.insert(key);
+            self.sync.repo_labels_syncing.insert(key, self.context.id);
         }
     }
 
-    pub fn finish_repo_labels_sync(&mut self, owner: &str, repo: &str) {
-        self.sync
-            .repo_labels_syncing
-            .remove(&repository_key(owner, repo));
+    pub fn finish_repo_labels_sync(&mut self, owner: &str, repo: &str, id: Option<i64>) {
+        let key = repository_key(owner, repo);
+        if self.sync.repo_labels_syncing.get(&key) == Some(&id) {
+            self.sync.repo_labels_syncing.remove(&key);
+        }
     }
 
     pub fn set_repo_issue_metadata_editable(&mut self, editable: Option<bool>) {
@@ -560,15 +588,26 @@ impl App {
             .pending_issue_actions
             .entry(key)
             .or_default()
-            .insert(issue_number, action);
+            .insert(issue_number, (self.context.id, action));
     }
 
-    pub fn clear_pending_issue_action(&mut self, owner: &str, repo: &str, issue_number: i64) {
+    pub fn clear_pending_issue_action(
+        &mut self,
+        owner: &str,
+        repo: &str,
+        id: Option<i64>,
+        issue_number: i64,
+    ) {
         let key = repository_key(owner, repo);
         let Some(actions) = self.interaction.pending_issue_actions.get_mut(&key) else {
             return;
         };
-        actions.remove(&issue_number);
+        if actions
+            .get(&issue_number)
+            .is_some_and(|(pending_id, _)| *pending_id == id)
+        {
+            actions.remove(&issue_number);
+        }
         if actions.is_empty() {
             self.interaction.pending_issue_actions.remove(&key);
         }
@@ -579,13 +618,10 @@ impl App {
             .pending_issue_actions
             .iter()
             .find_map(|(key, actions)| {
-                if !self.repository_key_is_current(key) {
-                    return None;
-                }
                 actions
                     .get(&issue_number)
-                    .copied()
-                    .map(PendingIssueAction::label)
+                    .filter(|(id, _)| self.repository_request_key_is_current(key, *id))
+                    .map(|(_, action)| action.label())
             })
     }
 

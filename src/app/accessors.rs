@@ -229,6 +229,10 @@ impl App {
         self.context.repo.as_deref()
     }
 
+    pub fn current_repo_id(&self) -> Option<i64> {
+        self.context.id
+    }
+
     pub fn scanning(&self) -> bool {
         self.sync.scanning
     }
@@ -244,14 +248,14 @@ impl App {
         self.sync
             .repo_permissions_syncing
             .iter()
-            .any(|key| self.repository_key_is_current(key))
+            .any(|(key, id)| self.repository_request_key_is_current(key, *id))
     }
 
     pub fn repo_labels_syncing(&self) -> bool {
         self.sync
             .repo_labels_syncing
             .iter()
-            .any(|key| self.repository_key_is_current(key))
+            .any(|(key, id)| self.repository_request_key_is_current(key, *id))
     }
 
     pub fn repo_issue_metadata_editable(&self) -> Option<bool> {

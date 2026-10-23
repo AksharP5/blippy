@@ -576,6 +576,41 @@ fn delayed_comment_deletion_keeps_a_refreshed_snapshot_count() {
 }
 
 #[test]
+fn failed_repository_replacement_preserves_the_previous_cache() {
+    let conn = open_db_at(std::path::Path::new(":memory:")).expect("open db");
+    seed_issue(&conn, 10);
+    let comment = test_comment(50, 10, "Cached comment");
+    upsert_comment(&conn, &comment).expect("cache comment");
+    let previous = get_repo_by_slug(&conn, "acme", "blippy")
+        .expect("lookup")
+        .expect("original repo");
+    let issues = list_issues(&conn, previous.id).expect("original issues");
+    conn.execute_batch(
+        "CREATE TRIGGER reject_replacement BEFORE INSERT ON repos WHEN NEW.id = 2
+         BEGIN SELECT RAISE(ABORT, 'cache write failed'); END;",
+    )
+    .expect("inject write failure");
+
+    let replacement = RepoRow {
+        id: 2,
+        ..previous.clone()
+    };
+    assert!(upsert_repo(&conn, &replacement).is_err());
+    assert_eq!(
+        get_repo_by_slug(&conn, "acme", "blippy").expect("preserved repo"),
+        Some(previous.clone())
+    );
+    assert_eq!(
+        list_issues(&conn, previous.id).expect("preserved issues"),
+        issues
+    );
+    assert_eq!(
+        comments_for_issue(&conn, 10).expect("preserved comments"),
+        [comment]
+    );
+}
+
+#[test]
 fn upsert_repo_preserves_existing_sync_state_when_new_values_missing() {
     let dir = unique_temp_dir("repo-sync-state");
     let db_path = dir.join("blippy.db");

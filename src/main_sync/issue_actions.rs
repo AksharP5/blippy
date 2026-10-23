@@ -1,14 +1,14 @@
 use super::*;
 
 pub(crate) fn start_add_comment(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     token: String,
     body: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -47,14 +47,14 @@ pub(crate) fn start_add_comment(
 }
 
 pub(crate) fn start_create_issue(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     token: String,
     title: String,
     body: Option<String>,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_db(
         token,
@@ -101,15 +101,15 @@ pub(crate) fn start_create_issue(
 }
 
 pub(crate) fn start_update_comment(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     comment_id: i64,
     token: String,
     body: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -149,15 +149,15 @@ pub(crate) fn start_update_comment(
 }
 
 pub(crate) fn start_delete_comment(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     comment_id: i64,
     issue_id: i64,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -197,14 +197,14 @@ pub(crate) fn start_delete_comment(
 }
 
 pub(crate) fn start_update_labels(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     token: String,
     labels: Vec<String>,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -242,15 +242,15 @@ pub(crate) fn start_update_labels(
 }
 
 pub(crate) fn start_update_assignees(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     token: String,
     assignees: Vec<String>,
     event_tx: Sender<AppEvent>,
     assignees_display: String,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -288,13 +288,13 @@ pub(crate) fn start_update_assignees(
 }
 
 pub(crate) fn start_reopen_issue(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -333,13 +333,13 @@ pub(crate) fn start_reopen_issue(
 }
 
 pub(crate) fn start_merge_pull_request(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     pull_number: i64,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,
@@ -378,14 +378,14 @@ pub(crate) fn start_merge_pull_request(
 }
 
 pub(crate) fn start_close_issue(
-    owner: String,
-    repo: String,
+    event_repo: RepoIdentity,
     issue_number: i64,
     token: String,
     body: Option<String>,
     event_tx: Sender<AppEvent>,
 ) {
-    let event_repo = RepoIdentity::new(&owner, &repo);
+    let owner = event_repo.owner.clone();
+    let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
     spawn_with_services(
         token,

@@ -33,7 +33,7 @@ pub(crate) fn maybe_start_repo_permissions_sync(
     token: &str,
     event_tx: Sender<AppEvent>,
 ) {
-    if app.repo_permissions_syncing() {
+    if app.current_repo_id().is_none() || app.repo_permissions_syncing() {
         return;
     }
     if !app.take_repo_permissions_sync_request() {
@@ -45,12 +45,16 @@ pub(crate) fn maybe_start_repo_permissions_sync(
         _ => return,
     };
 
-    super::repo_sync::start_fetch_repo_permissions(owner, repo, token.to_string(), event_tx);
+    super::repo_sync::start_fetch_repo_permissions(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        token.to_string(),
+        event_tx,
+    );
     app.begin_repo_permissions_sync();
 }
 
 pub(crate) fn maybe_start_repo_labels_sync(app: &mut App, token: &str, event_tx: Sender<AppEvent>) {
-    if app.repo_labels_syncing() {
+    if app.current_repo_id().is_none() || app.repo_labels_syncing() {
         return;
     }
     if !app.take_repo_labels_sync_request() {
@@ -62,7 +66,11 @@ pub(crate) fn maybe_start_repo_labels_sync(app: &mut App, token: &str, event_tx:
         _ => return,
     };
 
-    super::repo_sync::start_fetch_labels(owner, repo, token.to_string(), event_tx);
+    super::repo_sync::start_fetch_labels(
+        RepoIdentity::new(&owner, &repo, app.current_repo_id()),
+        token.to_string(),
+        event_tx,
+    );
     app.begin_repo_labels_sync();
 }
 
