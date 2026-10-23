@@ -121,12 +121,26 @@ impl App {
     }
 
     pub fn set_repos(&mut self, repos: Vec<LocalRepoRow>) {
+        let selected_repo = self
+            .search
+            .filtered_repo_indices
+            .get(self.navigation.selected_repo)
+            .and_then(|index| self.repos.get(*index))
+            .map(|repo| (repo.path.clone(), repo.remote_name.clone()));
         self.repos = repos;
         self.rebuild_repo_picker_filter();
-        if self.navigation.selected_repo >= self.search.filtered_repo_indices.len() {
-            self.navigation.selected_repo =
-                self.search.filtered_repo_indices.len().saturating_sub(1);
-        }
+        self.navigation.selected_repo = selected_repo
+            .and_then(|(path, remote_name)| {
+                self.search.filtered_repo_indices.iter().position(|index| {
+                    let repo = &self.repos[*index];
+                    repo.path == path && repo.remote_name == remote_name
+                })
+            })
+            .unwrap_or_else(|| {
+                self.navigation
+                    .selected_repo
+                    .min(self.search.filtered_repo_indices.len().saturating_sub(1))
+            });
     }
 
     pub fn set_remotes(&mut self, remotes: Vec<RemoteInfo>) {
