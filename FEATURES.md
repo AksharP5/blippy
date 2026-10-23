@@ -28,6 +28,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Issue and PR detail views with context-aware panes
 - HTML blocks in Markdown bodies remain readable as literal text
 - State and metadata updates prevent overlapping actions on the same item
+- Completed state and metadata actions preserve the selected issue or PR when it remains in the list
 - Copy repository, issue, and pull request URLs to the system clipboard
 - On supported Unix terminals, bracketed paste inserts text without submitting comments or triggering shortcuts, preserving line breaks in bodies
 
