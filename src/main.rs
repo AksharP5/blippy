@@ -32,9 +32,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, MouseButton, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, MouseButton, MouseEventKind,
 };
+#[cfg(unix)]
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -662,12 +663,10 @@ impl TerminalGuard {
             }
         };
 
-        let mut guard = Self { terminal };
-        if let Err(error) = execute!(guard.terminal.backend_mut(), EnableBracketedPaste)
-            && error.kind() != io::ErrorKind::Unsupported
-        {
-            return Err(error.into());
-        }
+        let guard = Self { terminal };
+        // Crossterm's native Windows reader does not emit paste events.
+        #[cfg(unix)]
+        execute!(io::stdout(), EnableBracketedPaste)?;
         Ok(guard)
     }
 
@@ -682,9 +681,10 @@ impl Drop for TerminalGuard {
         let _ = execute!(
             self.terminal.backend_mut(),
             LeaveAlternateScreen,
-            DisableMouseCapture,
-            DisableBracketedPaste
+            DisableMouseCapture
         );
+        #[cfg(unix)]
+        let _ = execute!(self.terminal.backend_mut(), DisableBracketedPaste);
         let _ = self.terminal.show_cursor();
     }
 }
