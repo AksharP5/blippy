@@ -408,6 +408,12 @@ pub(super) fn handle_events(
                     continue;
                 }
 
+                if (target == LinkedPullRequestTarget::Tui || pull_numbers.len() > 1)
+                    && !linked_navigation_source_is_active(app, issue_number, WorkItemMode::Issues)
+                {
+                    continue;
+                }
+
                 if pull_numbers.len() > 1 {
                     let picker_target = match target {
                         LinkedPullRequestTarget::Tui => LinkedPickerTarget::PullRequestTui,
@@ -560,6 +566,16 @@ pub(super) fn handle_events(
                             pull_number
                         )));
                     }
+                    continue;
+                }
+
+                if (target == LinkedIssueTarget::Tui || issue_numbers.len() > 1)
+                    && !linked_navigation_source_is_active(
+                        app,
+                        pull_number,
+                        WorkItemMode::PullRequests,
+                    )
+                {
                     continue;
                 }
 
@@ -780,4 +796,15 @@ pub(super) fn handle_events(
         }
     }
     Ok(handled_events)
+}
+
+fn linked_navigation_source_is_active(app: &App, number: i64, mode: WorkItemMode) -> bool {
+    matches!(
+        app.view(),
+        View::Issues | View::IssueDetail | View::IssueComments | View::PullRequestFiles
+    ) && !app.issue_search_mode()
+        && !app.help_overlay_visible()
+        && app
+            .current_or_selected_issue()
+            .is_some_and(|issue| issue.number == number && mode.matches(issue))
 }

@@ -1523,6 +1523,268 @@ fn linked_navigation_app(target_is_pr: bool) -> crate::app::App {
     app
 }
 
+fn cached_linked_navigation_app(target_is_pr: bool) -> (rusqlite::Connection, crate::app::App) {
+    let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+    let mut app = linked_navigation_app(target_is_pr);
+    let mut issues = app.issues().to_vec();
+    issues.push(IssueRow {
+        id: 3,
+        number: 6,
+        ..issues[0].clone()
+    });
+    app.set_issues(issues);
+    crate::store::upsert_repo(
+        &conn,
+        &crate::store::RepoRow {
+            id: 1,
+            owner: "acme".into(),
+            name: "blippy".into(),
+            updated_at: None,
+            etag: None,
+        },
+    )
+    .expect("cache repo");
+    for issue in app.issues() {
+        crate::store::upsert_issue(&conn, issue).expect("cache issue");
+    }
+    (conn, app)
+}
+
+fn linked_navigation_response(
+    target: crate::app::LinkedPickerTarget,
+    numbers: &[i64],
+) -> super::AppEvent {
+    use crate::app::LinkedPickerTarget;
+
+    let repo = super::RepoIdentity::new("acme", "blippy", None);
+    let items = numbers
+        .iter()
+        .map(|number| (*number, String::new()))
+        .collect();
+    match target {
+        LinkedPickerTarget::PullRequestTui | LinkedPickerTarget::PullRequestBrowser => {
+            super::AppEvent::LinkedPullRequestResolved {
+                repo,
+                issue_number: 7,
+                pull_requests: items,
+                target: if target == LinkedPickerTarget::PullRequestTui {
+                    super::LinkedPullRequestTarget::Tui
+                } else {
+                    super::LinkedPullRequestTarget::Browser
+                },
+            }
+        }
+        LinkedPickerTarget::IssueTui | LinkedPickerTarget::IssueBrowser => {
+            super::AppEvent::LinkedIssueResolved {
+                repo,
+                pull_number: 7,
+                issues: crate::github::LinkedIssues {
+                    issues: items,
+                    incomplete_reason: None,
+                },
+                target: if target == LinkedPickerTarget::IssueTui {
+                    super::LinkedIssueTarget::Tui
+                } else {
+                    super::LinkedIssueTarget::Browser
+                },
+            }
+        }
+    }
+}
+
+#[test]
+fn late_linked_results_preserve_comment_drafts() {
+    use crate::app::LinkedPickerTarget;
+
+    for target in [
+        LinkedPickerTarget::PullRequestTui,
+        LinkedPickerTarget::IssueTui,
+        LinkedPickerTarget::PullRequestBrowser,
+        LinkedPickerTarget::IssueBrowser,
+    ] {
+        let target_is_pr = matches!(
+            target,
+            LinkedPickerTarget::PullRequestTui | LinkedPickerTarget::PullRequestBrowser
+        );
+        for numbers in [&[8][..], &[8, 9][..]] {
+            if numbers.len() == 1
+                && matches!(
+                    target,
+                    LinkedPickerTarget::PullRequestBrowser | LinkedPickerTarget::IssueBrowser
+                )
+            {
+                continue;
+            }
+            let (conn, mut app) = cached_linked_navigation_app(target_is_pr);
+            let response = linked_navigation_response(target, numbers);
+            app.open_issue_comment_editor(View::IssueDetail);
+            for ch in "Keep this draft".chars() {
+                app.editor_mut().append_text(ch);
+            }
+            let (event_tx, event_rx) = channel();
+            event_tx.send(response).expect("delayed linked response");
+            super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle response");
+
+            assert_eq!(app.view(), View::CommentEditor, "{target:?}: {numbers:?}");
+            assert_eq!(app.editor().text(), "Keep this draft");
+            assert_eq!(app.current_issue_number(), Some(7));
+            assert_eq!(app.issue_query(), "#7");
+            assert!(app.has_assignee_filter());
+            if target_is_pr {
+                assert!(app.linked_pull_request_known(7));
+                assert_eq!(app.linked_pull_requests_for_issue(7), numbers);
+            } else {
+                assert!(app.linked_issue_known(7));
+                assert_eq!(app.linked_issues_for_pull_request(7), numbers);
+            }
+
+            app.on_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::NONE,
+            ));
+            let opened = if target_is_pr {
+                super::main_linked_actions::try_open_cached_linked_pull_request(
+                    &mut app,
+                    &conn,
+                    super::LinkedPullRequestTarget::Tui,
+                )
+            } else {
+                super::main_linked_actions::try_open_cached_linked_issue(
+                    &mut app,
+                    &conn,
+                    super::LinkedIssueTarget::Tui,
+                )
+            }
+            .expect("explicit navigation uses the saved response");
+            assert!(opened);
+            assert_eq!(
+                app.view(),
+                if numbers.len() == 1 {
+                    View::IssueDetail
+                } else {
+                    View::LinkedPicker
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn late_linked_results_preserve_changed_contexts() {
+    use crate::app::LinkedPickerTarget;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for target_is_pr in [true, false] {
+        let target = if target_is_pr {
+            LinkedPickerTarget::PullRequestTui
+        } else {
+            LinkedPickerTarget::IssueTui
+        };
+        for numbers in [&[8][..], &[8, 9][..]] {
+            for context in [
+                "different item",
+                "different mode",
+                "search",
+                "help",
+                "picker",
+                "repositories",
+            ] {
+                let (conn, mut app) = cached_linked_navigation_app(target_is_pr);
+                let response = linked_navigation_response(target, numbers);
+                match context {
+                    "different item" => {
+                        app.reveal_issue_by_number(6, app.work_item_mode());
+                        app.set_current_issue(3, 6);
+                    }
+                    "different mode" => {
+                        app.set_view(View::Issues);
+                        app.reveal_issue_by_number(
+                            8,
+                            if target_is_pr {
+                                WorkItemMode::PullRequests
+                            } else {
+                                WorkItemMode::Issues
+                            },
+                        );
+                    }
+                    "search" => {
+                        app.set_view(View::Issues);
+                        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+                    }
+                    "help" => app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE)),
+                    "picker" => app.open_label_picker(
+                        View::IssueDetail,
+                        vec!["bug".into()],
+                        &["bug".into()],
+                    ),
+                    "repositories" => app.set_view(View::RepoPicker),
+                    _ => unreachable!(),
+                }
+                let view = app.view();
+                let source = app.current_issue_number();
+                let mode = app.work_item_mode();
+                let query = app.issue_query().to_string();
+                let (event_tx, event_rx) = channel();
+                event_tx.send(response).expect("delayed linked response");
+                super::main_events::handle_events(&mut app, &conn, &event_rx)
+                    .expect("handle response");
+
+                assert_eq!(app.view(), view, "{context}: {target:?}: {numbers:?}");
+                assert_eq!(app.current_issue_number(), source);
+                assert_eq!(app.work_item_mode(), mode);
+                assert_eq!(app.issue_query(), query);
+                assert_eq!(app.issue_search_mode(), context == "search");
+                assert_eq!(app.help_overlay_visible(), context == "help");
+                if context == "picker" {
+                    assert_eq!(app.selected_labels(), vec!["bug"]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn linked_results_navigate_from_an_active_browsing_source() {
+    use crate::app::LinkedPickerTarget;
+
+    for target_is_pr in [true, false] {
+        let target = if target_is_pr {
+            LinkedPickerTarget::PullRequestTui
+        } else {
+            LinkedPickerTarget::IssueTui
+        };
+        for numbers in [&[8][..], &[8, 9][..]] {
+            for view in [
+                View::Issues,
+                View::IssueDetail,
+                View::IssueComments,
+                View::PullRequestFiles,
+            ] {
+                if target_is_pr && view == View::PullRequestFiles {
+                    continue;
+                }
+                let (conn, mut app) = cached_linked_navigation_app(target_is_pr);
+                app.set_view(view);
+                let (event_tx, event_rx) = channel();
+                event_tx
+                    .send(linked_navigation_response(target, numbers))
+                    .expect("linked response");
+                super::main_events::handle_events(&mut app, &conn, &event_rx)
+                    .expect("handle response");
+
+                if numbers.len() > 1 {
+                    assert_eq!(app.view(), View::LinkedPicker);
+                    assert_eq!(app.linked_picker_numbers(), numbers);
+                    assert_eq!(app.current_issue_number(), Some(7));
+                } else {
+                    assert_eq!(app.view(), View::IssueDetail);
+                    assert_eq!(app.current_issue_number(), Some(8));
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn linked_navigation_opens_cached_targets_hidden_by_filters() {
     let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
