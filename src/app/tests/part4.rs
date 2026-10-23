@@ -1,6 +1,276 @@
 use super::*;
 
 #[test]
+fn refresh_preserves_preview_scroll_for_the_same_issue() {
+    let mut app = App::new(Config::default());
+    let issue = IssueRow {
+        id: 1,
+        repo_id: 1,
+        number: 1,
+        state: "open".into(),
+        title: "Long issue".into(),
+        body: "body\n".repeat(80),
+        labels: vec![],
+        assignees: String::new(),
+        comments_count: 0,
+        updated_at: None,
+        is_pr: false,
+    };
+    app.set_issues(vec![issue.clone()]);
+    app.set_view(View::Issues);
+    app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+    app.set_issues_preview_max_scroll(60);
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert_eq!(app.issues_preview_scroll(), 1);
+
+    app.set_issues(vec![issue.clone()]);
+    assert_eq!(app.issues_preview_scroll(), 1);
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert_eq!(app.issues_preview_scroll(), 2);
+    app.set_issues_preview_max_scroll(1);
+    assert_eq!(app.issues_preview_scroll(), 1);
+
+    app.set_issues(vec![IssueRow {
+        id: 2,
+        repo_id: 2,
+        ..issue
+    }]);
+    assert_eq!(
+        app.issues_preview_scroll(),
+        0,
+        "new repository resets the preview even for the same issue number"
+    );
+}
+
+#[test]
+fn refresh_preserves_comment_reading_positions() {
+    let mut app = App::new(Config::default());
+    let mut comment = CommentRow {
+        id: 1,
+        issue_id: 10,
+        author: "dev".into(),
+        body: "body\n".repeat(80),
+        created_at: None,
+        last_accessed_at: Some(1),
+    };
+    app.set_current_issue(10, 1);
+    app.set_comments(vec![comment.clone()]);
+    app.set_view(View::IssueDetail);
+    app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+    app.set_issue_recent_comments_max_scroll(60);
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.set_view(View::IssueComments);
+    app.set_issue_comments_max_scroll(60);
+    app.set_issue_comment_offsets(vec![0]);
+    app.on_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+    assert_eq!(app.issue_comments_scroll(), 60);
+    assert_eq!(app.issue_recent_comments_scroll(), 1);
+
+    comment.last_accessed_at = Some(2);
+    app.set_comments(vec![comment.clone()]);
+    app.set_issue_comments_max_scroll(60);
+    app.set_issue_comment_offsets(vec![0]);
+    assert_eq!(app.issue_comments_scroll(), 60);
+    assert_eq!(app.issue_recent_comments_scroll(), 1);
+    app.set_issue_comments_max_scroll(10);
+    assert_eq!(app.issue_comments_scroll(), 10);
+
+    app.set_current_issue(11, 2);
+    app.set_comments(vec![CommentRow {
+        id: 2,
+        issue_id: 11,
+        ..comment
+    }]);
+    assert_eq!(app.issue_comments_scroll(), 0);
+    assert_eq!(app.issue_recent_comments_scroll(), 0);
+}
+
+#[test]
+fn refresh_keeps_position_inside_surviving_comment_after_predecessor_changes() {
+    let mut positions = Vec::new();
+    let mut expected_positions = Vec::new();
+    for (name, ids, offsets, max_scroll, expected_scroll) in [
+        ("deletion", vec![2, 3], vec![0, 80], 140, 25),
+        ("insertion", vec![1, 4, 2, 3], vec![0, 20, 40, 120], 180, 65),
+        (
+            "predecessor grows",
+            vec![1, 2, 3],
+            vec![0, 60, 140],
+            200,
+            85,
+        ),
+        (
+            "predecessor shrinks",
+            vec![1, 2, 3],
+            vec![0, 10, 90],
+            150,
+            35,
+        ),
+    ] {
+        let mut app = App::new(Config::default());
+        let comment = |id| CommentRow {
+            id,
+            issue_id: 10,
+            author: "dev".into(),
+            body: "body\n".repeat(80),
+            created_at: None,
+            last_accessed_at: None,
+        };
+        app.set_current_issue(10, 1);
+        app.set_view(View::IssueComments);
+        app.set_comments(vec![comment(1), comment(2), comment(3)]);
+        app.set_issue_comments_max_scroll(160);
+        app.set_issue_comment_offsets(vec![0, 20, 100]);
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.navigation.issue_comments_scroll = 45;
+
+        let next_comment_offset = *offsets.last().expect("next comment offset");
+        app.set_comments(ids.into_iter().map(comment).collect());
+        app.set_issue_comments_max_scroll(max_scroll);
+        app.set_issue_comment_offsets(offsets);
+
+        assert_eq!(app.selected_comment_row().map(|row| row.id), Some(2));
+        positions.push((name, app.issue_comments_scroll()));
+        expected_positions.push((name, expected_scroll));
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.selected_comment_row().map(|row| row.id), Some(3));
+        assert_eq!(app.issue_comments_scroll(), next_comment_offset, "{name}");
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.issue_comments_scroll(), expected_scroll - 25, "{name}");
+
+        app.navigation.issue_comments_scroll = expected_scroll;
+        app.set_comments(app.comments().to_vec());
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let mut new_offsets = app.navigation.issue_comment_offsets.clone();
+        *new_offsets.last_mut().expect("last comment offset") += 20;
+        app.set_issue_comments_max_scroll(max_scroll + 20);
+        app.set_issue_comment_offsets(new_offsets);
+        assert_eq!(app.selected_comment_row().map(|row| row.id), Some(3));
+        assert_eq!(
+            app.issue_comments_scroll(),
+            next_comment_offset + 20,
+            "explicit selection during {name} refresh"
+        );
+    }
+    assert_eq!(positions, expected_positions);
+}
+
+#[test]
+fn refreshing_comments_rebases_before_clamping_and_resets_removed_selection() {
+    let mut app = App::new(Config::default());
+    let comment = |id| CommentRow {
+        id,
+        issue_id: 10,
+        author: "dev".into(),
+        body: "body\n".repeat(100),
+        created_at: None,
+        last_accessed_at: None,
+    };
+    app.set_current_issue(10, 1);
+    app.set_view(View::IssueComments);
+    app.set_comments(vec![comment(1), comment(2)]);
+    app.set_issue_comments_max_scroll(100);
+    app.set_issue_comment_offsets(vec![0, 20]);
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.navigation.issue_comments_scroll = 90;
+
+    app.set_comments(vec![comment(2)]);
+    app.set_issue_comments_max_scroll(80);
+    app.set_issue_comment_offsets(vec![0]);
+    assert_eq!(app.issue_comments_scroll(), 70);
+
+    app.set_comments(vec![CommentRow {
+        body: "short".into(),
+        ..comment(2)
+    }]);
+    app.set_issue_comments_max_scroll(5);
+    app.set_issue_comment_offsets(vec![0]);
+    assert_eq!(app.issue_comments_scroll(), 5);
+
+    app.set_comments(vec![comment(3)]);
+    app.set_issue_comments_max_scroll(80);
+    app.set_issue_comment_offsets(vec![0]);
+    assert_eq!(app.issue_comments_scroll(), 0);
+
+    app.navigation.issue_comments_scroll = 50;
+    app.set_comments(vec![comment(3)]);
+    app.set_view(View::IssueDetail);
+    app.reset_issue_comments_scroll();
+    app.set_view(View::IssueComments);
+    app.set_issue_comments_max_scroll(80);
+    app.set_issue_comment_offsets(vec![0]);
+    assert_eq!(app.issue_comments_scroll(), 0);
+
+    app.navigation.issue_comments_scroll = 50;
+    app.set_comments(vec![comment(3)]);
+    app.set_current_issue(11, 2);
+    app.set_comments(vec![CommentRow {
+        issue_id: 11,
+        ..comment(4)
+    }]);
+    app.set_issue_comments_max_scroll(80);
+    app.set_issue_comment_offsets(vec![0]);
+    assert_eq!(app.issue_comments_scroll(), 0);
+}
+
+#[test]
+fn editing_and_deleting_predecessors_keeps_the_rendered_reading_lines() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let mut app = App::new(Config::default());
+    let predecessor = CommentRow {
+        id: 1,
+        issue_id: 10,
+        author: "dev".into(),
+        body: "earlier line\n".repeat(20),
+        created_at: None,
+        last_accessed_at: None,
+    };
+    let selected = CommentRow {
+        id: 2,
+        body: (0..100).map(|i| format!("reading-line-{i}\n")).collect(),
+        ..predecessor.clone()
+    };
+    app.set_current_issue(10, 1);
+    app.set_view(View::IssueComments);
+    app.set_comments(vec![predecessor.clone(), selected]);
+    let mut terminal = Terminal::new(TestBackend::new(60, 20)).expect("test terminal");
+    terminal
+        .draw(|frame| crate::ui::draw(frame, &mut app))
+        .expect("draw comments");
+    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app.navigation.issue_comments_scroll += 25;
+    terminal
+        .draw(|frame| crate::ui::draw(frame, &mut app))
+        .expect("draw reading position");
+    let reading_lines = |terminal: &Terminal<TestBackend>| {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(60)
+            .map(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>())
+            .filter(|row| row.contains("reading-line-"))
+            .collect::<Vec<_>>()
+    };
+    let before = reading_lines(&terminal);
+    assert!(before[0].contains("reading-line-24"));
+
+    app.update_comment_body_by_id(1, &"earlier line\n".repeat(40));
+    terminal
+        .draw(|frame| crate::ui::draw(frame, &mut app))
+        .expect("draw edited predecessor");
+    let after_edit = reading_lines(&terminal);
+    app.remove_comment_by_id(1);
+    terminal
+        .draw(|frame| crate::ui::draw(frame, &mut app))
+        .expect("draw deleted predecessor");
+    assert_eq!(app.selected_comment_row().map(|row| row.id), Some(2));
+    assert_eq!(reading_lines(&terminal), before);
+    assert_eq!(after_edit, before);
+}
+
+#[test]
 fn a_mouse_click_toggles_a_label_once() {
     let mut app = App::new(Config::default());
     app.open_label_picker(View::Issues, vec!["bug".to_string()], &[]);
@@ -454,6 +724,110 @@ fn merge_assignee_options_dedupes_case_insensitive() {
     ]);
 
     assert_eq!(app.assignee_options(), &["alex", "jordan", "Sam"]);
+}
+
+#[test]
+fn merge_label_options_preserves_highlight() {
+    for query in ["", "n"] {
+        for labels in [
+            vec!["bug", "enhancement"],
+            vec!["BUG", "ENHANCEMENT", "announcement"],
+        ] {
+            let mut app = App::new(Config::default());
+            app.open_label_picker(
+                View::Issues,
+                vec!["bug".into(), "enhancement".into()],
+                &["bug".into()],
+            );
+            for ch in query.chars() {
+                app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(
+                app.label_options()[app.selected_label_option()],
+                "enhancement"
+            );
+
+            app.merge_label_options(labels.into_iter().map(String::from).collect());
+
+            assert_eq!(app.label_query(), query);
+            assert_eq!(app.selected_labels(), vec!["bug"]);
+            assert_eq!(
+                app.label_options()[app.selected_label_option()],
+                "enhancement"
+            );
+            app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+            assert_eq!(app.selected_labels(), vec!["bug", "enhancement"]);
+        }
+    }
+}
+
+#[test]
+fn merge_assignee_options_preserves_highlight() {
+    for query in ["", "a"] {
+        for assignees in [vec!["alex", "sam"], vec!["ALEX", "SAM", "aaron"]] {
+            let mut app = App::new(Config::default());
+            app.open_assignee_picker(View::Issues, vec!["alex".into(), "sam".into()], "alex");
+            for ch in query.chars() {
+                app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(
+                app.assignee_options()[app.selected_assignee_option()],
+                "sam"
+            );
+
+            app.merge_assignee_options(assignees.into_iter().map(String::from).collect());
+
+            assert_eq!(app.assignee_query(), query);
+            assert_eq!(app.selected_assignees_csv(), "alex");
+            assert_eq!(
+                app.assignee_options()[app.selected_assignee_option()],
+                "sam"
+            );
+            app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+            assert_eq!(app.selected_assignees_csv(), "alex,sam");
+        }
+    }
+}
+
+#[test]
+fn merge_label_options_highlights_first_match_when_none_was_visible() {
+    let mut app = App::new(Config::default());
+    app.open_label_picker(View::Issues, vec![], &[]);
+    app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    app.merge_label_options(vec!["bug".into()]);
+    assert!(app.filtered_label_indices().is_empty());
+    app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(app.selected_labels().is_empty());
+
+    app.merge_label_options(vec!["documentation".into(), "Docs".into()]);
+
+    assert_eq!(app.label_query(), "d");
+    assert_eq!(app.label_options()[app.selected_label_option()], "Docs");
+}
+
+#[test]
+fn merge_assignee_options_highlights_first_match_when_none_was_visible() {
+    let mut app = App::new(Config::default());
+    app.open_assignee_picker(View::Issues, vec![], "");
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    app.merge_assignee_options(vec!["alex".into()]);
+    assert!(app.filtered_assignee_indices().is_empty());
+    app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(app.selected_assignees().is_empty());
+
+    app.merge_assignee_options(vec!["sara".into(), "Sam".into()]);
+
+    assert_eq!(app.assignee_query(), "s");
+    assert_eq!(
+        app.assignee_options()[app.selected_assignee_option()],
+        "Sam"
+    );
 }
 
 #[test]

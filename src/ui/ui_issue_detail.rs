@@ -507,7 +507,7 @@ pub(super) fn draw_issue_comments(
 ) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([Constraint::Length(5), Constraint::Min(0)])
         .split(area);
     let content_area = sections[1].inner(Margin {
         vertical: 1,
@@ -685,6 +685,39 @@ mod tests {
             },
         ]);
         app
+    }
+
+    #[test]
+    fn comments_header_shows_context_selection_and_actions() {
+        for (width, height) in [(80, 24), (120, 36)] {
+            let mut app = comments_app("first body".to_string());
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content
+                .chunks(width as usize)
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            println!("{rendered}");
+            for text in [
+                "[Back]",
+                "Comments (j/k jump)",
+                "selected 1/2",
+                "e edit",
+                "x delete",
+                "first body",
+            ] {
+                assert!(
+                    rendered.contains(text),
+                    "missing {text} at {width}x{height}"
+                );
+            }
+        }
     }
 
     #[test]
