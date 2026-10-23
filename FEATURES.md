@@ -7,7 +7,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 ## Repository Discovery and Sync
 
 - Scans local git repositories and indexes GitHub remotes; searches four directory levels inside each repository for nested repositories and finds registered nested worktrees at any depth, subject to scan depth limits and exclusions
-- Recognizes GitHub SSH remotes with explicit ports
+- Recognizes GitHub SSH remotes with explicit ports, including `ssh://git@ssh.github.com:443/owner/repo.git`
 - Supports direct `owner/repo` repo context from the current working tree
 - Keeps a local SQLite cache for fast navigation
 - `blippy sync` updates discovered repositories and remotes
