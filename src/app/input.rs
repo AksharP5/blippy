@@ -365,6 +365,12 @@ impl App {
             KeyCode::Esc if matches!(self.view, View::LabelPicker | View::AssigneePicker) => {
                 self.set_view(self.editor_flow.cancel_view);
             }
+            KeyCode::Up if self.view == View::IssueComments && key.modifiers.is_empty() => {
+                self.scroll_issue_comments(-1);
+            }
+            KeyCode::Down if self.view == View::IssueComments && key.modifiers.is_empty() => {
+                self.scroll_issue_comments(1);
+            }
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
             KeyCode::Enter => self.activate_selection(),
