@@ -159,62 +159,74 @@ pub(super) fn draw_pull_request_files(
         }
     }
 
-    let file_items = if app.pull_request_files().is_empty() {
-        vec![ListItem::new(
-            "No changed files cached yet. Press r to refresh.",
-        )]
-    } else {
-        let view_state_loaded = app.pull_request_view_state_loaded();
-        app.pull_request_files()
-            .iter()
-            .map(|file| {
-                let comment_count =
-                    app.pull_request_comments_count_for_path(file.filename.as_str());
-                let viewed = app.pull_request_file_is_viewed(file.filename.as_str());
-                let viewed_marker = match (view_state_loaded, viewed) {
-                    (false, _) => "?",
-                    (true, true) => "✓",
-                    (true, false) => "·",
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        viewed_marker,
-                        if view_state_loaded && viewed {
-                            Style::default()
-                                .fg(theme.accent_success)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default().fg(theme.text_muted)
-                        },
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        file_status_symbol(file.status.as_str()),
-                        Style::default().fg(file_status_color(file.status.as_str(), theme)),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        ellipsize(file.filename.as_str(), 34),
-                        Style::default()
-                            .fg(theme.text_primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("+{} -{}", file.additions, file.deletions),
-                        Style::default().fg(theme.text_muted),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("c:{}", comment_count),
-                        Style::default().fg(theme.border_popup),
-                    ),
-                ]))
-            })
-            .collect::<Vec<ListItem>>()
-    };
     let files_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Files;
     if !diff_expanded {
+        let files_inner = panes[0].inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        let max_file_rows = files_inner.height as usize;
+        let selected = selected_for_list(
+            app.selected_pull_request_file(),
+            app.pull_request_files().len(),
+        );
+        let start = list_window_start(selected, app.pull_request_files().len(), max_file_rows);
+        let file_items = if app.pull_request_files().is_empty() {
+            vec![ListItem::new(
+                "No changed files cached yet. Press r to refresh.",
+            )]
+        } else {
+            let view_state_loaded = app.pull_request_view_state_loaded();
+            app.pull_request_files()
+                .iter()
+                .skip(start)
+                .take(max_file_rows)
+                .map(|file| {
+                    let comment_count =
+                        app.pull_request_comments_count_for_path(file.filename.as_str());
+                    let viewed = app.pull_request_file_is_viewed(file.filename.as_str());
+                    let viewed_marker = match (view_state_loaded, viewed) {
+                        (false, _) => "?",
+                        (true, true) => "✓",
+                        (true, false) => "·",
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            viewed_marker,
+                            if view_state_loaded && viewed {
+                                Style::default()
+                                    .fg(theme.accent_success)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(theme.text_muted)
+                            },
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            file_status_symbol(file.status.as_str()),
+                            Style::default().fg(file_status_color(file.status.as_str(), theme)),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            ellipsize(file.filename.as_str(), 34),
+                            Style::default()
+                                .fg(theme.text_primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("+{} -{}", file.additions, file.deletions),
+                            Style::default().fg(theme.text_muted),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("c:{}", comment_count),
+                            Style::default().fg(theme.border_popup),
+                        ),
+                    ]))
+                })
+                .collect::<Vec<ListItem>>()
+        };
         let files_block_title = ui_status_overlay::focused_title("Changed files", files_focused);
         let files_list = List::new(file_items)
             .block(panel_block_with_border(
@@ -230,18 +242,10 @@ pub(super) fn draw_pull_request_files(
                     .fg(theme.text_primary)
                     .add_modifier(Modifier::BOLD),
             );
-        let mut files_state = list_state(selected_for_list(
-            app.selected_pull_request_file(),
-            app.pull_request_files().len(),
-        ));
+        let mut files_state = list_state(selected - start);
         frame.render_stateful_widget(files_list, panes[0], &mut files_state);
         register_mouse_region(app, MouseTarget::PullRequestFilesPane, panes[0]);
-        let files_inner = panes[0].inner(Margin {
-            vertical: 1,
-            horizontal: 1,
-        });
-        let max_file_rows = files_inner.height as usize;
-        for (row, index) in (files_state.offset()..app.pull_request_files().len())
+        for (row, index) in (start + files_state.offset()..app.pull_request_files().len())
             .take(max_file_rows)
             .enumerate()
         {
@@ -596,5 +600,71 @@ mod tests {
             .draw(|frame| crate::ui::draw(frame, &mut app))
             .unwrap();
         assert_eq!(&first_frame, terminal.backend().buffer());
+    }
+
+    #[test]
+    fn scrolled_file_rows_keep_their_highlight_and_mouse_targets() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+        for (width, height) in [(80, 16), (120, 24)] {
+            let mut app = App::new(Config::default());
+            app.set_view(View::PullRequestFiles);
+            app.set_pull_request_files(
+                1,
+                "head".to_string(),
+                (0..40)
+                    .map(|index| PullRequestFile {
+                        filename: format!("file_{index:02}.rs"),
+                        status: "modified".to_string(),
+                        additions: 1,
+                        deletions: 0,
+                        patch: Some("@@ -1 +1 @@\n context".to_string()),
+                    })
+                    .collect(),
+            );
+            app.set_pull_request_review_focus(PullRequestReviewFocus::Files);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            for selected in [0, 39, 38] {
+                app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+                app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+                for _ in 0..selected {
+                    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+                }
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, &mut app))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let visible = buffer
+                    .content
+                    .chunks(width as usize)
+                    .enumerate()
+                    .filter_map(|(y, row)| {
+                        let text = row[..width as usize / 3]
+                            .iter()
+                            .map(|cell| cell.symbol())
+                            .collect::<String>();
+                        let byte = text.find("file_")?;
+                        let x = text[..byte].chars().count() as u16;
+                        let index = text[byte + 5..byte + 7].parse::<usize>().unwrap();
+                        Some((x, y as u16, index))
+                    })
+                    .collect::<Vec<_>>();
+                assert!(!visible.is_empty());
+                let &(x, y, _) = visible
+                    .iter()
+                    .find(|(_, _, index)| *index == selected)
+                    .expect("selected file remains visible");
+                assert_eq!(buffer[(x, y)].bg, resolve_theme(None).bg_selected);
+                for (x, y, index) in visible {
+                    app.on_mouse(MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: x,
+                        row: y,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                    assert_eq!(app.selected_pull_request_file(), index);
+                }
+            }
+        }
     }
 }
