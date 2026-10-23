@@ -391,7 +391,15 @@ pub(super) fn draw_pull_request_files(
 
     let content_width = diff_area.width.saturating_sub(2);
     let viewport_height = diff_area.height.saturating_sub(2) as usize;
-    let total_lines = wrapped_line_count(&lines, content_width);
+    let wrap = content_width == 0
+        || lines
+            .iter()
+            .any(|line| line.width() > content_width as usize);
+    let total_lines = if wrap {
+        wrapped_line_count(&lines, content_width)
+    } else {
+        lines.len()
+    };
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_pull_request_diff_max_scroll(max_scroll);
 
@@ -430,15 +438,17 @@ pub(super) fn draw_pull_request_files(
         })
         .unwrap_or_else(|| "Diff".to_string());
     let diff_block_title = ui_status_overlay::focused_title(diff_title.as_str(), diff_focused);
-    let paragraph = Paragraph::new(Text::from(lines))
+    let mut paragraph = Paragraph::new(Text::from(lines))
         .block(panel_block_with_border(
             diff_block_title.as_str(),
             ui_status_overlay::focus_border(diff_focused, theme),
             theme,
         ))
         .style(Style::default().fg(theme.text_primary).bg(theme.bg_panel))
-        .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
+    if wrap {
+        paragraph = paragraph.wrap(Wrap { trim: false });
+    }
     frame.render_widget(paragraph, diff_area);
     register_mouse_region(app, MouseTarget::PullRequestDiffPane, diff_area);
     let diff_inner = diff_area.inner(Margin {
