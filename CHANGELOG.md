@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- *(deps)* resolve certificate distrust advisories in `rustls-webpki` and `webpki-roots` ([#72](https://github.com/AksharP5/blippy/pull/72))
 - keep repository selection during scans ([#91](https://github.com/AksharP5/blippy/pull/91))
 - *(review)* reject diffs changed by PR retargeting ([#93](https://github.com/AksharP5/blippy/pull/93))
 - keep issue selection after background actions ([#89](https://github.com/AksharP5/blippy/pull/89))
