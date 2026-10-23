@@ -390,16 +390,6 @@ pub(super) fn draw_issue_detail(
         } else {
             theme.bg_panel
         }));
-    let body_paragraph = Paragraph::new(Text::from(body_lines))
-        .block(body_block)
-        .style(Style::default().fg(theme.text_primary).bg(if body_focused {
-            theme.bg_panel_alt
-        } else {
-            theme.bg_panel
-        }))
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
-    frame.render_widget(body_paragraph, panes[0]);
     register_mouse_region(app, MouseTarget::IssueBodyPane, panes[0]);
     let body_inner = panes[0].inner(Margin {
         vertical: 1,
@@ -410,9 +400,8 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedPullRequestTuiButton,
         );
     }
@@ -421,9 +410,8 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedPullRequestWebButton,
         );
     }
@@ -432,9 +420,8 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedIssueTuiButton,
         );
     }
@@ -443,13 +430,22 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedIssueWebButton,
         );
     }
 
+    let body_paragraph = Paragraph::new(Text::from(body_lines))
+        .block(body_block)
+        .style(Style::default().fg(theme.text_primary).bg(if body_focused {
+            theme.bg_panel_alt
+        } else {
+            theme.bg_panel
+        }))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(body_paragraph, panes[0]);
     let side_content_width = panes[1].width.saturating_sub(2);
     let side_viewport = panes[1].height.saturating_sub(2) as usize;
     let side_total_lines = wrapped_line_count(&side_lines, side_content_width);
@@ -507,7 +503,7 @@ pub(super) fn draw_issue_comments(
 ) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([Constraint::Length(5), Constraint::Min(0)])
         .split(area);
     let content_area = sections[1].inner(Margin {
         vertical: 1,
@@ -685,6 +681,39 @@ mod tests {
             },
         ]);
         app
+    }
+
+    #[test]
+    fn comments_header_shows_context_selection_and_actions() {
+        for (width, height) in [(80, 24), (120, 36)] {
+            let mut app = comments_app("first body".to_string());
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content
+                .chunks(width as usize)
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            println!("{rendered}");
+            for text in [
+                "[Back]",
+                "Comments (j/k jump)",
+                "selected 1/2",
+                "e edit",
+                "x delete",
+                "first body",
+            ] {
+                assert!(
+                    rendered.contains(text),
+                    "missing {text} at {width}x{height}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -156,6 +156,62 @@ fn reopening_existing_cache_indexes_issues_by_repo_and_number() {
 }
 
 #[test]
+fn reopening_existing_cache_indexes_comment_lookup_and_retention() {
+    for legacy in [false, true] {
+        let dir = unique_temp_dir("comment-index");
+        let db_path = dir.join("blippy.db");
+        let conn = open_db_at(&db_path).expect("open db");
+        seed_issue(&conn, 10);
+        let comment = CommentRow {
+            last_accessed_at: (!legacy).then_some(1),
+            ..test_comment(50, 10, "Preserved comment")
+        };
+        upsert_comment(&conn, &comment).expect("cache comment");
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS comments_issue_created;
+             DROP INDEX IF EXISTS comments_accessed;",
+        )
+        .expect("simulate cache without comment indexes");
+        if legacy {
+            conn.execute("ALTER TABLE comments DROP COLUMN last_accessed_at", [])
+                .expect("simulate cache before access timestamps");
+        }
+        drop(conn);
+
+        for _ in 0..2 {
+            let conn = open_db_at(&db_path).expect("reopen existing cache");
+            for (query, expected) in [
+                (
+                    "PRAGMA index_info(comments_issue_created)",
+                    vec!["issue_id", "created_at"],
+                ),
+                (
+                    "PRAGMA index_info(comments_accessed)",
+                    vec!["last_accessed_at"],
+                ),
+            ] {
+                let columns: Vec<String> = conn
+                    .prepare(query)
+                    .expect("inspect comment index")
+                    .query_map([], |row| row.get(2))
+                    .expect("index columns")
+                    .collect::<Result<_, _>>()
+                    .expect("read index columns");
+                assert_eq!(columns, expected);
+            }
+            assert_eq!(
+                comments_for_issue(&conn, 10)
+                    .expect("preserved comment")
+                    .as_slice(),
+                std::slice::from_ref(&comment)
+            );
+        }
+
+        fs::remove_dir_all(&dir).expect("remove test cache");
+    }
+}
+
+#[test]
 fn upsert_issue_inserts_and_updates() {
     let dir = unique_temp_dir("issue-upsert");
     let db_path = dir.join("blippy.db");

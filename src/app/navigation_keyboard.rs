@@ -437,6 +437,14 @@ impl App {
         }
     }
 
+    pub(super) fn scroll_issue_comments(&mut self, delta: i16) {
+        self.navigation.issue_comments_scroll = self
+            .navigation
+            .issue_comments_scroll
+            .saturating_add_signed(delta)
+            .min(self.navigation.issue_comments_max_scroll);
+    }
+
     pub(super) fn jump_next_comment(&mut self) {
         if self.navigation.selected_comment + 1 >= self.comments.len() {
             return;

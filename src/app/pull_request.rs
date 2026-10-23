@@ -173,24 +173,22 @@ impl App {
         side: ReviewSide,
         line: i64,
     ) -> Vec<&PullRequestReviewComment> {
-        self.pull_request
-            .pull_request_review_comments
+        let comments = &self.pull_request.pull_request_review_comments;
+        // set_pull_request_review_comments keeps comments sorted by path, line, and ID.
+        let start = comments
+            .partition_point(|comment| (comment.path.as_str(), comment.line) < (path, line));
+        comments[start..]
             .iter()
-            .filter(|comment| {
-                comment.anchored
-                    && comment.path == path
-                    && comment.side == side
-                    && comment.line == line
-            })
-            .collect::<Vec<&PullRequestReviewComment>>()
+            .take_while(|comment| comment.path == path && comment.line == line)
+            .filter(|comment| comment.anchored && comment.side == side)
+            .collect()
     }
 
     pub fn pull_request_comments_count_for_path(&self, path: &str) -> usize {
-        self.pull_request
-            .pull_request_review_comments
-            .iter()
-            .filter(|comment| comment.path == path)
-            .count()
+        let comments = &self.pull_request.pull_request_review_comments;
+        let start = comments.partition_point(|comment| comment.path.as_str() < path);
+        let end = comments.partition_point(|comment| comment.path.as_str() <= path);
+        end - start
     }
 
     pub fn selected_pull_request_review_comment(&self) -> Option<&PullRequestReviewComment> {
@@ -604,47 +602,30 @@ impl App {
             return None;
         }
 
-        let side = self.pull_request.pull_request_review_side;
-        let mut selected_lines = Vec::new();
-        for row in &rows[start_index..=end_index] {
-            let line = match side {
-                ReviewSide::Left => row.old_line,
-                ReviewSide::Right => row.new_line,
-            };
-            if line.is_none() {
-                continue;
-            }
-            selected_lines.push(line.unwrap_or_default());
-        }
-
-        if selected_lines.is_empty() {
+        let selected_rows = &rows[start_index..=end_index];
+        let requested_side = self.pull_request.pull_request_review_side;
+        let side = if selected_rows.iter().any(|row| match requested_side {
+            ReviewSide::Left => row.old_line.is_some(),
+            ReviewSide::Right => row.new_line.is_some(),
+        }) {
+            requested_side
+        } else {
             let row = rows.get(self.pull_request.selected_pull_request_diff_line)?;
             match row.kind {
-                DiffKind::Added | DiffKind::Context => {
-                    return Some(PullRequestReviewTarget {
-                        commit_id: commit_id.clone(),
-                        path: file_path.to_string(),
-                        line: row.new_line?,
-                        side: ReviewSide::Right,
-                        start_line: None,
-                        start_side: None,
-                    });
-                }
-                DiffKind::Removed => {
-                    return Some(PullRequestReviewTarget {
-                        commit_id: commit_id.clone(),
-                        path: file_path.to_string(),
-                        line: row.old_line?,
-                        side: ReviewSide::Left,
-                        start_line: None,
-                        start_side: None,
-                    });
-                }
+                DiffKind::Added | DiffKind::Context => ReviewSide::Right,
+                DiffKind::Removed => ReviewSide::Left,
                 _ => return None,
             }
-        }
+        };
+        let selected_lines = selected_rows
+            .iter()
+            .filter_map(|row| match side {
+                ReviewSide::Left => row.old_line,
+                ReviewSide::Right => row.new_line,
+            })
+            .collect::<Vec<_>>();
 
-        let line = *selected_lines.last().unwrap_or(&0);
+        let line = *selected_lines.last()?;
         let start_line = if selected_lines.len() > 1 {
             selected_lines.first().copied()
         } else {
@@ -715,6 +696,118 @@ mod tests {
 
     const PATCH: &str = "diff --git a/example b/example\n@@ -1,2 +1,2 @@\n hidden first\n hidden second\n@@ -5,0 +5,0 @@\n@@ -10,2 +10,2 @@\n visible one\n visible two\n@@ -20 +20 @@\n hidden last\n";
 
+    fn assert_visual_review_side_fallback(patch: &str, side: ReviewSide, reverse: bool) {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(
+            1,
+            "displayed-head".into(),
+            vec![PullRequestFile {
+                filename: "example".into(),
+                status: if side == ReviewSide::Left {
+                    "removed"
+                } else {
+                    "added"
+                }
+                .into(),
+                additions: if side == ReviewSide::Right { 3 } else { 0 },
+                deletions: if side == ReviewSide::Left { 3 } else { 0 },
+                patch: Some(patch.into()),
+            }],
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        if side == ReviewSide::Right {
+            app.on_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        }
+        let requested_side = app.pull_request_review_side();
+        assert_ne!(requested_side, side);
+
+        for _ in 0..if reverse { 3 } else { 1 } {
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        }
+        let single = app.selected_pull_request_review_target().unwrap();
+        assert_eq!(single.side, side);
+        assert_eq!(single.line, if reverse { 3 } else { 1 });
+        assert_eq!(single.start_line, None);
+        assert_eq!(single.start_side, None);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+        for _ in 0..2 {
+            app.on_key(KeyEvent::new(
+                KeyCode::Char(if reverse { 'k' } else { 'j' }),
+                KeyModifiers::NONE,
+            ));
+        }
+        assert_eq!(app.pull_request_visual_range(), Some((1, 3)));
+        assert_eq!(
+            app.selected_pull_request_review_target(),
+            Some(PullRequestReviewTarget {
+                commit_id: "displayed-head".into(),
+                path: "example".into(),
+                line: 3,
+                side,
+                start_line: Some(1),
+                start_side: Some(side),
+            })
+        );
+        assert_eq!(app.pull_request_review_side(), requested_side);
+    }
+
+    #[test]
+    fn visual_review_side_fallback_preserves_deleted_range() {
+        assert_visual_review_side_fallback("@@ -1,3 +0,0 @@\n-a\n-b\n-c", ReviewSide::Left, false);
+    }
+
+    #[test]
+    fn visual_review_side_fallback_preserves_reverse_deleted_range() {
+        assert_visual_review_side_fallback("@@ -1,3 +0,0 @@\n-a\n-b\n-c", ReviewSide::Left, true);
+    }
+
+    #[test]
+    fn visual_review_side_fallback_preserves_added_range() {
+        assert_visual_review_side_fallback("@@ -0,0 +1,3 @@\n+a\n+b\n+c", ReviewSide::Right, false);
+    }
+
+    #[test]
+    fn visual_review_side_fallback_preserves_reverse_added_range() {
+        assert_visual_review_side_fallback("@@ -0,0 +1,3 @@\n+a\n+b\n+c", ReviewSide::Right, true);
+    }
+
+    #[test]
+    fn visual_review_range_keeps_requested_side_when_it_has_lines() {
+        for (patch, side, line) in [
+            (
+                "@@ -1,3 +1,2 @@\n context\n-old\n-removed\n+new",
+                ReviewSide::Right,
+                2,
+            ),
+            (
+                "@@ -1,2 +1,3 @@\n context\n-old\n+new\n+added",
+                ReviewSide::Left,
+                2,
+            ),
+        ] {
+            let mut app = App::new(Config::default());
+            app.pull_request.pull_request_files_head_sha = Some("displayed-head".into());
+            app.pull_request.pull_request_review_side = side;
+            app.pull_request.pull_request_visual_mode = true;
+            app.pull_request.pull_request_visual_anchor = Some(1);
+            app.pull_request.selected_pull_request_diff_line = 3;
+
+            assert_eq!(
+                app.review_target_for_rows("example", &parse_patch(Some(patch))),
+                Some(PullRequestReviewTarget {
+                    commit_id: "displayed-head".into(),
+                    path: "example".into(),
+                    line,
+                    side,
+                    start_line: Some(1),
+                    start_side: Some(side),
+                })
+            );
+        }
+    }
+
     fn collapsed_app() -> App {
         let mut app = App::new(Config::default());
         app.set_view(View::PullRequestFiles);
@@ -736,6 +829,67 @@ mod tests {
         }
         app.pull_request.selected_pull_request_diff_line = 1;
         app
+    }
+
+    #[test]
+    fn review_comment_lookups_preserve_paths_sides_and_id_order() {
+        let comment = |id, path: &str, line, side, anchored| PullRequestReviewComment {
+            id,
+            thread_id: None,
+            resolved: false,
+            anchored,
+            path: path.to_string(),
+            line,
+            side,
+            body: String::new(),
+            author: "reviewer".to_string(),
+            created_at: None,
+        };
+        let mut app = App::new(Config::default());
+        app.set_pull_request_review_comments(vec![
+            comment(3, "b.rs", 10, ReviewSide::Right, true),
+            comment(9, "a.rs", 10, ReviewSide::Right, true),
+            comment(5, "a.rs", 10, ReviewSide::Left, true),
+            comment(1, "a.rs", 9, ReviewSide::Right, true),
+            comment(2, "a.rs", 10, ReviewSide::Right, true),
+            comment(4, "a.rs", 10, ReviewSide::Right, false),
+            comment(6, "a.rs", 11, ReviewSide::Right, true),
+            comment(8, "c.rs", 10, ReviewSide::Right, true),
+        ]);
+        for (path, line, side, expected) in [
+            ("a.rs", 10, ReviewSide::Right, vec![2, 9]),
+            ("a.rs", 10, ReviewSide::Left, vec![5]),
+            ("a.rs", 9, ReviewSide::Right, vec![1]),
+            ("a.rs", 11, ReviewSide::Right, vec![6]),
+            ("b.rs", 10, ReviewSide::Right, vec![3]),
+            ("c.rs", 10, ReviewSide::Right, vec![8]),
+            ("", 10, ReviewSide::Right, vec![]),
+            ("a.rs", 12, ReviewSide::Right, vec![]),
+            ("z.rs", 10, ReviewSide::Right, vec![]),
+        ] {
+            let ids = app
+                .pull_request_comments_for_path_and_line(path, side, line)
+                .iter()
+                .map(|comment| comment.id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected);
+        }
+        assert_eq!(app.pull_request_comments_count_for_path("a.rs"), 6);
+        assert_eq!(app.pull_request_comments_count_for_path("b.rs"), 1);
+        assert_eq!(app.pull_request_comments_count_for_path("absent.rs"), 0);
+        app.remove_pull_request_review_comment_by_id(2);
+        app.update_pull_request_review_comment_body_by_id(9, "updated");
+        let remaining = app.pull_request_comments_for_path_and_line("a.rs", ReviewSide::Right, 10);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, 9);
+        assert_eq!(remaining[0].body, "updated");
+        assert_eq!(app.pull_request_comments_count_for_path("a.rs"), 5);
+        app.set_pull_request_review_comments(vec![]);
+        assert!(
+            app.pull_request_comments_for_path_and_line("a.rs", ReviewSide::Right, 10)
+                .is_empty()
+        );
+        assert_eq!(app.pull_request_comments_count_for_path("a.rs"), 0);
     }
 
     #[test]

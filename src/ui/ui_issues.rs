@@ -515,16 +515,6 @@ pub(super) fn draw_issues(
         ui_status_overlay::focus_border(preview_focused, theme),
         theme,
     );
-    let preview_widget = Paragraph::new(Text::from(preview_lines))
-        .block(preview_block)
-        .style(
-            Style::default()
-                .fg(theme.text_primary)
-                .bg(theme.bg_panel_alt),
-        )
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
-    frame.render_widget(preview_widget, preview_area);
     register_mouse_region(app, MouseTarget::IssuesPreviewPane, preview_area);
     let preview_inner = preview_area.inner(Margin {
         vertical: 1,
@@ -535,9 +525,8 @@ pub(super) fn draw_issues(
             app,
             preview_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &preview_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedPullRequestTuiButton,
         );
     }
@@ -546,9 +535,8 @@ pub(super) fn draw_issues(
             app,
             preview_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &preview_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedPullRequestWebButton,
         );
     }
@@ -557,9 +545,8 @@ pub(super) fn draw_issues(
             app,
             preview_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &preview_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedIssueTuiButton,
         );
     }
@@ -568,10 +555,19 @@ pub(super) fn draw_issues(
             app,
             preview_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &preview_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedIssueWebButton,
         );
     }
+    let preview_widget = Paragraph::new(Text::from(preview_lines))
+        .block(preview_block)
+        .style(
+            Style::default()
+                .fg(theme.text_primary)
+                .bg(theme.bg_panel_alt),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(preview_widget, preview_area);
 }

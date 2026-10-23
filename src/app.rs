@@ -494,6 +494,7 @@ struct NavigationState {
     issue_comments_scroll: u16,
     issue_comments_max_scroll: u16,
     issue_comment_offsets: Vec<u16>,
+    issue_comment_reading_position: Option<(i64, i32)>,
     issue_recent_comments_scroll: u16,
     issue_recent_comments_max_scroll: u16,
 }

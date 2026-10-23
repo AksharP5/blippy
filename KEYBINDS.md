@@ -87,6 +87,7 @@ Search mode:
 ## Issue Comments View
 
 - `j` / `k`: Move between comments
+- `Up` / `Down` or mouse wheel: Scroll comment content line by line
 - `m`: Add comment
 - `Shift+N`: Create issue (issue comments only)
 - `e`: Edit selected comment

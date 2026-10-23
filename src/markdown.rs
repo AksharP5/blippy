@@ -56,7 +56,7 @@ impl RenderState {
         match event {
             Event::Start(tag) => self.start_tag(tag),
             Event::End(tag) => self.end_tag(tag),
-            Event::Text(text) => self.push_text(text.as_ref()),
+            Event::Text(text) | Event::Html(text) => self.push_text(text.as_ref()),
             Event::Code(text) => {
                 let style = Style::default().fg(ACCENT_CYAN).bg(CODE_BG);
                 self.push_span(Span::styled(text.into_string(), style));
@@ -261,6 +261,27 @@ mod tests {
         backend::TestBackend,
         widgets::{Paragraph, Wrap},
     };
+
+    #[test]
+    fn preserves_html_block_content_as_literal_text() {
+        let input = "Before\n\n<details>\n<summary>Release notes</summary>\n<p>Fix reconnect failures.</p>\n</details>\n\nAfter";
+        let rendered = render(input)
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for text in [
+            "Before",
+            "<details>",
+            "<summary>Release notes</summary>",
+            "<p>Fix reconnect failures.</p>",
+            "</details>",
+            "After",
+        ] {
+            assert!(rendered.contains(text), "missing {text}");
+        }
+    }
 
     #[test]
     fn renders_heading_and_list() {

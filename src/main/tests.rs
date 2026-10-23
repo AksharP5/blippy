@@ -1655,6 +1655,152 @@ fn checkout_requires_a_local_repository() {
 }
 
 #[test]
+fn issue_creation_preserves_an_active_editor_or_picker() {
+    for picker in [false, true] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = linked_navigation_app(true);
+        crate::store::upsert_repo(
+            &conn,
+            &crate::store::RepoRow {
+                id: 1,
+                owner: "acme".to_string(),
+                name: "blippy".to_string(),
+                updated_at: None,
+                etag: None,
+            },
+        )
+        .expect("cache repo");
+        for issue in app.issues() {
+            crate::store::upsert_issue(&conn, issue).expect("cache issue");
+        }
+        let mut created = app.issues()[1].clone();
+        created.is_pr = false;
+        created.state = "open".to_string();
+
+        if picker {
+            app.open_label_picker(View::IssueDetail, vec!["bug".to_string()], &[]);
+            app.on_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        } else {
+            app.open_issue_comment_editor(View::IssueDetail);
+            for ch in "Keep this draft".chars() {
+                app.editor_mut().append_text(ch);
+            }
+        }
+        let view = app.view();
+        let (event_tx, event_rx) = channel();
+        event_tx
+            .send(super::AppEvent::IssueCreated {
+                repo: super::RepoIdentity::new("acme", "blippy", app.current_repo_id()),
+                issue: created.clone(),
+            })
+            .expect("earlier issue creation completes");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle creation");
+
+        assert_eq!(
+            app.view(),
+            view,
+            "an earlier creation must not close active input"
+        );
+        assert_eq!(app.current_issue_number(), Some(7));
+        assert_eq!(app.issue_query(), "#7");
+        assert!(app.has_assignee_filter());
+        if picker {
+            assert_eq!(app.selected_labels(), vec!["bug"]);
+        } else {
+            assert_eq!(app.editor().text(), "Keep this draft");
+        }
+        assert_eq!(app.status(), "Created issue #8");
+        assert!(app.take_sync_request());
+        assert!(
+            crate::store::list_issues(&conn, 1)
+                .expect("cached issues")
+                .iter()
+                .any(|issue| issue.id == created.id && !issue.is_pr)
+        );
+    }
+}
+
+#[test]
+fn issue_creation_preserves_search_help_and_pull_request_contexts() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for (searching, help, mode) in [
+        (true, false, WorkItemMode::Issues),
+        (false, true, WorkItemMode::Issues),
+        (false, false, WorkItemMode::PullRequests),
+    ] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = linked_navigation_app(true);
+        crate::store::upsert_repo(
+            &conn,
+            &crate::store::RepoRow {
+                id: 1,
+                owner: "acme".into(),
+                name: "blippy".into(),
+                updated_at: None,
+                etag: None,
+            },
+        )
+        .expect("cache repo");
+        for issue in app.issues() {
+            crate::store::upsert_issue(&conn, issue).expect("cache issue");
+        }
+        let created = IssueRow {
+            id: 3,
+            number: 9,
+            ..app.issues()[0].clone()
+        };
+
+        if mode == WorkItemMode::PullRequests {
+            assert!(app.reveal_issue_by_number(8, mode));
+            app.set_current_issue(2, 8);
+        } else {
+            app.set_view(View::Issues);
+        }
+        if searching {
+            app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        }
+        if help {
+            app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        }
+        let previous = (
+            app.view(),
+            app.work_item_mode(),
+            app.issue_query().to_string(),
+            app.current_issue_id(),
+            app.current_issue_number(),
+        );
+        let (event_tx, event_rx) = channel();
+        event_tx
+            .send(super::AppEvent::IssueCreated {
+                repo: super::RepoIdentity::new("acme", "blippy", app.current_repo_id()),
+                issue: created,
+            })
+            .expect("earlier issue creation completes");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle creation");
+
+        assert_eq!(
+            (
+                app.view(),
+                app.work_item_mode(),
+                app.issue_query().to_string(),
+                app.current_issue_id(),
+                app.current_issue_number(),
+            ),
+            previous,
+            "searching={searching}, help={help}, mode={mode:?}"
+        );
+        assert_eq!(app.issue_search_mode(), searching);
+        assert_eq!(app.help_overlay_visible(), help);
+        assert_eq!(app.status(), "Created issue #9");
+        assert!(app.take_sync_request());
+    }
+}
+
+#[test]
 fn created_issue_is_opened_even_when_hidden_by_filters() {
     let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
     let mut app = linked_navigation_app(true);

@@ -178,9 +178,18 @@ pub(super) fn handle_events(
                 }
                 app.request_sync();
                 let cache_result = cache_result.and_then(|()| {
+                    refresh_current_repo_issues(app, conn)?;
+                    if !matches!(
+                        app.view(),
+                        View::Issues | View::IssueDetail | View::IssueComments
+                    ) || app.work_item_mode() != WorkItemMode::Issues
+                        || app.issue_search_mode()
+                        || app.help_overlay_visible()
+                    {
+                        return Ok(());
+                    }
                     app.set_work_item_mode(WorkItemMode::Issues);
                     app.set_issue_filter(IssueFilter::Open);
-                    refresh_current_repo_issues(app, conn)?;
                     if app.reveal_issue_by_number(issue_number, WorkItemMode::Issues)
                         && let Some((issue_id, issue_number)) = app
                             .selected_issue_row()

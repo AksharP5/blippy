@@ -135,6 +135,7 @@ impl App {
     }
 
     pub fn set_issues(&mut self, issues: Vec<IssueRow>) {
+        let selected_issue_id = self.selected_issue_row().map(|issue| issue.id);
         let selected_issue_number = self.selected_issue_row().map(|issue| issue.number);
         let current_issue_number = self.context.issue_number;
         self.issues = issues;
@@ -153,33 +154,32 @@ impl App {
         {
             self.context.issue_id = Some(issue.id);
         }
-        self.navigation.issues_preview_scroll = 0;
-        self.navigation.issues_preview_max_scroll = 0;
+        if self.selected_issue_row().map(|issue| issue.id) != selected_issue_id {
+            self.navigation.issues_preview_scroll = 0;
+            self.navigation.issues_preview_max_scroll = 0;
+        }
     }
 
     pub fn set_comments(&mut self, comments: Vec<CommentRow>) {
-        self.navigation.issue_comment_offsets.clear();
+        self.preserve_issue_comment_reading_position();
         let selected_comment_id = self.selected_comment_row().map(|comment| comment.id);
         self.comments = comments;
-        if self.comments.is_empty() {
-            self.navigation.selected_comment = 0;
+        let selected_comment = selected_comment_id.and_then(|comment_id| {
+            self.comments
+                .iter()
+                .position(|comment| comment.id == comment_id)
+        });
+        if selected_comment != Some(self.navigation.selected_comment) {
+            self.navigation.issue_comment_offsets.clear();
+        }
+        self.navigation.selected_comment = selected_comment.unwrap_or(0);
+        if selected_comment.is_none() {
+            self.navigation.issue_comment_reading_position = None;
             self.navigation.issue_comments_scroll = 0;
             self.navigation.issue_recent_comments_scroll = 0;
             self.navigation.issue_comments_max_scroll = 0;
             self.navigation.issue_recent_comments_max_scroll = 0;
-            return;
         }
-        self.navigation.selected_comment = selected_comment_id
-            .and_then(|comment_id| {
-                self.comments
-                    .iter()
-                    .position(|comment| comment.id == comment_id)
-            })
-            .unwrap_or(0);
-        self.navigation.issue_comments_scroll = 0;
-        self.navigation.issue_recent_comments_scroll = 0;
-        self.navigation.issue_comments_max_scroll = 0;
-        self.navigation.issue_recent_comments_max_scroll = 0;
     }
 
     pub(super) fn back_from_issue_detail(&mut self) {
@@ -209,9 +209,11 @@ impl App {
 
     pub fn reset_issue_comments_scroll(&mut self) {
         self.navigation.issue_comments_scroll = 0;
+        self.navigation.issue_comment_reading_position = None;
     }
 
     pub fn set_issue_comments_max_scroll(&mut self, max_scroll: u16) {
+        self.preserve_issue_comment_reading_position();
         self.navigation.issue_comments_max_scroll = max_scroll;
         if self.navigation.issue_comments_scroll > max_scroll {
             self.navigation.issue_comments_scroll = max_scroll;
@@ -222,12 +224,40 @@ impl App {
         let selected = self.navigation.selected_comment;
         let previous = self.navigation.issue_comment_offsets.get(selected).copied();
         let current = offsets.get(selected).copied();
+        let relative_offset = self
+            .navigation
+            .issue_comment_reading_position
+            .take()
+            .filter(|(id, _)| {
+                self.selected_comment_row()
+                    .is_some_and(|comment| comment.id == *id)
+            })
+            .map(|(_, offset)| offset)
+            .unwrap_or_default();
         if previous != current {
-            self.navigation.issue_comments_scroll = current
-                .unwrap_or_default()
-                .min(self.navigation.issue_comments_max_scroll);
+            self.navigation.issue_comments_scroll = (i32::from(current.unwrap_or_default())
+                + relative_offset)
+                .clamp(0, i32::from(self.navigation.issue_comments_max_scroll))
+                as u16;
         }
         self.navigation.issue_comment_offsets = offsets;
+    }
+
+    fn preserve_issue_comment_reading_position(&mut self) {
+        if self.navigation.issue_comment_reading_position.is_some() {
+            return;
+        }
+        if let Some(comment) = self.selected_comment_row()
+            && let Some(offset) = self
+                .navigation
+                .issue_comment_offsets
+                .get(self.navigation.selected_comment)
+        {
+            self.navigation.issue_comment_reading_position = Some((
+                comment.id,
+                i32::from(self.navigation.issue_comments_scroll) - i32::from(*offset),
+            ));
+        }
     }
 
     pub fn set_issue_recent_comments_max_scroll(&mut self, max_scroll: u16) {
@@ -457,6 +487,7 @@ impl App {
 
     fn reset_issue_sync_state(&mut self) {
         self.navigation.issue_comment_offsets.clear();
+        self.navigation.issue_comment_reading_position = None;
         self.sync.comment_sync_requested = false;
         self.sync.pull_request_files_sync_requested = false;
         self.sync.pull_request_review_comments_sync_requested = false;
@@ -502,6 +533,7 @@ impl App {
     }
 
     pub fn update_comment_body_by_id(&mut self, comment_id: i64, body: &str) {
+        self.preserve_issue_comment_reading_position();
         for comment in &mut self.comments {
             if comment.id == comment_id {
                 comment.body = body.to_string();
@@ -521,6 +553,7 @@ impl App {
             None => return,
         };
 
+        self.preserve_issue_comment_reading_position();
         self.comments.remove(removed_index);
         self.navigation.issue_comment_offsets.clear();
         if self.comments.is_empty() {

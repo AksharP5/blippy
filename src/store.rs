@@ -574,6 +574,10 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
         ",
     )?;
     add_comment_accessed_column(conn)?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS comments_issue_created ON comments(issue_id, created_at);
+         CREATE INDEX IF NOT EXISTS comments_accessed ON comments(last_accessed_at);",
+    )?;
     add_issue_comments_count_column(conn)?;
     migrate_label_encoding(conn)?;
     Ok(())

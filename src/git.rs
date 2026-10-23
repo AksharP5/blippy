@@ -29,7 +29,7 @@ pub fn parse_remote_url(url: &str) -> Option<RepoSlug> {
         let parsed = reqwest::Url::parse(cleaned).ok()?;
         if parsed.username() != "git"
             || parsed.password().is_some()
-            || parsed.host_str() != Some("github.com")
+            || !matches!(parsed.host_str(), Some("github.com" | "ssh.github.com"))
             || parsed.query().is_some()
             || parsed.fragment().is_some()
         {
@@ -195,6 +195,7 @@ mod tests {
     fn parse_remote_url_rejects_unsupported_ssh_url_components() {
         for url in [
             "ssh://git@github.com.evil.invalid/acme/blippy.git",
+            "ssh://git@ssh.github.com.evil.invalid:443/acme/blippy.git",
             "ssh://git@github.com:invalid/acme/blippy.git",
             "ssh://git:secret@github.com/acme/blippy.git",
             "ssh://git@github.com/acme/blippy.git?query",
@@ -293,6 +294,36 @@ mod tests {
         assert_eq!(remotes[0].slug.owner, "acme");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_github_remotes_reads_ssh_over_https_origin() {
+        let dir = unique_temp_dir("git-remote-ssh-443");
+        init_git_repo(&dir);
+        run_git(
+            &dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "ssh://git@ssh.github.com:443/acme/blippy.git",
+            ],
+        );
+
+        let remotes = super::list_github_remotes_at(&dir).expect("list remotes");
+        assert_eq!(
+            remotes,
+            vec![RemoteInfo {
+                name: "origin".into(),
+                url: "ssh://git@ssh.github.com:443/acme/blippy.git".into(),
+                slug: RepoSlug {
+                    owner: "acme".into(),
+                    repo: "blippy".into(),
+                },
+            }]
+        );
+
+        fs::remove_dir_all(&dir).expect("remove test repo");
     }
 
     #[test]

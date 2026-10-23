@@ -57,31 +57,69 @@ pub(super) fn register_inline_button(
     app: &mut App,
     area: Rect,
     scroll: u16,
-    line: usize,
-    x_offset: u16,
-    width: u16,
+    lines: &[Line<'_>],
+    button: (usize, u16, u16),
     target: MouseTarget,
 ) {
-    if area.width == 0 || area.height == 0 || width == 0 {
+    use ratatui::{buffer::Buffer, widgets::Widget};
+
+    let (line, x_offset, width) = button;
+    if area.is_empty() || width == 0 {
         return;
     }
-    let line = line as u16;
-    if line < scroll {
+    let Some(content) = lines.get(line) else {
+        return;
+    };
+    let row = wrapped_line_count(&lines[..line], area.width);
+    let top = row.saturating_sub(scroll as usize);
+    if top >= area.height as usize {
         return;
     }
-    let y = area.y.saturating_add(line.saturating_sub(scroll));
-    if y >= area.y.saturating_add(area.height) {
+
+    // Let Paragraph place the marked span using the same wrapping as the visible text.
+    let mut content = content.clone();
+    let mut column = 0;
+    for span in &mut content.spans {
+        let end = column + span.width();
+        span.style = if column >= x_offset as usize && end <= (x_offset as usize + width as usize) {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        column = end;
+    }
+    let line_scroll = (scroll as usize).saturating_sub(row) as u16;
+    let paragraph = Paragraph::new(content)
+        .wrap(Wrap { trim: false })
+        .scroll((line_scroll, 0));
+    let height = paragraph
+        .line_count(area.width)
+        .saturating_sub(line_scroll as usize)
+        .min(area.height as usize - top) as u16;
+    if height == 0 {
         return;
     }
-    let x = area.x.saturating_add(x_offset);
-    if x >= area.x.saturating_add(area.width) {
-        return;
+    let visible = Rect {
+        y: area.y + top as u16,
+        height,
+        ..area
+    };
+    let mut probe = Buffer::empty(visible);
+    paragraph.render(visible, &mut probe);
+    for y in visible.y..visible.bottom() {
+        let mut x = visible.x;
+        while x < visible.right() {
+            if !probe[(x, y)].modifier.contains(Modifier::REVERSED) {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < visible.right() && probe[(x, y)].modifier.contains(Modifier::REVERSED) {
+                x += 1;
+            }
+            app.register_mouse_region(target, start, y, x - start, 1);
+        }
     }
-    let max_width = area.width.saturating_sub(x_offset);
-    if max_width == 0 {
-        return;
-    }
-    app.register_mouse_region(target, x, y, width.min(max_width), 1);
 }
 
 pub(super) fn fit_inline(value: &str, max: usize) -> String {
@@ -671,6 +709,136 @@ mod tests {
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn wrapped_link_buttons_click_their_rendered_cells() {
+        use crate::app::{AppAction, WorkItemMode};
+        for view in [View::Issues, View::IssueDetail] {
+            for is_pr in [false, true] {
+                for width in [60, 80, 120] {
+                    let mut app = App::new(Config::default());
+                    app.set_issues(vec![crate::store::IssueRow {
+                        id: 1,
+                        repo_id: 1,
+                        number: 1,
+                        state: "open".into(),
+                        title:
+                            "A long title with enough words to wrap across several terminal rows"
+                                .repeat(2),
+                        body: "Description".into(),
+                        labels: vec![],
+                        assignees: String::new(),
+                        comments_count: 0,
+                        updated_at: None,
+                        is_pr,
+                    }]);
+                    if is_pr {
+                        app.set_work_item_mode(WorkItemMode::PullRequests);
+                        app.set_linked_issue_for_pull_request(1, Some(7));
+                    } else {
+                        app.set_linked_pull_request(1, Some(7));
+                    }
+                    app.set_current_issue(1, 1);
+                    app.set_view(view);
+                    let theme = resolve_theme(None);
+                    let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+                    terminal
+                        .draw(|frame| crate::ui::draw(frame, &mut app))
+                        .unwrap();
+                    let min_x = if view == View::Issues {
+                        width * 56 / 100
+                    } else {
+                        0
+                    };
+                    let mut button_cells = Vec::new();
+                    for y in 6..39 {
+                        for x in min_x..width {
+                            let cell = &terminal.backend().buffer()[(x, y)];
+                            let web = cell.bg == theme.accent_primary;
+                            if cell.fg == theme.bg_app && (web || cell.bg == theme.accent_success) {
+                                button_cells.push((x, y, web));
+                            }
+                        }
+                    }
+                    assert!(button_cells.iter().any(|(_, _, web)| *web));
+                    assert!(button_cells.iter().any(|(_, _, web)| !*web));
+                    for (column, row, web) in button_cells {
+                        app.on_mouse(MouseEvent {
+                            kind: MouseEventKind::Down(MouseButton::Left),
+                            column,
+                            row,
+                            modifiers: KeyModifiers::NONE,
+                        });
+                        let expected = match (is_pr, web) {
+                            (false, false) => AppAction::OpenLinkedPullRequestInTui,
+                            (false, true) => AppAction::OpenLinkedPullRequestInBrowser,
+                            (true, false) => AppAction::OpenLinkedIssueInTui,
+                            (true, true) => AppAction::OpenLinkedIssueInBrowser,
+                        };
+                        assert_eq!(
+                            app.take_action(),
+                            Some(expected),
+                            "{view:?} is_pr={is_pr} width={width} cell={column},{row}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_link_hitboxes_follow_scroll_and_clipping() {
+        use crate::app::AppAction;
+        use ratatui::{buffer::Buffer, widgets::Widget};
+
+        let lines = vec![
+            Line::from("界界 heading wraps over several rows"),
+            Line::from(vec![
+                Span::raw("Linked #7 "),
+                Span::styled(" TUI ", Style::default().fg(Color::Red)),
+            ]),
+            Line::from("After the link"),
+        ];
+        let mut visible_cells = 0;
+        for width in [4, 8, 16, 40] {
+            for scroll in 0..12 {
+                let area = Rect::new(3, 2, width, 3);
+                let mut buffer = Buffer::empty(area);
+                Paragraph::new(Text::from(lines.clone()))
+                    .wrap(Wrap { trim: false })
+                    .scroll((scroll, 0))
+                    .render(area, &mut buffer);
+                let mut app = App::new(Config::default());
+                register_inline_button(
+                    &mut app,
+                    area,
+                    scroll,
+                    &lines,
+                    (1, 10, 5),
+                    MouseTarget::LinkedPullRequestTuiButton,
+                );
+                for y in area.y..area.bottom() {
+                    for x in area.x..area.right() {
+                        let expected = (buffer[(x, y)].fg == Color::Red)
+                            .then_some(AppAction::OpenLinkedPullRequestInTui);
+                        visible_cells += usize::from(expected.is_some());
+                        app.on_mouse(MouseEvent {
+                            kind: MouseEventKind::Down(MouseButton::Left),
+                            column: x,
+                            row: y,
+                            modifiers: KeyModifiers::NONE,
+                        });
+                        assert_eq!(
+                            app.take_action(),
+                            expected,
+                            "width={width} scroll={scroll} cell={x},{y}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(visible_cells > 0);
+    }
 
     #[test]
     fn wrapped_line_count_matches_word_wrap_and_terminal_width() {

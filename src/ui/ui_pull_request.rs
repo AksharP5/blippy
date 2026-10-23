@@ -52,6 +52,9 @@ pub(super) fn draw_pull_request_files(
         PullRequestReviewFocus::Diff => "diff",
     };
     let horizontal_scroll = app.pull_request_diff_horizontal_scroll();
+    let back_label = "[Back]";
+    let files_label = "[Files]";
+    let diff_label = "[Diff]";
     let header = Text::from(vec![
         Line::from(Span::styled(
             title.clone(),
@@ -61,14 +64,14 @@ pub(super) fn draw_pull_request_files(
         )),
         Line::from(vec![
             Span::styled(
-                "[Back]",
+                back_label,
                 Style::default()
                     .fg(theme.accent_primary)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
-                "[Files]",
+                files_label,
                 if focused == "files" {
                     Style::default()
                         .fg(theme.accent_success)
@@ -79,7 +82,7 @@ pub(super) fn draw_pull_request_files(
             ),
             Span::raw("  "),
             Span::styled(
-                "[Diff]",
+                diff_label,
                 if focused == "diff" {
                     Style::default()
                         .fg(theme.accent_success)
@@ -137,27 +140,24 @@ pub(super) fn draw_pull_request_files(
         vertical: 1,
         horizontal: 1,
     });
-    app.register_mouse_region(
-        MouseTarget::Back,
-        header_content.x,
-        header_content.y.saturating_add(1),
-        8,
-        1,
-    );
-    app.register_mouse_region(
-        MouseTarget::PullRequestFocusFiles,
-        header_content.x.saturating_add(9),
-        header_content.y.saturating_add(1),
-        9,
-        1,
-    );
-    app.register_mouse_region(
-        MouseTarget::PullRequestFocusDiff,
-        header_content.x.saturating_add(20),
-        header_content.y.saturating_add(1),
-        8,
-        1,
-    );
+    if header_content.height > 1 {
+        let mut x = header_content.x;
+        for (label, target) in [
+            (back_label, MouseTarget::Back),
+            (files_label, MouseTarget::PullRequestFocusFiles),
+            (diff_label, MouseTarget::PullRequestFocusDiff),
+        ] {
+            let width = Span::raw(label).width() as u16;
+            app.register_mouse_region(
+                target,
+                x,
+                header_content.y + 1,
+                width.min(header_content.right().saturating_sub(x)),
+                1,
+            );
+            x = x.saturating_add(width + 2);
+        }
+    }
 
     let file_items = if app.pull_request_files().is_empty() {
         vec![ListItem::new(
@@ -497,6 +497,59 @@ mod tests {
     use crate::{app::PullRequestFile, config::Config};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn review_toolbar_buttons_match_their_visible_cells() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        for width in [80, 120] {
+            let mut app = App::new(Config::default());
+            app.set_view(View::PullRequestFiles);
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            let rows = terminal
+                .backend()
+                .buffer()
+                .content
+                .chunks(width as usize)
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+                .collect::<Vec<_>>();
+            let (y, row) = rows
+                .iter()
+                .enumerate()
+                .find(|(_, row)| row.contains("[Files]"))
+                .unwrap();
+            for (label, expected, opposite) in [
+                (
+                    "[Files]",
+                    PullRequestReviewFocus::Files,
+                    PullRequestReviewFocus::Diff,
+                ),
+                (
+                    "[Diff]",
+                    PullRequestReviewFocus::Diff,
+                    PullRequestReviewFocus::Files,
+                ),
+            ] {
+                let x = row[..row.find(label).unwrap()].chars().count() as u16;
+                for offset in 0..label.len() as u16 {
+                    app.set_pull_request_review_focus(opposite);
+                    app.on_mouse(MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: x + offset,
+                        row: y as u16,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                    assert_eq!(
+                        app.pull_request_review_focus(),
+                        expected,
+                        "{label} cell {offset}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn resizing_a_panned_diff_renders_correctly_on_the_first_frame() {
