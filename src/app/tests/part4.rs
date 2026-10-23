@@ -457,6 +457,110 @@ fn merge_assignee_options_dedupes_case_insensitive() {
 }
 
 #[test]
+fn merge_label_options_preserves_highlight() {
+    for query in ["", "n"] {
+        for labels in [
+            vec!["bug", "enhancement"],
+            vec!["BUG", "ENHANCEMENT", "announcement"],
+        ] {
+            let mut app = App::new(Config::default());
+            app.open_label_picker(
+                View::Issues,
+                vec!["bug".into(), "enhancement".into()],
+                &["bug".into()],
+            );
+            for ch in query.chars() {
+                app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(
+                app.label_options()[app.selected_label_option()],
+                "enhancement"
+            );
+
+            app.merge_label_options(labels.into_iter().map(String::from).collect());
+
+            assert_eq!(app.label_query(), query);
+            assert_eq!(app.selected_labels(), vec!["bug"]);
+            assert_eq!(
+                app.label_options()[app.selected_label_option()],
+                "enhancement"
+            );
+            app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.take_action(), Some(AppAction::SubmitLabels));
+            assert_eq!(app.selected_labels(), vec!["bug", "enhancement"]);
+        }
+    }
+}
+
+#[test]
+fn merge_assignee_options_preserves_highlight() {
+    for query in ["", "a"] {
+        for assignees in [vec!["alex", "sam"], vec!["ALEX", "SAM", "aaron"]] {
+            let mut app = App::new(Config::default());
+            app.open_assignee_picker(View::Issues, vec!["alex".into(), "sam".into()], "alex");
+            for ch in query.chars() {
+                app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(
+                app.assignee_options()[app.selected_assignee_option()],
+                "sam"
+            );
+
+            app.merge_assignee_options(assignees.into_iter().map(String::from).collect());
+
+            assert_eq!(app.assignee_query(), query);
+            assert_eq!(app.selected_assignees_csv(), "alex");
+            assert_eq!(
+                app.assignee_options()[app.selected_assignee_option()],
+                "sam"
+            );
+            app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.take_action(), Some(AppAction::SubmitAssignees));
+            assert_eq!(app.selected_assignees_csv(), "alex,sam");
+        }
+    }
+}
+
+#[test]
+fn merge_label_options_highlights_first_match_when_none_was_visible() {
+    let mut app = App::new(Config::default());
+    app.open_label_picker(View::Issues, vec![], &[]);
+    app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    app.merge_label_options(vec!["bug".into()]);
+    assert!(app.filtered_label_indices().is_empty());
+    app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(app.selected_labels().is_empty());
+
+    app.merge_label_options(vec!["documentation".into(), "Docs".into()]);
+
+    assert_eq!(app.label_query(), "d");
+    assert_eq!(app.label_options()[app.selected_label_option()], "Docs");
+}
+
+#[test]
+fn merge_assignee_options_highlights_first_match_when_none_was_visible() {
+    let mut app = App::new(Config::default());
+    app.open_assignee_picker(View::Issues, vec![], "");
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    app.merge_assignee_options(vec!["alex".into()]);
+    assert!(app.filtered_assignee_indices().is_empty());
+    app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert!(app.selected_assignees().is_empty());
+
+    app.merge_assignee_options(vec!["sara".into(), "Sam".into()]);
+
+    assert_eq!(app.assignee_query(), "s");
+    assert_eq!(
+        app.assignee_options()[app.selected_assignee_option()],
+        "Sam"
+    );
+}
+
+#[test]
 fn back_from_expanded_diff_returns_to_split_review() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);
