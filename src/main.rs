@@ -32,7 +32,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -310,6 +311,10 @@ fn run_app(
         }
 
         match event::read()? {
+            Event::Paste(text) => {
+                app.on_paste(&text);
+                needs_redraw = true;
+            }
             Event::Key(key) if !key.is_release() => {
                 app.on_key(key);
                 needs_redraw = true;
@@ -657,7 +662,13 @@ impl TerminalGuard {
             }
         };
 
-        Ok(Self { terminal })
+        let mut guard = Self { terminal };
+        if let Err(error) = execute!(guard.terminal.backend_mut(), EnableBracketedPaste)
+            && error.kind() != io::ErrorKind::Unsupported
+        {
+            return Err(error.into());
+        }
+        Ok(guard)
     }
 
     fn terminal_mut(&mut self) -> &mut Tui {
@@ -671,7 +682,8 @@ impl Drop for TerminalGuard {
         let _ = execute!(
             self.terminal.backend_mut(),
             LeaveAlternateScreen,
-            DisableMouseCapture
+            DisableMouseCapture,
+            DisableBracketedPaste
         );
         let _ = self.terminal.show_cursor();
     }

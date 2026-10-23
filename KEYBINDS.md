@@ -161,6 +161,8 @@ Search mode:
 - `Ctrl+j`: Insert newline (non-create-issue editors)
 - `Esc`: Cancel
 
+Pasting in a text field inserts text without submitting or running shortcuts. In terminals with bracketed paste support, comment and issue bodies keep pasted line breaks; titles and search fields use spaces.
+
 ## Search Qualifiers
 
 - `is:open`, `is:closed`, `is:merged`

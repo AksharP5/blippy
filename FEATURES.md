@@ -29,6 +29,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - HTML blocks in Markdown bodies remain readable as literal text
 - State and metadata updates prevent overlapping actions on the same item
 - Copy repository, issue, and pull request URLs to the system clipboard
+- Bracketed paste inserts text without submitting comments or triggering shortcuts, preserving line breaks in bodies
 
 ## Issue Creation in TUI
 

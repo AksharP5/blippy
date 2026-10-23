@@ -1,6 +1,57 @@
 use super::*;
 
 impl App {
+    pub fn on_paste(&mut self, text: &str) {
+        if self.search.help_overlay_visible {
+            return;
+        }
+        let (input, multiline) = match self.view {
+            View::CommentEditor if self.comment_editor.create_issue_confirm_visible() => return,
+            View::CommentEditor if !self.comment_editor.create_issue_title_focused() => {
+                (&mut self.comment_editor.text, true)
+            }
+            View::CommentEditor | View::CommentPresetName => (&mut self.comment_editor.name, false),
+            View::Issues if self.search.issue_search_mode => (&mut self.search.issue_query, false),
+            View::RepoPicker if self.search.repo_search_mode => {
+                (&mut self.search.repo_query, false)
+            }
+            View::LabelPicker => (&mut self.metadata_picker.label_query, false),
+            View::AssigneePicker => (&mut self.metadata_picker.assignee_query, false),
+            _ => return,
+        };
+        // Terminals send pasted line endings as CR, LF, or CRLF.
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        input.extend(text.chars().filter_map(|ch| match ch {
+            '\n' | '\t' if !multiline => Some(' '),
+            '\n' | '\t' => Some(ch),
+            ch if ch.is_control() => None,
+            ch => Some(ch),
+        }));
+
+        match self.view {
+            View::Issues => {
+                self.rebuild_issue_filter();
+                self.navigation.issues_preview_scroll = 0;
+                self.update_search_status();
+            }
+            View::RepoPicker => {
+                self.rebuild_repo_picker_filter();
+                self.navigation.selected_repo = 0;
+            }
+            View::LabelPicker => {
+                if let Some(index) = self.filtered_label_indices().first() {
+                    self.metadata_picker.selected_label_option = *index;
+                }
+            }
+            View::AssigneePicker => {
+                if let Some(index) = self.filtered_assignee_indices().first() {
+                    self.metadata_picker.selected_assignee_option = *index;
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn editor(&self) -> &CommentEditorState {
         &self.comment_editor
     }
@@ -248,5 +299,95 @@ impl App {
             },
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pasted_comments_keep_line_breaks_and_wait_for_submit() {
+        let mut config = Config::default();
+        config.keybinds.insert("back_escape".into(), "q".into());
+        let mut app = App::new(config);
+        app.open_issue_comment_editor(View::IssueComments);
+        app.on_paste("first line\r\n\tquoted λ\rlast line\n");
+
+        assert_eq!(app.editor().text(), "first line\n\tquoted λ\nlast line\n");
+        assert_eq!(app.view(), View::CommentEditor);
+        assert!(app.take_action().is_none());
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            app.take_action(),
+            Some(AppAction::SubmitIssueComment)
+        ));
+    }
+
+    #[test]
+    fn pasted_issue_title_and_body_preserve_confirmation() {
+        let mut app = App::new(Config::default());
+        app.open_create_issue_editor(View::Issues);
+        app.on_paste("Issue\r\ntitle");
+        assert_eq!(app.editor().name(), "Issue title");
+        assert!(!app.editor().create_issue_confirm_visible());
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+        app.on_paste("Body\nline two");
+        assert_eq!(app.editor().text(), "Body\nline two");
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.editor().create_issue_confirm_visible());
+        app.on_paste("\n\rmore text");
+        assert_eq!(app.editor().text(), "Body\nline two");
+        assert!(app.take_action().is_none());
+    }
+
+    #[test]
+    fn pasted_text_updates_search_and_picker_queries_without_actions() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.on_paste("is:open\nparser");
+        assert_eq!(app.issue_query(), "is:open parser");
+        assert!(app.issue_search_mode());
+
+        app.set_view(View::RepoPicker);
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.on_paste("acme/repo");
+        assert_eq!(app.repo_query(), "acme/repo");
+        assert!(app.repo_search_mode());
+
+        app.open_label_picker(
+            View::Issues,
+            vec!["good first issue".into(), "bug".into()],
+            &[],
+        );
+        app.on_paste("good first issue");
+        assert_eq!(app.label_query(), "good first issue");
+        assert_eq!(app.filtered_label_indices(), vec![1]);
+        assert_eq!(app.selected_label_option(), 1);
+        assert!(app.selected_labels().is_empty());
+
+        app.open_assignee_picker(View::Issues, vec!["jane".into(), "alice".into()], "");
+        app.on_paste("jane");
+        assert_eq!(app.assignee_query(), "jane");
+        assert_eq!(app.filtered_assignee_indices(), vec![1]);
+        assert_eq!(app.selected_assignee_option(), 1);
+        assert!(app.take_action().is_none());
+    }
+
+    #[test]
+    fn paste_does_not_run_browsing_shortcuts_or_dismiss_help() {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        app.on_paste("p?dd\r\nM\u{1b}\u{3}");
+        assert_eq!(app.view(), View::Issues);
+        assert_eq!(app.work_item_mode(), WorkItemMode::Issues);
+        assert!(!app.help_overlay_visible());
+        assert!(!app.should_quit());
+        assert!(app.take_action().is_none());
+        app.on_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        app.on_paste("?\u{1b}");
+        assert!(app.help_overlay_visible());
+        assert!(app.take_action().is_none());
     }
 }
