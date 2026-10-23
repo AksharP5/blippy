@@ -44,6 +44,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Open linked items in TUI or browser
 - Linked-item lookups follow the selected row when scrolling through the issue or PR list
 - Linked metadata is cached to reduce repeated lookups; partial results remain usable, and refresh retries incomplete or failed lookups
+- Delayed results cache links without interrupting editors, pickers, search, help, or navigation to another item
 - Opening a linked item clears list search and assignee filters to reveal the target
 
 ## Pull Request Review Workspace
