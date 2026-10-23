@@ -390,16 +390,6 @@ pub(super) fn draw_issue_detail(
         } else {
             theme.bg_panel
         }));
-    let body_paragraph = Paragraph::new(Text::from(body_lines))
-        .block(body_block)
-        .style(Style::default().fg(theme.text_primary).bg(if body_focused {
-            theme.bg_panel_alt
-        } else {
-            theme.bg_panel
-        }))
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
-    frame.render_widget(body_paragraph, panes[0]);
     register_mouse_region(app, MouseTarget::IssueBodyPane, panes[0]);
     let body_inner = panes[0].inner(Margin {
         vertical: 1,
@@ -410,9 +400,8 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedPullRequestTuiButton,
         );
     }
@@ -421,9 +410,8 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedPullRequestWebButton,
         );
     }
@@ -432,9 +420,8 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedIssueTuiButton,
         );
     }
@@ -443,13 +430,22 @@ pub(super) fn draw_issue_detail(
             app,
             body_inner,
             scroll,
-            line,
-            x_offset,
-            width,
+            &body_lines,
+            (line, x_offset, width),
             MouseTarget::LinkedIssueWebButton,
         );
     }
 
+    let body_paragraph = Paragraph::new(Text::from(body_lines))
+        .block(body_block)
+        .style(Style::default().fg(theme.text_primary).bg(if body_focused {
+            theme.bg_panel_alt
+        } else {
+            theme.bg_panel
+        }))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(body_paragraph, panes[0]);
     let side_content_width = panes[1].width.saturating_sub(2);
     let side_viewport = panes[1].height.saturating_sub(2) as usize;
     let side_total_lines = wrapped_line_count(&side_lines, side_content_width);
