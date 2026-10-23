@@ -623,6 +623,10 @@ fn refresh_current_repo_issues(app: &mut App, conn: &rusqlite::Connection) -> Re
             return Ok(());
         }
     };
+    if app.current_repo_id().is_some_and(|id| id != repo_row.id) {
+        // SyncFinished owns replacement adoption and clears the old repository context.
+        return Ok(());
+    }
     let issues = list_issues(conn, repo_row.id)?;
     app.set_current_repo_id(repo_row.id);
     app.set_issues(issues);

@@ -293,62 +293,106 @@ fn offscreen_repository_redirect_keeps_pending_operations_visible_under_both_nam
 
 #[test]
 fn recreated_repository_sync_replaces_the_current_tui_context() {
-    let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
-    let mut app = linked_navigation_app(true);
-    app.set_current_repo_id(1);
-    app.set_pending_issue_action(7, PendingIssueAction::Closing);
-    app.set_linked_pull_request(7, Some(8));
-    app.set_comments(vec![crate::store::CommentRow {
-        id: 10,
-        issue_id: 1,
-        author: "alex".into(),
-        body: "Previous repository comment".into(),
-        created_at: None,
-        last_accessed_at: None,
-    }]);
-    let replacement = crate::store::RepoRow {
-        id: 2,
-        owner: "Acme".into(),
-        name: "blippy".into(),
-        updated_at: None,
-        etag: None,
-    };
-    crate::store::upsert_repo(&conn, &replacement).expect("replacement repository cache");
-    let issue = IssueRow {
-        id: 100,
-        repo_id: 2,
-        title: "Replacement repository issue".into(),
-        ..app.issues()[0].clone()
-    };
-    crate::store::upsert_issue(&conn, &issue).expect("replacement issue");
-    app.begin_repo_sync();
-    app.begin_repo_permissions_sync();
-    app.begin_repo_labels_sync();
-    let (event_tx, event_rx) = channel();
-    event_tx
-        .send(super::AppEvent::SyncFinished {
-            owner: "acme".into(),
-            repo: "blippy".into(),
-            resolved_repo: replacement,
-            stats: Default::default(),
-        })
-        .expect("replacement sync completed");
+    for target_is_pr in [true, false] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let mut app = linked_navigation_app(target_is_pr);
+        app.set_current_repo_id(1);
+        app.set_repo_issue_metadata_editable(Some(true));
+        app.set_repo_pull_request_mergeable(Some(true));
+        app.set_pending_issue_action(7, PendingIssueAction::Closing);
+        app.set_comments(vec![crate::store::CommentRow {
+            id: 10,
+            issue_id: 1,
+            author: "alex".into(),
+            body: "Previous repository comment".into(),
+            created_at: None,
+            last_accessed_at: None,
+        }]);
+        let replacement = crate::store::RepoRow {
+            id: 2,
+            owner: "Acme".into(),
+            name: "blippy".into(),
+            updated_at: None,
+            etag: None,
+        };
+        crate::store::upsert_repo(&conn, &replacement).expect("replacement repository cache");
+        let issue = IssueRow {
+            id: 100,
+            repo_id: 2,
+            title: "Replacement repository issue".into(),
+            ..app.issues()[0].clone()
+        };
+        crate::store::upsert_issue(&conn, &issue).expect("replacement issue");
+        let linked_item = IssueRow {
+            id: 101,
+            repo_id: 2,
+            title: "Replacement linked item".into(),
+            ..app.issues()[1].clone()
+        };
+        crate::store::upsert_issue(&conn, &linked_item).expect("replacement linked item");
+        app.set_issues(vec![app.issues()[0].clone()]);
+        let previous_issues = app.issues().to_vec();
+        app.begin_repo_sync();
+        app.begin_repo_permissions_sync();
+        app.begin_repo_labels_sync();
+        let (event_tx, event_rx) = channel();
+        let old_request = super::RepoIdentity::new("acme", "blippy", app.current_repo_id());
+        let linked_event = if target_is_pr {
+            super::AppEvent::LinkedPullRequestResolved {
+                repo: old_request,
+                issue_number: 7,
+                pull_requests: vec![(8, String::new())],
+                target: super::LinkedPullRequestTarget::Tui,
+            }
+        } else {
+            super::AppEvent::LinkedIssueResolved {
+                repo: old_request,
+                pull_number: 7,
+                issues: crate::github::LinkedIssues {
+                    issues: vec![(8, String::new())],
+                    incomplete_reason: None,
+                },
+                target: super::LinkedIssueTarget::Tui,
+            }
+        };
+        event_tx.send(linked_event).expect("old linked response");
+        super::main_events::handle_events(&mut app, &conn, &event_rx)
+            .expect("linked response before sync finishes");
 
-    super::main_events::handle_events(&mut app, &conn, &event_rx).expect("replace context");
+        assert_eq!(app.current_repo_id(), Some(1));
+        assert_eq!(app.issues(), previous_issues);
+        assert_eq!(app.current_issue_id(), Some(1));
+        assert_eq!(app.comments()[0].id, 10);
+        assert_eq!(app.repo_issue_metadata_editable(), Some(true));
+        assert_eq!(app.repo_pull_request_mergeable(), Some(true));
+        event_tx
+            .send(super::AppEvent::SyncFinished {
+                owner: "acme".into(),
+                repo: "blippy".into(),
+                resolved_repo: replacement,
+                stats: Default::default(),
+            })
+            .expect("replacement sync completed");
 
-    assert_eq!(app.issues(), &[issue]);
-    assert_eq!(app.current_repo_id(), Some(2));
-    assert_eq!(app.pending_issue_badge(7), None);
-    assert_eq!(app.current_issue_id(), None);
-    assert!(app.comments().is_empty());
-    assert!(app.linked_pull_requests_for_issue(7).is_empty());
-    assert_eq!(app.view(), View::Issues);
-    assert_eq!(app.issue_query(), "");
-    assert!(!app.has_assignee_filter());
-    assert!(!app.syncing());
-    assert!(!app.repo_permissions_syncing());
-    assert!(!app.repo_labels_syncing());
-    assert!(app.status().starts_with("Synced"));
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("replace context");
+
+        assert_eq!(app.issues(), &[linked_item, issue]);
+        assert_eq!(app.current_repo_id(), Some(2));
+        assert_eq!(app.pending_issue_badge(7), None);
+        assert_eq!(app.current_issue_id(), None);
+        assert!(app.comments().is_empty());
+        assert!(app.linked_pull_requests_for_issue(7).is_empty());
+        assert!(app.linked_issues_for_pull_request(7).is_empty());
+        assert_eq!(app.repo_issue_metadata_editable(), None);
+        assert_eq!(app.repo_pull_request_mergeable(), None);
+        assert_eq!(app.view(), View::Issues);
+        assert_eq!(app.issue_query(), "");
+        assert!(!app.has_assignee_filter());
+        assert!(!app.syncing());
+        assert!(!app.repo_permissions_syncing());
+        assert!(!app.repo_labels_syncing());
+        assert!(app.status().starts_with("Synced"));
+    }
 }
 
 #[test]
