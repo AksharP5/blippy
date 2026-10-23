@@ -11,6 +11,28 @@ impl App {
             return;
         }
         let target = self.mouse_target_at(event.column, event.row);
+        let picker_target = match self.view {
+            View::LabelPicker => matches!(
+                target,
+                Some(
+                    MouseTarget::LabelOption(_)
+                        | MouseTarget::LabelApply
+                        | MouseTarget::LabelCancel
+                )
+            ),
+            View::AssigneePicker => matches!(
+                target,
+                Some(
+                    MouseTarget::AssigneeOption(_)
+                        | MouseTarget::AssigneeApply
+                        | MouseTarget::AssigneeCancel
+                )
+            ),
+            _ => true,
+        };
+        if !picker_target {
+            return;
+        }
         match event.kind {
             MouseEventKind::ScrollUp => {
                 self.handle_mouse_scroll(target, false);
