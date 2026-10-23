@@ -32,7 +32,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 - Create issues directly in the terminal from issue contexts
 - Title/body editor with confirmation dialog before submission
-- Automatically navigates to the newly created issue after success
+- Opens the newly created issue after success when browsing issues; active editors, pickers, search, and PR review keep their context
 
 ## Linked Issue/PR Navigation
 
