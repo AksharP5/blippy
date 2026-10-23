@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14](https://github.com/AksharP5/blippy/compare/v0.1.13...v0.1.14) - 2026-10-23
+
+### Fixed
+
+- keep repository selection during scans ([#91](https://github.com/AksharP5/blippy/pull/91))
+- *(review)* reject diffs changed by PR retargeting ([#93](https://github.com/AksharP5/blippy/pull/93))
+- keep issue selection after background actions ([#89](https://github.com/AksharP5/blippy/pull/89))
+- *(input)* keep multiline paste from submitting comments ([#87](https://github.com/AksharP5/blippy/pull/87))
+- *(links)* preserve input during delayed navigation ([#85](https://github.com/AksharP5/blippy/pull/85))
+- *(sync)* recover when a repository is recreated ([#68](https://github.com/AksharP5/blippy/pull/68))
+- stop metadata pickers from opening background issues ([#64](https://github.com/AksharP5/blippy/pull/64))
+- *(ui)* keep linked-item buttons clickable after wrapping ([#76](https://github.com/AksharP5/blippy/pull/76))
+- *(ui)* align review toolbar clicks with button labels ([#74](https://github.com/AksharP5/blippy/pull/74))
+- make long comments fully readable ([#66](https://github.com/AksharP5/blippy/pull/66))
+- preserve reading position across background refreshes ([#62](https://github.com/AksharP5/blippy/pull/62))
+- keep editors open when issue creation finishes ([#60](https://github.com/AksharP5/blippy/pull/60))
+- *(ui)* show the comments header and selection count ([#57](https://github.com/AksharP5/blippy/pull/57))
+- preserve metadata picker highlights during refresh ([#58](https://github.com/AksharP5/blippy/pull/58))
+- *(links)* discover linked items after scrolling past row 20 ([#50](https://github.com/AksharP5/blippy/pull/50))
+- *(markdown)* preserve HTML block content in descriptions ([#78](https://github.com/AksharP5/blippy/pull/78))
+- *(review)* keep multiline selections on added and deleted lines ([#54](https://github.com/AksharP5/blippy/pull/54))
+- *(git)* recognize GitHub SSH-over-HTTPS remotes ([#52](https://github.com/AksharP5/blippy/pull/52))
+
+### Other
+
+- *(review)* render only visible changed files ([#95](https://github.com/AksharP5/blippy/pull/95))
+- *(review)* cut large diff redraw time by 69-83% ([#83](https://github.com/AksharP5/blippy/pull/83))
+- *(review)* cut comment-heavy diff rendering time by 46% ([#70](https://github.com/AksharP5/blippy/pull/70))
+- *(store)* cut cached comment loading from 23ms to 0.03ms ([#80](https://github.com/AksharP5/blippy/pull/80))
+
 ## [0.1.13](https://github.com/AksharP5/blippy/compare/v0.1.12...v0.1.13) - 2026-10-15
 
 ### Added
