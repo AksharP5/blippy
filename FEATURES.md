@@ -29,7 +29,9 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Issue and PR detail views with context-aware panes
 - HTML blocks in Markdown bodies remain readable as literal text
 - State and metadata updates prevent overlapping actions on the same item
+- Completed state and metadata actions preserve the selected issue or PR when it remains in the list
 - Copy repository, issue, and pull request URLs to the system clipboard
+- On supported Unix terminals, bracketed paste inserts text without submitting comments or triggering shortcuts, preserving line breaks in bodies
 
 ## Issue Creation in TUI
 
@@ -57,7 +59,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Horizontal diff panning for long lines
 - Mark files viewed/unviewed, ignoring repeat toggles until GitHub responds
 - Visual multiline range selection within one diff hunk for review comments, including automatic side fallback for added-only or deleted-only selections
-- Review comments keep the commit shown when the editor opened. If the PR changes while files load, refresh with `r` to retry.
+- Review comments keep the commit shown when the editor opened. If the PR head or base changes while files load, refresh with `r` to retry.
 
 ## Comments and Review Threads
 

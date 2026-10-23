@@ -88,14 +88,15 @@ pub struct ApiPullRequestFile {
     pub patch: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct ApiPullRequestHead {
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+pub struct ApiPullRequestCommit {
     pub sha: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct ApiPullRequestSummary {
-    pub head: ApiPullRequestHead,
+    pub head: ApiPullRequestCommit,
+    pub base: ApiPullRequestCommit,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]

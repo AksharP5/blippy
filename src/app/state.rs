@@ -513,11 +513,7 @@ impl App {
                 issue.state = state.to_string();
             }
         }
-        self.rebuild_issue_filter();
-        if self.navigation.selected_issue >= self.search.filtered_issue_indices.len() {
-            self.navigation.selected_issue =
-                self.search.filtered_issue_indices.len().saturating_sub(1);
-        }
+        self.refresh_issue_filter();
     }
 
     pub fn update_issue_labels_by_number(&mut self, issue_number: i64, labels: &[String]) {
@@ -526,7 +522,7 @@ impl App {
                 issue.labels = labels.to_vec();
             }
         }
-        self.rebuild_issue_filter();
+        self.refresh_issue_filter();
     }
 
     pub fn update_issue_assignees_by_number(&mut self, issue_number: i64, assignees: &str) {
@@ -535,7 +531,24 @@ impl App {
                 issue.assignees = assignees.to_string();
             }
         }
+        self.refresh_issue_filter();
+    }
+
+    fn refresh_issue_filter(&mut self) {
+        let selected_issue_id = self.selected_issue_row().map(|issue| issue.id);
         self.rebuild_issue_filter();
+        if let Some(selected) = selected_issue_id.and_then(|id| {
+            self.search
+                .filtered_issue_indices
+                .iter()
+                .position(|index| self.issues[*index].id == id)
+        }) {
+            self.navigation.selected_issue = selected;
+        }
+        if self.selected_issue_row().map(|issue| issue.id) != selected_issue_id {
+            self.navigation.issues_preview_scroll = 0;
+            self.navigation.issues_preview_max_scroll = 0;
+        }
     }
 
     pub fn update_issue_comments_count_by_number(&mut self, issue_number: i64, count: i64) {

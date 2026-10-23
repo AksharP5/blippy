@@ -34,6 +34,8 @@ use anyhow::Result;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, MouseButton, MouseEventKind,
 };
+#[cfg(unix)]
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -310,6 +312,10 @@ fn run_app(
         }
 
         match event::read()? {
+            Event::Paste(text) => {
+                app.on_paste(&text);
+                needs_redraw = true;
+            }
             Event::Key(key) if !key.is_release() => {
                 app.on_key(key);
                 needs_redraw = true;
@@ -657,7 +663,11 @@ impl TerminalGuard {
             }
         };
 
-        Ok(Self { terminal })
+        let guard = Self { terminal };
+        // Crossterm's native Windows reader does not emit paste events.
+        #[cfg(unix)]
+        execute!(io::stdout(), EnableBracketedPaste)?;
+        Ok(guard)
     }
 
     fn terminal_mut(&mut self) -> &mut Tui {
@@ -673,6 +683,8 @@ impl Drop for TerminalGuard {
             LeaveAlternateScreen,
             DisableMouseCapture
         );
+        #[cfg(unix)]
+        let _ = execute!(self.terminal.backend_mut(), DisableBracketedPaste);
         let _ = self.terminal.show_cursor();
     }
 }
