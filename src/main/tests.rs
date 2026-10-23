@@ -31,6 +31,73 @@ fn worker_events_request_one_redraw_per_batch() {
 }
 
 #[test]
+fn repository_scan_updates_preserve_the_selected_checkout_and_remote() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for filtered in [false, true] {
+        let conn = crate::store::open_db_at(std::path::Path::new(":memory:")).expect("db");
+        let rows = [
+            ("/work/main", "origin", "blippy", "2026-10-22"),
+            ("/work/review", "origin", "blippy", "2026-10-21"),
+            ("/work/unrelated", "origin", "other", "2026-10-20"),
+        ]
+        .map(|(path, remote_name, repo, last_seen)| LocalRepoRow {
+            path: path.into(),
+            remote_name: remote_name.into(),
+            owner: "acme".into(),
+            repo: repo.into(),
+            url: format!("https://github.com/acme/{repo}.git"),
+            last_seen: Some(last_seen.into()),
+            last_scanned: None,
+        });
+        for row in &rows {
+            crate::store::upsert_local_repo(&conn, row).expect("cache checkout");
+        }
+        let mut app = crate::app::App::new(Config::default());
+        app.set_view(View::RepoPicker);
+        app.set_repos(super::main_data::load_repos(&conn).expect("cached repos"));
+        if filtered {
+            for ch in "/blippy".chars() {
+                app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.selected_repo_target().unwrap().2, "/work/review");
+
+        crate::store::upsert_local_repo(
+            &conn,
+            &LocalRepoRow {
+                remote_name: "upstream".into(),
+                last_seen: Some("2026-10-23".into()),
+                ..rows[1].clone()
+            },
+        )
+        .expect("scan discovers another remote");
+        let (event_tx, event_rx) = channel();
+        event_tx
+            .send(super::AppEvent::ReposUpdated)
+            .expect("scan update");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle scan");
+
+        let selected = app.filtered_repo_rows()[app.selected_repo()];
+        assert_eq!(selected.path, "/work/review");
+        assert_eq!(selected.remote_name, "origin");
+        assert_eq!(app.repo_query(), if filtered { "blippy" } else { "" });
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        super::main_actions::handle_actions(
+            &mut app,
+            &mut crate::clipboard::SystemClipboard::default(),
+            &conn,
+            "token",
+            event_tx,
+        )
+        .expect("open selected checkout");
+        assert_eq!(app.current_repo_path(), Some("/work/review"));
+    }
+}
+
+#[test]
 fn invalid_presets_keep_the_editor_open() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

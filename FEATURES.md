@@ -11,6 +11,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Supports direct `owner/repo` repo context from the current working tree
 - Keeps a local SQLite cache for fast navigation
 - `blippy sync` updates discovered repositories and remotes
+- Repository scans preserve the selected local checkout and remote
 - Broken local repositories are reported while scanning continues for healthy repositories
 - Stalled GitHub API requests time out after 30 seconds
 - Background sync avoids duplicate requests during repository and issue navigation
