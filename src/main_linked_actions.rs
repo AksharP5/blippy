@@ -10,20 +10,7 @@ pub(super) fn maybe_probe_visible_linked_items(
         _ => return,
     };
 
-    let visible = match app.view() {
-        View::Issues => app
-            .issues_for_view()
-            .iter()
-            .take(20)
-            .map(|issue| (issue.number, issue.is_pr))
-            .collect::<Vec<_>>(),
-        View::IssueDetail | View::IssueComments | View::PullRequestFiles => app
-            .current_or_selected_issue()
-            .map(|issue| (issue.number, issue.is_pr))
-            .into_iter()
-            .collect(),
-        _ => return,
-    };
+    let visible = linked_probe_items(app);
 
     for (number, is_pr) in visible {
         if is_pr {
@@ -52,6 +39,24 @@ pub(super) fn maybe_probe_visible_linked_items(
             event_tx.clone(),
             LinkedPullRequestTarget::Probe,
         );
+    }
+}
+
+fn linked_probe_items(app: &App) -> Vec<(i64, bool)> {
+    match app.view() {
+        View::Issues => app
+            .issues_for_view()
+            .iter()
+            .skip(app.selected_issue().saturating_sub(19))
+            .take(20)
+            .map(|issue| (issue.number, issue.is_pr))
+            .collect::<Vec<_>>(),
+        View::IssueDetail | View::IssueComments | View::PullRequestFiles => app
+            .current_or_selected_issue()
+            .map(|issue| (issue.number, issue.is_pr))
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -510,4 +515,59 @@ pub(super) fn run_silent_command(command: &mut std::process::Command) -> Result<
         return Ok(());
     }
     anyhow::bail!("command exited with status {}", status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::IssueRow;
+
+    #[test]
+    fn linked_probes_follow_the_selected_issue_and_pull_request() {
+        for is_pr in [false, true] {
+            let mut app = App::new(Config::default());
+            app.set_view(View::Issues);
+            app.set_work_item_mode(if is_pr {
+                WorkItemMode::PullRequests
+            } else {
+                WorkItemMode::Issues
+            });
+            app.set_issues(
+                (1..=40)
+                    .map(|number| IssueRow {
+                        id: number,
+                        repo_id: 1,
+                        number,
+                        state: "open".into(),
+                        title: format!("Item {number}"),
+                        body: String::new(),
+                        labels: Vec::new(),
+                        assignees: String::new(),
+                        comments_count: 0,
+                        updated_at: None,
+                        is_pr,
+                    })
+                    .collect(),
+            );
+
+            for number in [40, 21, 20, 1] {
+                assert!(app.select_issue_by_number(number));
+                let probes = linked_probe_items(&app);
+                assert_eq!(probes.len(), 20);
+                assert!(
+                    probes.contains(&(number, is_pr)),
+                    "selected #{number} missing from {probes:?}"
+                );
+            }
+
+            app.set_current_issue(5, 5);
+            app.set_view(View::IssueDetail);
+            assert_eq!(linked_probe_items(&app), vec![(5, is_pr)]);
+            app.set_view(View::RepoPicker);
+            assert!(linked_probe_items(&app).is_empty());
+            app.set_issues(Vec::new());
+            app.set_view(View::Issues);
+            assert!(linked_probe_items(&app).is_empty());
+        }
+    }
 }
