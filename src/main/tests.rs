@@ -31,6 +31,117 @@ fn worker_events_request_one_redraw_per_batch() {
 }
 
 #[test]
+fn completed_issue_actions_preserve_the_selected_item() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    for action in ["close", "merge", "labels", "assignees", "reopen"] {
+        let mut app = crate::app::App::new(Config::default());
+        app.set_current_repo_with_path("acme", "blippy", None);
+        app.set_view(View::Issues);
+        if action == "merge" {
+            app.set_work_item_mode(WorkItemMode::PullRequests);
+        }
+        app.set_issues(
+            (1..=3)
+                .map(|number| IssueRow {
+                    id: number,
+                    repo_id: 1,
+                    number,
+                    state: if action == "reopen" && number == 3 {
+                        "closed"
+                    } else {
+                        "open"
+                    }
+                    .into(),
+                    title: format!("Issue {number}"),
+                    body: "Long description\n".repeat(20),
+                    labels: vec!["bug".into()],
+                    assignees: "alex".into(),
+                    comments_count: 0,
+                    updated_at: None,
+                    is_pr: action == "merge",
+                })
+                .collect(),
+        );
+        let query = match action {
+            "labels" => "label:bug",
+            "assignees" => "assignee:alex",
+            _ => "",
+        };
+        if !query.is_empty() {
+            for ch in format!("/{query}").chars() {
+                app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+        assert!(app.select_issue_by_number(2));
+        app.set_issues_preview_max_scroll(10);
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.issues_preview_scroll(), 1);
+        let repo = super::RepoIdentity::new("acme", "blippy", None);
+        let event = match action {
+            "labels" => super::AppEvent::IssueLabelsUpdated {
+                repo,
+                issue_number: 3,
+                labels: Vec::new(),
+            },
+            "assignees" => super::AppEvent::IssueAssigneesUpdated {
+                repo,
+                issue_number: 3,
+                assignees: "sam".into(),
+            },
+            _ => super::AppEvent::IssueUpdated {
+                repo,
+                issue_number: 3,
+                message: match action {
+                    "reopen" => "reopened",
+                    "merge" => "merged",
+                    _ => "closed",
+                }
+                .into(),
+            },
+        };
+        let (event_tx, event_rx) = channel();
+        event_tx
+            .send(event)
+            .expect("completed action on previous item");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle completion");
+
+        assert_eq!(
+            app.selected_issue_row().map(|issue| issue.number),
+            Some(2),
+            "{action} completion changed selection"
+        );
+        assert_eq!(app.issues_preview_scroll(), 1);
+        app.on_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+        super::main_actions::handle_actions(
+            &mut app,
+            &mut crate::clipboard::SystemClipboard::default(),
+            &conn,
+            "token",
+            event_tx.clone(),
+        )
+        .expect("open comment editor for selected item");
+        assert_eq!(app.current_issue_number(), Some(2));
+        assert_eq!(app.view(), View::CommentEditor);
+
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        event_tx
+            .send(super::AppEvent::IssueUpdated {
+                repo: super::RepoIdentity::new("acme", "blippy", None),
+                issue_number: 2,
+                message: "closed".into(),
+            })
+            .expect("selected item leaves the open filter");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle removal");
+        assert_eq!(app.selected_issue_row().map(|issue| issue.number), Some(1));
+        assert_eq!(app.issues_preview_scroll(), 0);
+    }
+}
+
+#[test]
 fn invalid_presets_keep_the_editor_open() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
