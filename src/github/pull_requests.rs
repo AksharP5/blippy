@@ -9,7 +9,7 @@ impl GitHubClient {
         repo: &str,
         pull_number: i64,
     ) -> Result<(String, Vec<ApiPullRequestFile>)> {
-        let head_sha = self.pull_request_head_sha(owner, repo, pull_number).await?;
+        let commits = self.pull_request_commits(owner, repo, pull_number).await?;
         let mut page = 1;
         let mut files = Vec::new();
         loop {
@@ -33,12 +33,12 @@ impl GitHubClient {
             }
             page += 1;
         }
-        if self.pull_request_head_sha(owner, repo, pull_number).await? != head_sha {
+        if self.pull_request_commits(owner, repo, pull_number).await? != commits {
             return Err(anyhow!(
                 "Pull request changed while loading files; refresh to try again"
             ));
         }
-        Ok((head_sha, files))
+        Ok((commits.head.sha, files))
     }
 
     pub async fn pull_request_file_view_state(
@@ -140,12 +140,12 @@ impl GitHubClient {
         Ok(())
     }
 
-    async fn pull_request_head_sha(
+    async fn pull_request_commits(
         &self,
         owner: &str,
         repo: &str,
         pull_number: i64,
-    ) -> Result<String> {
+    ) -> Result<ApiPullRequestSummary> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}",
             self.api_base, owner, repo, pull_number
@@ -157,8 +157,7 @@ impl GitHubClient {
             .send()
             .await?
             .error_for_status()?;
-        let pull = response.json::<ApiPullRequestSummary>().await?;
-        Ok(pull.head.sha)
+        Ok(response.json::<ApiPullRequestSummary>().await?)
     }
 
     pub async fn merge_pull_request(
@@ -579,7 +578,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn files_snapshot_requires_the_same_head_before_and_after_all_pages() {
+    async fn files_snapshot_requires_the_same_commits_before_and_after_all_pages() {
         let file = serde_json::json!({
             "filename": "src/main.rs",
             "status": "modified",
@@ -587,39 +586,66 @@ mod tests {
             "deletions": 1,
             "patch": "@@ -1 +1 @@\n-old\n+new",
         });
-        for final_head in ["head-a", "head-b"] {
+        let first_page = (0..100)
+            .map(|index| {
+                let mut file = file.clone();
+                file["filename"] = serde_json::json!(format!("src/file-{index:03}.rs"));
+                file
+            })
+            .collect::<Vec<_>>();
+        for (final_head, final_base) in [
+            ("head-a", "base-a"),
+            ("head-b", "base-a"),
+            ("head-a", "base-b"),
+        ] {
             let (client, server) = serve_responses(vec![
                 (
                     "GET /repos/acme/blippy/pulls/7",
-                    serde_json::json!({"head": {"sha": "head-a"}}),
+                    serde_json::json!({
+                        "head": {"sha": "head-a"},
+                        "base": {"sha": "base-a"},
+                    }),
                 ),
                 (
                     "GET /repos/acme/blippy/pulls/7/files?per_page=100&page=1",
-                    serde_json::json!(vec![file.clone(); 100]),
+                    serde_json::json!(first_page),
                 ),
                 (
                     "GET /repos/acme/blippy/pulls/7/files?per_page=100&page=2",
-                    serde_json::json!([file.clone()]),
+                    if final_base == "base-a" {
+                        serde_json::json!([file.clone()])
+                    } else {
+                        // Retargeting to a base containing the first 100 files leaves one page.
+                        serde_json::json!([])
+                    },
                 ),
                 (
                     "GET /repos/acme/blippy/pulls/7",
-                    serde_json::json!({"head": {"sha": final_head}}),
+                    serde_json::json!({
+                        "head": {"sha": final_head},
+                        "base": {"sha": final_base},
+                    }),
                 ),
             ]);
 
             let result = client.list_pull_request_files("acme", "blippy", 7).await;
             server
                 .join()
-                .expect("all pages fetched between head checks");
-            if final_head == "head-a" {
+                .expect("all pages fetched between commit checks");
+            if final_head == "head-a" && final_base == "base-a" {
                 let (head_sha, files) = result.expect("stable snapshot");
                 assert_eq!(head_sha, "head-a");
                 assert_eq!(files.len(), 101);
             } else {
+                let error = match result {
+                    Err(error) => error,
+                    Ok((_, files)) => panic!(
+                        "accepted {} files after head={final_head}, base={final_base}",
+                        files.len()
+                    ),
+                };
                 assert_eq!(
-                    result
-                        .expect_err("changed head must reject all files")
-                        .to_string(),
+                    error.to_string(),
                     "Pull request changed while loading files; refresh to try again"
                 );
             }
