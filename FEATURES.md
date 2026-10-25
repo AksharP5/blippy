@@ -57,6 +57,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Merge pull requests directly from the review/detail flow
 - Split or expanded diff review modes
 - Horizontal diff panning for long lines
+- Inline comment editors preserve the review layout, diff focus, and selected line when returning
 - Mark files viewed/unviewed, ignoring repeat toggles until GitHub responds
 - Visual multiline range selection within one diff hunk for review comments, including automatic side fallback for added-only or deleted-only selections
 - Refresh keeps collapsed hunks for unchanged files and expands files whose patches changed
