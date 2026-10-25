@@ -266,7 +266,7 @@ pub(super) fn handle_events(
             }
             AppEvent::PullRequestFilesUpdated {
                 issue_id,
-                head_sha,
+                commits,
                 files,
                 pull_request_id,
                 viewed_files,
@@ -275,7 +275,7 @@ pub(super) fn handle_events(
                 app.finish_pull_request_files_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
                     let count = files.len();
-                    app.set_pull_request_files(issue_id, head_sha, files);
+                    app.set_pull_request_diff(issue_id, commits, files);
                     if let Some(message) = view_state_error {
                         app.set_status(format!(
                             "Loaded {} changed files; view state unavailable: {}",
@@ -293,11 +293,15 @@ pub(super) fn handle_events(
                     app.set_status(format!("PR files unavailable: {}", message));
                 }
             }
-            AppEvent::PullRequestReviewCommentsUpdated { issue_id, comments } => {
+            AppEvent::PullRequestReviewCommentsUpdated {
+                issue_id,
+                commits,
+                comments,
+            } => {
                 app.finish_pull_request_review_comments_sync(issue_id);
                 if app.current_issue_id() == Some(issue_id) {
                     let count = comments.len();
-                    app.set_pull_request_review_comments(comments);
+                    app.set_pull_request_review_comments_for_diff(commits, comments);
                     app.set_status(format!("Loaded {} review comments", count));
                 }
             }

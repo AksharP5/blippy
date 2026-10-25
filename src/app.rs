@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 
 use crate::config::{CommentDefault, Config};
 use crate::git::RemoteInfo;
+use crate::github::ApiPullRequestSummary;
 use crate::keybinds::Keybinds;
 use crate::pr_diff::{DiffKind, parse_patch};
 use crate::store::{CommentRow, IssueRow, LocalRepoRow, RepoRow};
@@ -417,13 +418,14 @@ struct RepoContextState {
 #[derive(Debug)]
 struct PullRequestState {
     pull_request_files_issue_id: Option<i64>,
-    pull_request_files_head_sha: Option<String>,
+    pull_request_files_commits: Option<ApiPullRequestSummary>,
     pull_request_id: Option<String>,
     pull_request_files: Vec<PullRequestFile>,
     pull_request_view_state_loaded: bool,
     pull_request_viewed_files: HashSet<String>,
     pull_request_collapsed_hunks: HashMap<String, HashSet<usize>>,
     pull_request_review_comments: Vec<PullRequestReviewComment>,
+    pull_request_review_comments_commits: Option<ApiPullRequestSummary>,
     pull_request_review_focus: PullRequestReviewFocus,
     selected_pull_request_file: usize,
     selected_pull_request_diff_line: usize,
@@ -444,13 +446,14 @@ impl Default for PullRequestState {
     fn default() -> Self {
         Self {
             pull_request_files_issue_id: None,
-            pull_request_files_head_sha: None,
+            pull_request_files_commits: None,
             pull_request_id: None,
             pull_request_files: Vec::new(),
             pull_request_view_state_loaded: false,
             pull_request_viewed_files: HashSet::new(),
             pull_request_collapsed_hunks: HashMap::new(),
             pull_request_review_comments: Vec::new(),
+            pull_request_review_comments_commits: None,
             pull_request_review_focus: PullRequestReviewFocus::Files,
             selected_pull_request_file: 0,
             selected_pull_request_diff_line: 0,

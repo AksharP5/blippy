@@ -475,7 +475,7 @@ enum AppEvent {
     },
     PullRequestFilesUpdated {
         issue_id: i64,
-        head_sha: String,
+        commits: github::ApiPullRequestSummary,
         files: Vec<PullRequestFile>,
         pull_request_id: Option<String>,
         viewed_files: HashSet<String>,
@@ -487,6 +487,7 @@ enum AppEvent {
     },
     PullRequestReviewCommentsUpdated {
         issue_id: i64,
+        commits: github::ApiPullRequestSummary,
         comments: Vec<PullRequestReviewComment>,
     },
     PullRequestReviewCommentsFailed {

@@ -20,7 +20,7 @@ pub(crate) fn start_pull_request_files_sync(
                     .await
             });
 
-            let (head_sha, files) = match result {
+            let (commits, files) = match result {
                 Ok(files) => files,
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::PullRequestFilesFailed {
@@ -54,7 +54,7 @@ pub(crate) fn start_pull_request_files_sync(
                 .collect::<Vec<PullRequestFile>>();
             let _ = event_tx.send(AppEvent::PullRequestFilesUpdated {
                 issue_id,
-                head_sha,
+                commits,
                 files: mapped,
                 pull_request_id,
                 viewed_files,
@@ -84,7 +84,7 @@ pub(crate) fn start_pull_request_review_comments_sync(
                     .await
             });
 
-            let comments = match result {
+            let (commits, comments) = match result {
                 Ok(comments) => comments,
                 Err(error) => {
                     let _ = event_tx.send(AppEvent::PullRequestReviewCommentsFailed {
@@ -97,6 +97,7 @@ pub(crate) fn start_pull_request_review_comments_sync(
 
             let _ = event_tx.send(AppEvent::PullRequestReviewCommentsUpdated {
                 issue_id,
+                commits,
                 comments: map_review_comments(comments),
             });
         },
@@ -156,6 +157,10 @@ fn map_review_comments(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "pr_sync_tests.rs"]
+mod review_anchors;
 
 #[cfg(test)]
 mod tests {
