@@ -32,21 +32,22 @@ pub(crate) fn handle_preset_selection(
     Ok(())
 }
 
-pub(crate) fn save_preset_from_editor(app: &mut App) -> Result<()> {
+pub(crate) fn save_preset_from_editor(app: &mut App) {
     let name = app.editor().name().trim().to_string();
     if name.is_empty() {
         app.set_status("Preset name required".to_string());
-        return Ok(());
+        return;
     }
     let body = app.editor().text().to_string();
     if body.trim().is_empty() {
         app.set_status("Preset body required".to_string());
-        return Ok(());
+        return;
     }
 
-    app.add_comment_default(crate::config::CommentDefault { name, body });
-    app.save_config()?;
+    if let Err(error) = app.save_comment_default(crate::config::CommentDefault { name, body }) {
+        app.set_status(format!("Preset save failed: {error:#}"));
+        return;
+    }
     app.set_view(View::CommentPresetPicker);
     app.set_status("Preset saved".to_string());
-    Ok(())
 }

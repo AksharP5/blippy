@@ -5,6 +5,16 @@ impl App {
         if key.is_release() {
             return;
         }
+        let text_key = matches!(key.code, KeyCode::Char(_))
+            && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT);
+        if !text_key
+            && let Some(mapped) = self.keybinds.remap_key(key)
+            && mapped.code == KeyCode::Char('c')
+            && mapped.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.should_quit = true;
+            return;
+        }
         if self.search.help_overlay_visible {
             let key = match key.code {
                 KeyCode::Home | KeyCode::End => Some(key),
@@ -446,6 +456,12 @@ impl App {
     }
 
     pub fn set_view(&mut self, view: View) {
+        let review_editor_transition = self.editor_flow.cancel_view == View::PullRequestFiles
+            && matches!(
+                (self.view, view),
+                (View::PullRequestFiles, View::CommentEditor)
+                    | (View::CommentEditor, View::PullRequestFiles)
+            );
         if self.view != view && view == View::IssueComments {
             self.navigation.issue_comment_offsets.clear();
         }
@@ -457,13 +473,13 @@ impl App {
             self.editor_flow.pending_submission = None;
         }
         self.search.help_overlay_visible = false;
-        if self.view != View::PullRequestFiles {
+        if self.view != View::PullRequestFiles && !review_editor_transition {
             self.pull_request.pull_request_diff_expanded = false;
         }
         match self.view {
             View::Issues => self.focus = Focus::IssuesList,
             View::IssueDetail => self.focus = Focus::IssueBody,
-            View::PullRequestFiles => {
+            View::PullRequestFiles if !review_editor_transition => {
                 self.pull_request.pull_request_review_focus = PullRequestReviewFocus::Files;
             }
             _ => {

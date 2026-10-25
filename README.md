@@ -62,7 +62,7 @@ cargo install --git https://github.com/AksharP5/blippy
 - Create issues from the TUI with a confirmation step
 - Keep failed issue and comment drafts for editing and manual retry
 - Open linked issues/PRs in TUI or browser
-- Review PR diffs with inline comments and thread resolution
+- Review PR diffs with inline comment navigation and thread resolution
 - Merge pull requests from the TUI when repository permissions allow
 - Distinguish merged pull requests from closed pull requests
 - Edit labels and assignees (when repository permissions allow)
@@ -83,6 +83,8 @@ See [FEATURES.md](FEATURES.md) for a full feature breakdown.
 - Config file: `~/.config/blippy/config.toml`
 - Keybind overrides: `~/.config/blippy/keybinds.toml`
 - Example keybind file: [keybinds.example.toml](keybinds.example.toml)
+
+Bindings in `keybinds.toml` override `[keybinds]` in `config.toml`. Saving comment presets preserves each file's bindings, so removing an override restores the binding from the main config.
 
 Theme example:
 

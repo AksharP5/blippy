@@ -383,6 +383,7 @@ pub(crate) fn start_reopen_issue(
 pub(crate) fn start_merge_pull_request(
     event_repo: RepoIdentity,
     pull_number: i64,
+    head_sha: Option<String>,
     token: String,
     event_tx: Sender<AppEvent>,
 ) {
@@ -401,7 +402,7 @@ pub(crate) fn start_merge_pull_request(
             let result = services.runtime.block_on(async {
                 services
                     .client
-                    .merge_pull_request(&owner, &repo, pull_number)
+                    .merge_pull_request(&owner, &repo, pull_number, head_sha.as_deref())
                     .await
             });
 

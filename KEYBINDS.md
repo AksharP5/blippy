@@ -4,7 +4,7 @@ blippy is keyboard-first. Mouse/trackpad support exists, but it can be finicky a
 
 ## Global
 
-- `Ctrl+c`: Quit
+- `Ctrl+c`: Quit, including editors and active searches
 - `?`: Toggle help overlay
 - `Ctrl+g`: Open repo picker
 - `Ctrl+h` / `Ctrl+l`: Switch pane focus in split views
@@ -106,7 +106,8 @@ Search mode:
 
 ## Pull Request Review View (`Files`)
 
-- `Ctrl+h` / `Ctrl+l`: Focus files pane or diff pane
+- `Ctrl+h` / `Ctrl+k`: Focus files pane and restore split view if expanded
+- `Ctrl+l` / `Ctrl+j`: Focus diff pane
 - `j` / `k`: Move selected file
 - `Enter`: Expand diff pane to full width
 - `w`: Toggle file viewed/unviewed on GitHub
@@ -118,7 +119,8 @@ Search mode:
 
 ## Pull Request Review View (`Diff`)
 
-- `Ctrl+h` / `Ctrl+l`: Focus files pane or diff pane
+- `Ctrl+h` / `Ctrl+k`: Focus files pane and restore split view if expanded
+- `Ctrl+l` / `Ctrl+j`: Focus diff pane
 - `j` / `k`: Move selected diff row
 - `Enter`: Expand to full diff (or return to split when expanded)
 - `c`: Collapse/expand selected hunk
@@ -130,7 +132,7 @@ Search mode:
 - `e`: Edit selected inline review comment
 - `x`: Delete selected inline review comment
 - `Shift+R`: Resolve/reopen selected review thread
-- `n` / `p`: Cycle line comments on current diff row
+- `n` / `p`: Cycle line comments on current diff row, scrolling the selected comment into view
 - `r`: Refresh PR data
 - `v`: Checkout PR locally
 - `Shift+M`: Merge pull request
@@ -176,6 +178,8 @@ Issue creation and add/edit comment editors stay open while submitting. Text ent
 ## Configurable Default Bindings
 
 All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or under `[keybinds]` in `~/.config/blippy/config.toml`).
+
+Modified or named quit bindings also work in text fields. Plain characters remain text while editing or searching.
 
 | Action | Default |
 | --- | --- |

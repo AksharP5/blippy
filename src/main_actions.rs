@@ -240,6 +240,9 @@ pub(super) fn handle_actions(
                     return Ok(());
                 }
             };
+            if !ensure_issue_action_available(app, issue_number) {
+                return Ok(());
+            }
             app.set_current_issue(issue_id, issue_number);
             let labels = selected_issue_labels(app).unwrap_or_default();
             let options = label_options_for_repo(app);
@@ -258,6 +261,9 @@ pub(super) fn handle_actions(
                     return Ok(());
                 }
             };
+            if !ensure_issue_action_available(app, issue_number) {
+                return Ok(());
+            }
             app.set_current_issue(issue_id, issue_number);
             let assignees = selected_issue_assignees(app).unwrap_or_default();
             let options = assignee_options_for_repo(app);
@@ -305,7 +311,7 @@ pub(super) fn handle_actions(
             close_issue_with_comment(app, token, Some(comment), event_tx.clone())?;
         }
         AppAction::SavePreset => {
-            save_preset_from_editor(app)?;
+            save_preset_from_editor(app);
         }
     }
     Ok(())

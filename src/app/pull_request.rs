@@ -5,6 +5,10 @@ impl App {
         &self.pull_request.pull_request_files
     }
 
+    pub fn pull_request_head_sha(&self) -> Option<&str> {
+        self.pull_request.pull_request_files_head_sha.as_deref()
+    }
+
     pub fn pull_request_id(&self) -> Option<&str> {
         self.pull_request.pull_request_id.as_deref()
     }
@@ -240,19 +244,26 @@ impl App {
         head_sha: String,
         files: Vec<PullRequestFile>,
     ) {
+        let patches_by_path = files
+            .iter()
+            .map(|file| (file.filename.as_str(), file.patch.as_deref()))
+            .collect::<HashMap<_, _>>();
+        // Collapsed row positions belong to a patch, not just its filename.
+        for previous_file in &self.pull_request.pull_request_files {
+            if patches_by_path.get(previous_file.filename.as_str())
+                != Some(&previous_file.patch.as_deref())
+            {
+                self.pull_request
+                    .pull_request_collapsed_hunks
+                    .remove(&previous_file.filename);
+            }
+        }
         self.pull_request.pull_request_files_issue_id = Some(issue_id);
         self.pull_request.pull_request_files_head_sha = Some(head_sha);
         self.pull_request.pull_request_id = None;
         self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files = files;
-        let mut active_file_paths = HashSet::new();
-        for file in &self.pull_request.pull_request_files {
-            active_file_paths.insert(file.filename.clone());
-        }
         self.pull_request.pull_request_viewed_files.clear();
-        self.pull_request
-            .pull_request_collapsed_hunks
-            .retain(|file_path, _| active_file_paths.contains(file_path));
         self.pull_request.selected_pull_request_file = 0;
         self.pull_request.selected_pull_request_diff_line = 0;
         self.pull_request.pull_request_diff_scroll = 0;
@@ -695,6 +706,20 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     const PATCH: &str = "diff --git a/example b/example\n@@ -1,2 +1,2 @@\n hidden first\n hidden second\n@@ -5,0 +5,0 @@\n@@ -10,2 +10,2 @@\n visible one\n visible two\n@@ -20 +20 @@\n hidden last\n";
+
+    #[test]
+    fn merge_head_follows_the_current_issue() {
+        let mut app = App::new(Config::default());
+        app.set_current_issue(1, 7);
+        assert_eq!(app.pull_request_head_sha(), None);
+
+        app.set_pull_request_files(1, "head-a".to_string(), Vec::new());
+        app.set_current_issue(1, 7);
+        assert_eq!(app.pull_request_head_sha(), Some("head-a"));
+
+        app.set_current_issue(2, 8);
+        assert_eq!(app.pull_request_head_sha(), None);
+    }
 
     fn assert_visual_review_side_fallback(patch: &str, side: ReviewSide, reverse: bool) {
         let mut app = App::new(Config::default());

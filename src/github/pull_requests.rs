@@ -165,6 +165,7 @@ impl GitHubClient {
         owner: &str,
         repo: &str,
         pull_number: i64,
+        head_sha: Option<&str>,
     ) -> Result<()> {
         let repo_details = self
             .client
@@ -186,14 +187,23 @@ impl GitHubClient {
         );
         let mut last_error = String::new();
         for merge_method in merge_methods {
+            let mut payload = serde_json::json!({ "merge_method": merge_method });
+            if let Some(head_sha) = head_sha {
+                payload["sha"] = serde_json::json!(head_sha);
+            }
             let response = self
                 .client
                 .put(merge_url.as_str())
                 .bearer_auth(&self.token)
-                .json(&serde_json::json!({ "merge_method": merge_method }))
+                .json(&payload)
                 .send()
                 .await?;
             let status = response.status();
+            if status == reqwest::StatusCode::CONFLICT && head_sha.is_some() {
+                return Err(anyhow!(
+                    "Pull request head changed; refresh the diff and try merging again"
+                ));
+            }
             let payload_text = response.text().await.unwrap_or_default();
 
             if status.is_success() {
@@ -508,7 +518,7 @@ mod tests {
     use std::time::Instant;
 
     fn serve_responses(
-        responses: Vec<(&'static str, serde_json::Value)>,
+        responses: Vec<(&'static str, &'static str, serde_json::Value)>,
     ) -> (GitHubClient, thread::JoinHandle<Vec<serde_json::Value>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock GitHub");
         listener
@@ -517,7 +527,7 @@ mod tests {
         let api_base = format!("http://{}", listener.local_addr().expect("local address"));
         let server = thread::spawn(move || {
             let mut bodies = Vec::new();
-            for (request_line, response) in responses {
+            for (request_line, status, response) in responses {
                 let deadline = Instant::now() + Duration::from_secs(5);
                 let stream = loop {
                     match listener.accept() {
@@ -559,7 +569,7 @@ mod tests {
                 let body = response.to_string();
                 write!(
                     reader.get_mut(),
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(), body
                 ).expect("mock response");
             }
@@ -575,6 +585,112 @@ mod tests {
             api_base,
         };
         (client, server)
+    }
+
+    #[tokio::test]
+    async fn merge_request_pins_the_displayed_head() {
+        let mut app = crate::app::App::new(crate::config::Config::default());
+        app.set_current_issue(1, 7);
+        app.set_pull_request_files(1, "head-a".to_string(), Vec::new());
+        for (server_head, status, response) in [
+            ("head-a", "200 OK", serde_json::json!({"merged": true})),
+            (
+                "head-b",
+                "409 Conflict",
+                serde_json::json!({"message": "Head branch was modified"}),
+            ),
+        ] {
+            let (client, server) = serve_responses(vec![
+                (
+                    "GET /repos/acme/blippy",
+                    "200 OK",
+                    serde_json::json!({
+                        "allow_merge_commit": true,
+                        "allow_squash_merge": true,
+                        "allow_rebase_merge": true,
+                    }),
+                ),
+                ("PUT /repos/acme/blippy/pulls/7/merge", status, response),
+            ]);
+
+            let result = client
+                .merge_pull_request("acme", "blippy", 7, app.pull_request_head_sha())
+                .await;
+            let bodies = server
+                .join()
+                .expect("one merge attempt, without a head fetch");
+            println!(
+                "Displayed head=head-a, server head={server_head}, result={result:?}, requests={bodies:?}"
+            );
+            assert_eq!(
+                bodies,
+                vec![
+                    serde_json::Value::Null,
+                    serde_json::json!({"merge_method": "merge", "sha": "head-a"}),
+                ]
+            );
+            if server_head == "head-a" {
+                result.expect("merge unchanged head");
+            } else {
+                assert_eq!(
+                    result
+                        .expect_err("reject changed head without trying another method")
+                        .to_string(),
+                    "Pull request head changed; refresh the diff and try merging again"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn merge_method_fallback_preserves_optional_head() {
+        for head_sha in [Some("head-a"), None] {
+            let (client, server) = serve_responses(vec![
+                (
+                    "GET /repos/acme/blippy",
+                    "200 OK",
+                    if head_sha.is_some() {
+                        serde_json::json!({
+                            "allow_merge_commit": true,
+                            "allow_squash_merge": true,
+                        })
+                    } else {
+                        serde_json::json!({})
+                    },
+                ),
+                (
+                    "PUT /repos/acme/blippy/pulls/7/merge",
+                    "405 Method Not Allowed",
+                    serde_json::json!({"message": "Merge commits are not allowed"}),
+                ),
+                (
+                    "PUT /repos/acme/blippy/pulls/7/merge",
+                    "200 OK",
+                    serde_json::json!({"merged": true}),
+                ),
+            ]);
+
+            client
+                .merge_pull_request("acme", "blippy", 7, head_sha)
+                .await
+                .expect("fallback to squash merge");
+            let bodies = server.join().expect("settings and two merge attempts");
+            println!("Fallback head={head_sha:?}, requests={bodies:?}");
+            let expected = if head_sha.is_some() {
+                vec![
+                    serde_json::Value::Null,
+                    serde_json::json!({"merge_method": "merge", "sha": "head-a"}),
+                    serde_json::json!({"merge_method": "squash", "sha": "head-a"}),
+                ]
+            } else {
+                vec![
+                    serde_json::Value::Null,
+                    serde_json::json!({"merge_method": "merge"}),
+                    serde_json::json!({"merge_method": "squash"}),
+                ]
+            };
+            assert_eq!(bodies, expected);
+        }
     }
 
     #[tokio::test]
@@ -601,6 +717,7 @@ mod tests {
             let (client, server) = serve_responses(vec![
                 (
                     "GET /repos/acme/blippy/pulls/7",
+                    "200 OK",
                     serde_json::json!({
                         "head": {"sha": "head-a"},
                         "base": {"sha": "base-a"},
@@ -608,10 +725,12 @@ mod tests {
                 ),
                 (
                     "GET /repos/acme/blippy/pulls/7/files?per_page=100&page=1",
+                    "200 OK",
                     serde_json::json!(first_page),
                 ),
                 (
                     "GET /repos/acme/blippy/pulls/7/files?per_page=100&page=2",
+                    "200 OK",
                     if final_base == "base-a" {
                         serde_json::json!([file.clone()])
                     } else {
@@ -621,6 +740,7 @@ mod tests {
                 ),
                 (
                     "GET /repos/acme/blippy/pulls/7",
+                    "200 OK",
                     serde_json::json!({
                         "head": {"sha": final_head},
                         "base": {"sha": final_base},
@@ -721,6 +841,7 @@ mod tests {
 
             let (client, server) = serve_responses(vec![(
                 "POST /repos/acme/blippy/pulls/7/comments",
+                "200 OK",
                 serde_json::json!({}),
             )]);
             client

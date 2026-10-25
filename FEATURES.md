@@ -54,11 +54,13 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 - View changed files and diff, with option for checkout
 - PR checkout uses the selected GitHub remote and local repository
-- Merge pull requests directly from the review/detail flow
+- Merge pull requests directly from the review/detail flow. Once a diff is loaded, merges require the same head commit; refresh the diff if it changes.
 - Split or expanded diff review modes
 - Horizontal diff panning for long lines
+- Inline comment editors preserve the review layout, diff focus, and selected line when returning
 - Mark files viewed/unviewed, ignoring repeat toggles until GitHub responds
 - Visual multiline range selection within one diff hunk for review comments, including automatic side fallback for added-only or deleted-only selections
+- Refresh keeps collapsed hunks for unchanged files and expands files whose patches changed
 - Review comments keep the commit shown when the editor opened. If the PR head or base changes while files load, refresh with `r` to retry.
 
 ## Comments and Review Threads
@@ -69,13 +71,14 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Failed issue creation and add/edit comment submissions keep their drafts and targets for manual retry, including the original commit and line range for inline reviews
 - Pending submissions ignore repeat submits; delayed results preserve newer editors and navigation
 - Resolve or reopen PR review threads
-- Navigate comment threads on selected diff lines
+- Navigate comment threads on selected diff lines, keeping the selected comment visible
 
 ## Metadata Editing and Permission Awareness
 
 - Edit labels and assignees for issues/PRs from the TUI
 - Merge actions are permission-aware and only enabled for authorized repos
 - Label and assignee pickers with inline filtering; background suggestions preserve the highlighted option and checked selections
+- Metadata pickers stay closed while an action on the same item is pending, so reopening uses its saved labels and assignees
 - Open metadata pickers keep mouse input inside the picker, leaving background issues and repository navigation inactive
 - Editing is permission-aware and checks repo capabilities
 
@@ -95,3 +98,4 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Scrollable help overlay with keyboard and mouse wheel controls; input stays in help until it is dismissed
 - Configurable keybindings via `~/.config/blippy/keybinds.toml`
 - Configurable close-comment presets in `~/.config/blippy/config.toml`
+- Failed preset saves keep the editor and draft open so the write can be retried

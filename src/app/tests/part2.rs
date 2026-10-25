@@ -383,6 +383,64 @@ fn custom_quit_keybinding_remaps_and_disables_default() {
 }
 
 #[test]
+fn quit_bindings_work_while_editing_and_searching() {
+    for (binding, quit_key) in [
+        (
+            "ctrl+c",
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ),
+        (
+            "ctrl+q",
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+        ),
+        ("esc", KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+    ] {
+        for view in [
+            View::CommentEditor,
+            View::CommentPresetName,
+            View::RepoPicker,
+            View::Issues,
+            View::LabelPicker,
+            View::AssigneePicker,
+        ] {
+            let mut config = Config::default();
+            config.keybinds.insert("quit".into(), binding.into());
+            let mut app = App::new(config);
+            match view {
+                View::CommentEditor => app.open_issue_comment_editor(View::Issues),
+                View::LabelPicker => app.open_label_picker(View::Issues, vec!["bug".into()], &[]),
+                View::AssigneePicker => {
+                    app.open_assignee_picker(View::Issues, vec!["alex".into()], "")
+                }
+                _ => app.set_view(view),
+            }
+            if matches!(view, View::RepoPicker | View::Issues) {
+                app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+            }
+            if binding != "ctrl+c" {
+                app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+                assert!(!app.should_quit(), "disabled Ctrl+C in {view:?}");
+            }
+
+            app.on_key(quit_key);
+            assert!(app.should_quit(), "{binding} in {view:?}");
+            assert!(app.take_action().is_none());
+        }
+    }
+}
+
+#[test]
+fn plain_quit_bindings_remain_text_in_input_fields() {
+    let mut config = Config::default();
+    config.keybinds.insert("quit".into(), "q".into());
+    let mut app = App::new(config);
+    app.open_issue_comment_editor(View::Issues);
+    app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+    assert!(!app.should_quit());
+    assert_eq!(app.editor().text(), "q");
+}
+
+#[test]
 fn shift_n_triggers_create_issue_action() {
     let mut app = App::new(Config::default());
     app.set_view(View::Issues);
@@ -733,4 +791,59 @@ fn c_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
     app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
 
     assert!(!app.pull_request_hunk_is_collapsed("src/main.rs", 0));
+}
+
+#[test]
+fn refreshed_patches_only_keep_collapses_for_unchanged_content() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let original = "@@ -1 +1 @@\n-old\n+reviewed";
+    let changed = "@@ -1 +1 @@\n-old\n+unreviewed";
+    for (head, patch, collapsed) in [
+        ("head-a", original, true),
+        ("head-b", original, true),
+        ("head-a", changed, false),
+        ("head-b", changed, false),
+    ] {
+        let mut app = App::new(Config::default());
+        let file = |patch: &str| PullRequestFile {
+            filename: "src/main.rs".into(),
+            status: "modified".into(),
+            additions: 1,
+            deletions: 1,
+            patch: Some(patch.into()),
+        };
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(1, "head-a".into(), vec![file(original)]);
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert!(app.pull_request_hunk_is_collapsed("src/main.rs", 0));
+
+        app.set_pull_request_files(1, head.into(), vec![file(patch)]);
+        assert_eq!(
+            app.pull_request_hunk_is_collapsed("src/main.rs", 0),
+            collapsed,
+            "collapse state after refreshing {head}: {patch}"
+        );
+        let rows = crate::pr_diff::parse_patch(Some(patch));
+        assert_eq!(
+            app.visible_pull_request_diff_rows("src/main.rs", &rows)
+                .count(),
+            if collapsed { 1 } else { 2 }
+        );
+        if !collapsed {
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw refreshed patch");
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("unreviewed"));
+        }
+    }
 }
