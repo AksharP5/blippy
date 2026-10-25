@@ -105,6 +105,9 @@ impl Config {
         file.persist(&path)
             .map_err(|error| error.error)
             .with_context(|| format!("Failed to replace config at {}", path.display()))?;
+        // Replacement committed; a directory-sync error must not invite a duplicate save.
+        #[cfg(unix)]
+        let _ = fs::File::open(parent).and_then(|directory| directory.sync_all());
         self.comment_defaults = current.comment_defaults;
         Ok(())
     }
