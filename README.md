@@ -83,6 +83,8 @@ See [FEATURES.md](FEATURES.md) for a full feature breakdown.
 - Keybind overrides: `~/.config/blippy/keybinds.toml`
 - Example keybind file: [keybinds.example.toml](keybinds.example.toml)
 
+Bindings in `keybinds.toml` override `[keybinds]` in `config.toml`. Saving comment presets preserves each file's bindings, so removing an override restores the binding from the main config.
+
 Theme example:
 
 ```toml

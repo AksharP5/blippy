@@ -610,7 +610,7 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
-        let keybinds = Keybinds::from_overrides(&config.keybinds);
+        let keybinds = Keybinds::from_overrides(&config.effective_keybinds());
         Self {
             should_quit: false,
             config,
