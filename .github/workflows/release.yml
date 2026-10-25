@@ -12,6 +12,7 @@
 #
 # Note that a GitHub Release with this tag is assumed to exist as a draft
 # with the appropriate title/body, and will be undrafted for you.
+# Preserve the custom OIDC publisher and one-day artifact retention when regenerating.
 
 name: Release
 permissions:
@@ -70,6 +71,7 @@ jobs:
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/dist
+          retention-days: 1
       # sure would be cool if github gave us proper conditionals...
       # so here's a doubly-nested ternary-via-truthiness to try to provide the best possible
       # functionality based on whether this is a pull_request, and whether it's from a fork.
@@ -86,6 +88,7 @@ jobs:
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
+          retention-days: 1
 
   # Build and packages all the platform-specific things
   build-local-artifacts:
@@ -161,6 +164,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
+          retention-days: 1
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
@@ -208,6 +212,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-global
+          retention-days: 1
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
@@ -255,6 +260,7 @@ jobs:
           # Overwrite the previous copy
           name: artifacts-dist-manifest
           path: dist-manifest.json
+          retention-days: 1
       # Create a GitHub Release while uploading all files to it
       - name: "Download GitHub Artifacts"
         uses: actions/download-artifact@v8

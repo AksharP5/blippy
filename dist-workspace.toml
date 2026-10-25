@@ -18,7 +18,7 @@ hosting = "github"
 # Use a custom npm job because the built-in publisher requires NPM_TOKEN.
 publish-jobs = ["homebrew", "./publish-npm"]
 github-custom-job-permissions = { "publish-npm" = { contents = "read", "id-token" = "write" } }
-# The generated caller inherits every repository secret. Keep the narrower OIDC-only workflow.
+# Preserve the OIDC-only publisher and one-day intermediate artifact retention.
 allow-dirty = ["ci"]
 # Homebrew tap to push formula updates to
 tap = "AksharP5/homebrew-tap"
