@@ -734,3 +734,58 @@ fn c_collapses_selected_hunk_and_navigation_skips_hidden_rows() {
 
     assert!(!app.pull_request_hunk_is_collapsed("src/main.rs", 0));
 }
+
+#[test]
+fn refreshed_patches_only_keep_collapses_for_unchanged_content() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let original = "@@ -1 +1 @@\n-old\n+reviewed";
+    let changed = "@@ -1 +1 @@\n-old\n+unreviewed";
+    for (head, patch, collapsed) in [
+        ("head-a", original, true),
+        ("head-b", original, true),
+        ("head-a", changed, false),
+        ("head-b", changed, false),
+    ] {
+        let mut app = App::new(Config::default());
+        let file = |patch: &str| PullRequestFile {
+            filename: "src/main.rs".into(),
+            status: "modified".into(),
+            additions: 1,
+            deletions: 1,
+            patch: Some(patch.into()),
+        };
+        app.set_view(View::PullRequestFiles);
+        app.set_pull_request_files(1, "head-a".into(), vec![file(original)]);
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert!(app.pull_request_hunk_is_collapsed("src/main.rs", 0));
+
+        app.set_pull_request_files(1, head.into(), vec![file(patch)]);
+        assert_eq!(
+            app.pull_request_hunk_is_collapsed("src/main.rs", 0),
+            collapsed,
+            "collapse state after refreshing {head}: {patch}"
+        );
+        let rows = crate::pr_diff::parse_patch(Some(patch));
+        assert_eq!(
+            app.visible_pull_request_diff_rows("src/main.rs", &rows)
+                .count(),
+            if collapsed { 1 } else { 2 }
+        );
+        if !collapsed {
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw refreshed patch");
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("unreviewed"));
+        }
+    }
+}

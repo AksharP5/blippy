@@ -240,19 +240,26 @@ impl App {
         head_sha: String,
         files: Vec<PullRequestFile>,
     ) {
+        let patches_by_path = files
+            .iter()
+            .map(|file| (file.filename.as_str(), file.patch.as_deref()))
+            .collect::<HashMap<_, _>>();
+        // Collapsed row positions belong to a patch, not just its filename.
+        for previous_file in &self.pull_request.pull_request_files {
+            if patches_by_path.get(previous_file.filename.as_str())
+                != Some(&previous_file.patch.as_deref())
+            {
+                self.pull_request
+                    .pull_request_collapsed_hunks
+                    .remove(&previous_file.filename);
+            }
+        }
         self.pull_request.pull_request_files_issue_id = Some(issue_id);
         self.pull_request.pull_request_files_head_sha = Some(head_sha);
         self.pull_request.pull_request_id = None;
         self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files = files;
-        let mut active_file_paths = HashSet::new();
-        for file in &self.pull_request.pull_request_files {
-            active_file_paths.insert(file.filename.clone());
-        }
         self.pull_request.pull_request_viewed_files.clear();
-        self.pull_request
-            .pull_request_collapsed_hunks
-            .retain(|file_path, _| active_file_paths.contains(file_path));
         self.pull_request.selected_pull_request_file = 0;
         self.pull_request.selected_pull_request_diff_line = 0;
         self.pull_request.pull_request_diff_scroll = 0;
