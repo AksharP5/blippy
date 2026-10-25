@@ -394,6 +394,10 @@ fn quit_bindings_work_while_editing_and_searching() {
             KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
         ),
         ("esc", KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        (
+            "shift+tab",
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+        ),
     ] {
         for view in [
             View::CommentEditor,
