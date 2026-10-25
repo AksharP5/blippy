@@ -831,6 +831,100 @@ fn merge_assignee_options_highlights_first_match_when_none_was_visible() {
 }
 
 #[test]
+fn keyboard_focus_files_restores_split_review() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let rendered_text = |terminal: &Terminal<TestBackend>| {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(120)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for (files_key, diff_key) in [('h', 'l'), ('k', 'j')] {
+        for expanded in [true, false] {
+            let mut app = App::new(Config::default());
+            app.set_view(View::PullRequestFiles);
+            app.set_pull_request_files(
+                1,
+                "head-a".to_string(),
+                ["first.rs", "second.rs"]
+                    .into_iter()
+                    .map(|filename| PullRequestFile {
+                        filename: filename.to_string(),
+                        status: "modified".to_string(),
+                        additions: 2,
+                        deletions: 0,
+                        patch: Some("@@ -1 +1,3 @@\n context\n+one\n+two".to_string()),
+                    })
+                    .collect(),
+            );
+            app.on_key(KeyEvent::new(
+                KeyCode::Char(diff_key),
+                KeyModifiers::CONTROL,
+            ));
+            assert_eq!(
+                app.pull_request_review_focus(),
+                PullRequestReviewFocus::Diff
+            );
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            app.on_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            assert_eq!(app.pull_request_visual_range(), Some((1, 2)));
+            if expanded {
+                app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
+
+            app.on_key(KeyEvent::new(
+                KeyCode::Char(diff_key),
+                KeyModifiers::CONTROL,
+            ));
+            assert_eq!(
+                app.pull_request_review_focus(),
+                PullRequestReviewFocus::Diff
+            );
+            assert_eq!(app.pull_request_diff_expanded(), expanded);
+            assert_eq!(app.pull_request_visual_range(), Some((1, 2)));
+
+            app.on_key(KeyEvent::new(
+                KeyCode::Char(files_key),
+                KeyModifiers::CONTROL,
+            ));
+            assert_eq!(
+                app.pull_request_review_focus(),
+                PullRequestReviewFocus::Files
+            );
+            assert_eq!(app.pull_request_visual_range(), None);
+            let mut terminal = Terminal::new(TestBackend::new(120, 24)).expect("test terminal");
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw focused files");
+            let rendered = rendered_text(&terminal);
+            assert!(
+                rendered.contains("Changed files") && rendered.contains("second.rs"),
+                "Ctrl+{files_key} must reveal the file list, expanded={expanded}:\n{rendered}"
+            );
+            assert!(!app.pull_request_diff_expanded());
+            assert_eq!(app.selected_pull_request_diff_line(), 2);
+
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw next file");
+            assert_eq!(app.selected_pull_request_file(), 1);
+            assert_eq!(
+                app.selected_pull_request_file_row().unwrap().filename,
+                "second.rs"
+            );
+            assert!(rendered_text(&terminal).contains("Diff: second.rs"));
+        }
+    }
+}
+
+#[test]
 fn back_from_expanded_diff_returns_to_split_review() {
     let mut app = App::new(Config::default());
     app.set_view(View::PullRequestFiles);
