@@ -951,3 +951,66 @@ fn create_issue_confirm_tab_switches_between_cancel_and_create() {
     app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.take_action(), Some(AppAction::SubmitCreatedIssue));
 }
+
+#[test]
+fn label_qualifiers_match_whole_labels_while_plain_search_matches_substrings() {
+    use ratatui::{Terminal, backend::TestBackend};
+    for is_pr in [false, true] {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        if is_pr {
+            app.set_work_item_mode(WorkItemMode::PullRequests);
+        }
+        app.set_issues(
+            [
+                (11, "Exact label", "Bug"),
+                (22, "Debug tooling", "debug"),
+                (33, "Patch tooling", "bugfix"),
+            ]
+            .map(|(number, title, label)| IssueRow {
+                id: number,
+                repo_id: 1,
+                number,
+                state: "open".into(),
+                title: title.into(),
+                body: String::new(),
+                labels: vec![label.into()],
+                assignees: String::new(),
+                comments_count: 0,
+                updated_at: None,
+                is_pr,
+            })
+            .to_vec(),
+        );
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.on_paste("label:BUG");
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let numbers = app
+            .issues_for_view()
+            .iter()
+            .map(|issue| issue.number)
+            .collect::<Vec<_>>();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(80)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        eprintln!("is_pr={is_pr}, label:BUG => {numbers:?}\n{screen}");
+        assert_eq!(numbers, vec![11]);
+        assert!(screen.contains("Exact label"));
+        assert!(!screen.contains("Debug tooling"));
+        assert!(!screen.contains("Patch tooling"));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        app.on_paste("bug");
+        assert_eq!(app.issues_for_view().len(), 3);
+    }
+}

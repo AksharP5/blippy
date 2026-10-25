@@ -109,7 +109,10 @@ impl App {
                 return value == state;
             }
             if let Some(value) = token.strip_prefix("label:") {
-                return labels.contains(value);
+                return issue
+                    .labels
+                    .iter()
+                    .any(|label| label.eq_ignore_ascii_case(value));
             }
             if let Some(value) = token.strip_prefix("assignee:") {
                 let value = value.strip_prefix('@').unwrap_or(value);

@@ -88,7 +88,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Issue/PR search with GitHub-style qualifiers
 - Supported qualifiers include:
   - `is:open`, `is:closed`, `is:merged`
-  - `label:<name>`
+  - `label:<name>` matches whole label names, ignoring ASCII case
   - `assignee:<user>`, `assignee:none`
   - `#<number>`
 
