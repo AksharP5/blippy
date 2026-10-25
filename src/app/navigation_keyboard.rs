@@ -509,15 +509,11 @@ impl App {
             },
             View::PullRequestFiles => match code {
                 KeyCode::Char('h') | KeyCode::Char('k') => {
-                    self.pull_request.pull_request_review_focus = PullRequestReviewFocus::Files;
-                    self.pull_request.pull_request_visual_mode = false;
-                    self.pull_request.pull_request_visual_anchor = None;
-                    self.sync_selected_pull_request_review_comment();
+                    self.set_pull_request_review_focus(PullRequestReviewFocus::Files);
                     true
                 }
                 KeyCode::Char('l') | KeyCode::Char('j') => {
-                    self.pull_request.pull_request_review_focus = PullRequestReviewFocus::Diff;
-                    self.sync_selected_pull_request_review_comment();
+                    self.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
                     true
                 }
                 _ => false,

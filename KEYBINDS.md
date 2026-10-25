@@ -106,7 +106,8 @@ Search mode:
 
 ## Pull Request Review View (`Files`)
 
-- `Ctrl+h` / `Ctrl+l`: Focus files pane or diff pane
+- `Ctrl+h` / `Ctrl+k`: Focus files pane and restore split view if expanded
+- `Ctrl+l` / `Ctrl+j`: Focus diff pane
 - `j` / `k`: Move selected file
 - `Enter`: Expand diff pane to full width
 - `w`: Toggle file viewed/unviewed on GitHub
@@ -118,7 +119,8 @@ Search mode:
 
 ## Pull Request Review View (`Diff`)
 
-- `Ctrl+h` / `Ctrl+l`: Focus files pane or diff pane
+- `Ctrl+h` / `Ctrl+k`: Focus files pane and restore split view if expanded
+- `Ctrl+l` / `Ctrl+j`: Focus diff pane
 - `j` / `k`: Move selected diff row
 - `Enter`: Expand to full diff (or return to split when expanded)
 - `c`: Collapse/expand selected hunk
