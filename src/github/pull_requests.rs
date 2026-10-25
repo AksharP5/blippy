@@ -8,7 +8,7 @@ impl GitHubClient {
         owner: &str,
         repo: &str,
         pull_number: i64,
-    ) -> Result<(String, Vec<ApiPullRequestFile>)> {
+    ) -> Result<(ApiPullRequestSummary, Vec<ApiPullRequestFile>)> {
         let commits = self.pull_request_commits(owner, repo, pull_number).await?;
         let mut page = 1;
         let mut files = Vec::new();
@@ -38,7 +38,7 @@ impl GitHubClient {
                 "Pull request changed while loading files; refresh to try again"
             ));
         }
-        Ok((commits.head.sha, files))
+        Ok((commits, files))
     }
 
     pub async fn pull_request_file_view_state(
@@ -241,7 +241,8 @@ impl GitHubClient {
         owner: &str,
         repo: &str,
         pull_number: i64,
-    ) -> Result<Vec<ApiPullRequestReviewComment>> {
+    ) -> Result<(ApiPullRequestSummary, Vec<ApiPullRequestReviewComment>)> {
+        let commits = self.pull_request_commits(owner, repo, pull_number).await?;
         let thread_map = self
             .list_pull_request_review_thread_map(owner, repo, pull_number)
             .await?;
@@ -272,7 +273,12 @@ impl GitHubClient {
             }
             page += 1;
         }
-        Ok(comments)
+        if self.pull_request_commits(owner, repo, pull_number).await? != commits {
+            return Err(anyhow!(
+                "Pull request changed while loading review comments; refresh to try again"
+            ));
+        }
+        Ok((commits, comments))
     }
 
     async fn list_pull_request_review_thread_map(
@@ -753,8 +759,9 @@ mod tests {
                 .join()
                 .expect("all pages fetched between commit checks");
             if final_head == "head-a" && final_base == "base-a" {
-                let (head_sha, files) = result.expect("stable snapshot");
-                assert_eq!(head_sha, "head-a");
+                let (commits, files) = result.expect("stable snapshot");
+                assert_eq!(commits.head.sha, "head-a");
+                assert_eq!(commits.base.sha, "base-a");
                 assert_eq!(files.len(), 101);
             } else {
                 let error = match result {
@@ -767,6 +774,67 @@ mod tests {
                 assert_eq!(
                     error.to_string(),
                     "Pull request changed while loading files; refresh to try again"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn review_comments_require_a_stable_head_and_base() {
+        for (head, base) in [
+            ("head-a", "base-a"),
+            ("head-b", "base-a"),
+            ("head-a", "base-b"),
+        ] {
+            let (client, server) = serve_responses(vec![
+                (
+                    "GET /repos/acme/blippy/pulls/7",
+                    "200 OK",
+                    serde_json::json!({
+                        "head": {"sha": "head-a"}, "base": {"sha": "base-a"}
+                    }),
+                ),
+                (
+                    "POST /graphql",
+                    "200 OK",
+                    serde_json::json!({"data": {"repository": {"pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [], "pageInfo": {"hasNextPage": false}
+                        }
+                    }}}}),
+                ),
+                (
+                    "GET /repos/acme/blippy/pulls/7/comments?per_page=100&page=1",
+                    "200 OK",
+                    serde_json::json!([{
+                        "id": 10, "path": "src/main.rs", "line": 1, "side": "RIGHT",
+                        "body": "Review"
+                    }]),
+                ),
+                (
+                    "GET /repos/acme/blippy/pulls/7",
+                    "200 OK",
+                    serde_json::json!({"head": {"sha": head}, "base": {"sha": base}}),
+                ),
+            ]);
+            let result = client
+                .list_pull_request_review_comments("acme", "blippy", 7)
+                .await;
+            server
+                .join()
+                .expect("comments fetched between commit checks");
+            if head == "head-a" && base == "base-a" {
+                let (commits, comments) = result.expect("stable review comments");
+                assert_eq!(commits.head.sha, "head-a");
+                assert_eq!(commits.base.sha, "base-a");
+                assert_eq!(comments.len(), 1);
+                assert_eq!(comments[0].line, Some(1));
+            } else {
+                assert_eq!(
+                    result
+                        .expect_err("changed diff must not supply anchors")
+                        .to_string(),
+                    "Pull request changed while loading review comments; refresh to try again"
                 );
             }
         }
@@ -790,7 +858,10 @@ mod tests {
             let (event_tx, event_rx) = std::sync::mpsc::channel();
             let snapshot = |head: &str, patch: &str| crate::AppEvent::PullRequestFilesUpdated {
                 issue_id: 1,
-                head_sha: head.to_string(),
+                commits: ApiPullRequestSummary {
+                    head: ApiPullRequestCommit { sha: head.into() },
+                    base: ApiPullRequestCommit { sha: "base".into() },
+                },
                 files: vec![PullRequestFile {
                     filename: "src/main.rs".to_string(),
                     status: "modified".to_string(),

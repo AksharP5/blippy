@@ -62,6 +62,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Visual multiline range selection within one diff hunk for review comments, including automatic side fallback for added-only or deleted-only selections
 - Refresh keeps collapsed hunks for unchanged files and expands files whose patches changed
 - Review comments keep the commit shown when the editor opened. If the PR head or base changes while files load, refresh with `r` to retry.
+- Inline review threads appear only on a matching head and base snapshot; failed refreshes cannot attach old threads to changed code. Unchanged diff refreshes preserve the reading position.
 
 ## Comments and Review Threads
 

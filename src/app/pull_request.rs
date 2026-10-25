@@ -6,7 +6,10 @@ impl App {
     }
 
     pub fn pull_request_head_sha(&self) -> Option<&str> {
-        self.pull_request.pull_request_files_head_sha.as_deref()
+        self.pull_request
+            .pull_request_files_commits
+            .as_ref()
+            .map(|commits| commits.head.sha.as_str())
     }
 
     pub fn pull_request_id(&self) -> Option<&str> {
@@ -177,8 +180,8 @@ impl App {
         side: ReviewSide,
         line: i64,
     ) -> Vec<&PullRequestReviewComment> {
-        let comments = &self.pull_request.pull_request_review_comments;
-        // set_pull_request_review_comments keeps comments sorted by path, line, and ID.
+        let comments = self.current_pull_request_review_comments();
+        // Comments are sorted by path, line, and ID when loaded.
         let start = comments
             .partition_point(|comment| (comment.path.as_str(), comment.line) < (path, line));
         comments[start..]
@@ -189,7 +192,7 @@ impl App {
     }
 
     pub fn pull_request_comments_count_for_path(&self, path: &str) -> usize {
-        let comments = &self.pull_request.pull_request_review_comments;
+        let comments = self.current_pull_request_review_comments();
         let start = comments.partition_point(|comment| comment.path.as_str() < path);
         let end = comments.partition_point(|comment| comment.path.as_str() <= path);
         end - start
@@ -198,8 +201,7 @@ impl App {
     pub fn selected_pull_request_review_comment(&self) -> Option<&PullRequestReviewComment> {
         let target = self.selected_pull_request_review_target()?;
         let mut comments = self
-            .pull_request
-            .pull_request_review_comments
+            .current_pull_request_review_comments()
             .iter()
             .filter(|comment| {
                 comment.anchored
@@ -238,12 +240,41 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub fn set_pull_request_files(
         &mut self,
         issue_id: i64,
         head_sha: String,
         files: Vec<PullRequestFile>,
     ) {
+        self.set_pull_request_diff(
+            issue_id,
+            ApiPullRequestSummary {
+                head: crate::github::ApiPullRequestCommit { sha: head_sha },
+                base: crate::github::ApiPullRequestCommit { sha: String::new() },
+            },
+            files,
+        );
+    }
+
+    pub fn set_pull_request_diff(
+        &mut self,
+        issue_id: i64,
+        commits: ApiPullRequestSummary,
+        files: Vec<PullRequestFile>,
+    ) {
+        let same_commits = self.pull_request.pull_request_files_commits.as_ref() == Some(&commits);
+        let same_files = self.pull_request.pull_request_files == files;
+        if self.pull_request.pull_request_files_issue_id == Some(issue_id)
+            && same_commits
+            && same_files
+        {
+            return;
+        }
+        if same_commits && !same_files {
+            self.pull_request.pull_request_review_comments.clear();
+            self.pull_request.pull_request_review_comments_commits = None;
+        }
         let patches_by_path = files
             .iter()
             .map(|file| (file.filename.as_str(), file.patch.as_deref()))
@@ -259,7 +290,7 @@ impl App {
             }
         }
         self.pull_request.pull_request_files_issue_id = Some(issue_id);
-        self.pull_request.pull_request_files_head_sha = Some(head_sha);
+        self.pull_request.pull_request_files_commits = Some(commits);
         self.pull_request.pull_request_id = None;
         self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files = files;
@@ -277,8 +308,19 @@ impl App {
         self.pull_request.selected_pull_request_review_comment_id = None;
     }
 
-    pub fn set_pull_request_review_comments(
+    #[cfg(test)]
+    pub fn set_pull_request_review_comments(&mut self, comments: Vec<PullRequestReviewComment>) {
+        let commits = self
+            .pull_request
+            .pull_request_files_commits
+            .clone()
+            .expect("review comment fixture needs a diff");
+        self.set_pull_request_review_comments_for_diff(commits, comments);
+    }
+
+    pub fn set_pull_request_review_comments_for_diff(
         &mut self,
+        commits: ApiPullRequestSummary,
         mut comments: Vec<PullRequestReviewComment>,
     ) {
         comments.sort_by(|left, right| {
@@ -288,9 +330,20 @@ impl App {
                 .then(left.id.cmp(&right.id))
         });
         self.pull_request.pull_request_review_comments = comments;
+        self.pull_request.pull_request_review_comments_commits = Some(commits);
         self.pull_request.selected_pull_request_review_comment_id = self
             .selected_pull_request_review_comment()
             .map(|comment| comment.id);
+    }
+
+    fn current_pull_request_review_comments(&self) -> &[PullRequestReviewComment] {
+        // Keep a response that arrives before its files, without exposing its anchors yet.
+        if self.pull_request.pull_request_files_commits
+            != self.pull_request.pull_request_review_comments_commits
+        {
+            return &[];
+        }
+        &self.pull_request.pull_request_review_comments
     }
 
     pub fn set_pull_request_review_focus(&mut self, focus: PullRequestReviewFocus) {
@@ -387,13 +440,14 @@ impl App {
 
     pub(super) fn reset_pull_request_state(&mut self) {
         self.pull_request.pull_request_files_issue_id = None;
-        self.pull_request.pull_request_files_head_sha = None;
+        self.pull_request.pull_request_files_commits = None;
         self.pull_request.pull_request_id = None;
         self.pull_request.pull_request_view_state_loaded = false;
         self.pull_request.pull_request_files.clear();
         self.pull_request.pull_request_viewed_files.clear();
         self.pull_request.pull_request_collapsed_hunks.clear();
         self.pull_request.pull_request_review_comments.clear();
+        self.pull_request.pull_request_review_comments_commits = None;
         self.pull_request.selected_pull_request_file = 0;
         self.pull_request.selected_pull_request_diff_line = 0;
         self.pull_request.pull_request_diff_scroll = 0;
@@ -600,7 +654,7 @@ impl App {
         file_path: &str,
         rows: &[crate::pr_diff::DiffRow],
     ) -> Option<PullRequestReviewTarget> {
-        let commit_id = self.pull_request.pull_request_files_head_sha.as_ref()?;
+        let commit_id = self.pull_request_head_sha()?;
         if rows.is_empty() {
             return None;
         }
@@ -644,7 +698,7 @@ impl App {
         };
 
         Some(PullRequestReviewTarget {
-            commit_id: commit_id.clone(),
+            commit_id: commit_id.to_string(),
             path: file_path.to_string(),
             line,
             side,
@@ -659,8 +713,7 @@ impl App {
             None => return,
         };
         let mut ids = self
-            .pull_request
-            .pull_request_review_comments
+            .current_pull_request_review_comments()
             .iter()
             .filter(|comment| {
                 comment.anchored
@@ -813,7 +866,7 @@ mod tests {
             ),
         ] {
             let mut app = App::new(Config::default());
-            app.pull_request.pull_request_files_head_sha = Some("displayed-head".into());
+            app.set_pull_request_files(1, "displayed-head".into(), Vec::new());
             app.pull_request.pull_request_review_side = side;
             app.pull_request.pull_request_visual_mode = true;
             app.pull_request.pull_request_visual_anchor = Some(1);
@@ -871,6 +924,7 @@ mod tests {
             created_at: None,
         };
         let mut app = App::new(Config::default());
+        app.set_pull_request_files(1, "head".into(), Vec::new());
         app.set_pull_request_review_comments(vec![
             comment(3, "b.rs", 10, ReviewSide::Right, true),
             comment(9, "a.rs", 10, ReviewSide::Right, true),

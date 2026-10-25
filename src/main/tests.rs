@@ -1040,6 +1040,7 @@ fn review_edits_and_deletions_refresh_after_an_older_snapshot() {
             author: "alex".into(),
             created_at: None,
         };
+        app.set_pull_request_files(1, "head-a".into(), Vec::new());
         app.set_pull_request_review_comments(vec![old.clone()]);
         app.begin_pull_request_review_comments_sync();
         let (event_tx, event_rx) = channel();
@@ -1059,6 +1060,10 @@ fn review_edits_and_deletions_refresh_after_an_older_snapshot() {
         event_tx
             .send(super::AppEvent::PullRequestReviewCommentsUpdated {
                 issue_id: 1,
+                commits: serde_json::from_value(serde_json::json!({
+                    "head": {"sha": "head-a"}, "base": {"sha": ""}
+                }))
+                .expect("diff commits"),
                 comments: vec![old.clone()],
             })
             .expect("older fetch completed later");
@@ -1077,6 +1082,10 @@ fn review_edits_and_deletions_refresh_after_an_older_snapshot() {
         event_tx
             .send(super::AppEvent::PullRequestReviewCommentsUpdated {
                 issue_id: 1,
+                commits: serde_json::from_value(serde_json::json!({
+                    "head": {"sha": "head-a"}, "base": {"sha": ""}
+                }))
+                .expect("diff commits"),
                 comments: fresh,
             })
             .expect("refresh completed");
@@ -1115,7 +1124,10 @@ fn completed_file_view_changes_refresh_after_an_older_snapshot() {
     event_tx
         .send(super::AppEvent::PullRequestFilesUpdated {
             issue_id: 1,
-            head_sha: "head-a".to_string(),
+            commits: serde_json::from_value(serde_json::json!({
+                "head": {"sha": "head-a"}, "base": {"sha": ""}
+            }))
+            .expect("diff commits"),
             files: vec![file.clone()],
             pull_request_id: Some("PR".into()),
             viewed_files: Default::default(),
@@ -1129,7 +1141,10 @@ fn completed_file_view_changes_refresh_after_an_older_snapshot() {
     event_tx
         .send(super::AppEvent::PullRequestFilesUpdated {
             issue_id: 1,
-            head_sha: "head-a".to_string(),
+            commits: serde_json::from_value(serde_json::json!({
+                "head": {"sha": "head-a"}, "base": {"sha": ""}
+            }))
+            .expect("diff commits"),
             files: vec![file],
             pull_request_id: Some("PR".into()),
             viewed_files: ["src/main.rs".to_string()].into(),
@@ -1961,7 +1976,10 @@ fn pull_request_view_state_failure_stays_unknown() {
     event_tx
         .send(super::AppEvent::PullRequestFilesUpdated {
             issue_id: 33,
-            head_sha: "head-a".to_string(),
+            commits: serde_json::from_value(serde_json::json!({
+                "head": {"sha": "head-a"}, "base": {"sha": ""}
+            }))
+            .expect("diff commits"),
             files: vec![crate::app::PullRequestFile {
                 filename: "src/main.rs".to_string(),
                 status: "modified".to_string(),
