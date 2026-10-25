@@ -12,7 +12,7 @@
 #
 # Note that a GitHub Release with this tag is assumed to exist as a draft
 # with the appropriate title/body, and will be undrafted for you.
-# Preserve the custom OIDC publisher and one-day artifact retention when regenerating.
+# Preserve the custom OIDC publisher and artifact upload policies when regenerating.
 
 name: Release
 permissions:
@@ -66,12 +66,6 @@ jobs:
         # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
         run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh"
-      - name: Cache dist
-        uses: actions/upload-artifact@v7
-        with:
-          name: cargo-dist-cache
-          path: ~/.cargo/bin/dist
-          retention-days: 1
       # sure would be cool if github gave us proper conditionals...
       # so here's a doubly-nested ternary-via-truthiness to try to provide the best possible
       # functionality based on whether this is a pull_request, and whether it's from a fork.
@@ -83,6 +77,13 @@ jobs:
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
+      - name: Share dist with release jobs
+        if: ${{ !github.event.pull_request || fromJson(steps.plan.outputs.manifest).ci.github.pr_run_mode == 'upload' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-dist-cache
+          path: ~/.cargo/bin/dist
+          retention-days: 1
       - name: "Upload dist-manifest.json"
         uses: actions/upload-artifact@v7
         with:
