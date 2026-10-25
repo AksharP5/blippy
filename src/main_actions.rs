@@ -305,7 +305,7 @@ pub(super) fn handle_actions(
             close_issue_with_comment(app, token, Some(comment), event_tx.clone())?;
         }
         AppAction::SavePreset => {
-            save_preset_from_editor(app)?;
+            save_preset_from_editor(app);
         }
     }
     Ok(())

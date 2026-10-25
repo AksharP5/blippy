@@ -246,6 +246,96 @@ fn invalid_presets_keep_the_editor_open() {
 }
 
 #[test]
+fn preset_save_failures_keep_the_draft_and_allow_retry() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::fs;
+
+    const CONFIG_ENV: &str = "BLIPPY_TEST_PRESET_CONFIG";
+    let Some(config_dir) = std::env::var_os(CONFIG_ENV) else {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("timestamp")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("blippy-preset-save-{nanos}"));
+        fs::create_dir_all(dir.join("blippy/config.toml")).expect("block config writes");
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "tests::preset_save_failures_keep_the_draft_and_allow_retry",
+            ])
+            .env(CONFIG_ENV, &dir)
+            .env("XDG_CONFIG_HOME", &dir)
+            .output()
+            .expect("isolated preset test");
+        fs::remove_dir_all(&dir).expect("remove test config");
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    };
+
+    let config_path = std::path::PathBuf::from(config_dir).join("blippy/config.toml");
+    let config = Config {
+        theme: Some("midnight".into()),
+        comment_defaults: vec![crate::config::CommentDefault {
+            name: "existing".into(),
+            body: "Existing response".into(),
+        }],
+        ..Config::default()
+    };
+    let mut app = crate::app::App::new(config);
+    app.editor_mut().reset_for_preset_name();
+    for ch in "resolved".chars() {
+        app.editor_mut().append_name(ch);
+    }
+    for ch in "Closing as resolved.".chars() {
+        app.editor_mut().append_text(ch);
+    }
+    app.set_view(View::CommentEditor);
+    app.set_selected_preset(3);
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+
+    for writable in [false, true] {
+        if writable {
+            fs::remove_dir(&config_path).expect("allow config writes");
+        }
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let (event_tx, _) = channel();
+        super::main_actions::handle_actions(
+            &mut app,
+            &mut crate::clipboard::SystemClipboard::default(),
+            &conn,
+            "token",
+            event_tx,
+        )
+        .expect("keep the TUI running after preset save");
+
+        if !writable {
+            assert_eq!(app.view(), View::CommentEditor);
+            assert!(app.status().starts_with("Preset save failed:"));
+            assert_eq!(app.editor().name(), "resolved");
+            assert_eq!(app.editor().text(), "Closing as resolved.");
+            assert_eq!(app.comment_defaults().len(), 1);
+            assert_eq!(app.selected_preset(), 3);
+            continue;
+        }
+
+        assert_eq!(app.view(), View::CommentPresetPicker);
+        assert_eq!(app.status(), "Preset saved");
+        assert_eq!(app.comment_defaults().len(), 2);
+        assert_eq!(app.selected_preset(), 0);
+        let saved = Config::load().expect("saved config");
+        assert_eq!(saved.theme.as_deref(), Some("midnight"));
+        assert_eq!(saved.comment_defaults, app.comment_defaults());
+        assert_eq!(saved.comment_defaults[1].name, "resolved");
+        assert_eq!(saved.comment_defaults[1].body, "Closing as resolved.");
+    }
+}
+
+#[test]
 fn reopening_the_current_issue_preserves_in_flight_comment_sync() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
