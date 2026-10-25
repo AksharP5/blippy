@@ -1014,3 +1014,42 @@ fn label_qualifiers_match_whole_labels_while_plain_search_matches_substrings() {
         assert_eq!(app.issues_for_view().len(), 3);
     }
 }
+
+#[test]
+fn quoted_label_filters_preserve_spaces_and_combine_with_other_qualifiers() {
+    for is_pr in [false, true] {
+        let mut app = App::new(Config::default());
+        app.set_view(View::Issues);
+        if is_pr {
+            app.set_work_item_mode(WorkItemMode::PullRequests);
+        }
+        app.set_issues(
+            [(44, "api, v2"), (55, "api, v20")]
+                .map(|(number, label)| IssueRow {
+                    id: number,
+                    repo_id: 1,
+                    number,
+                    state: "open".into(),
+                    title: format!("API version {number}"),
+                    body: String::new(),
+                    labels: vec![label.into()],
+                    assignees: "alex".into(),
+                    comments_count: 0,
+                    updated_at: None,
+                    is_pr,
+                })
+                .to_vec(),
+        );
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.on_paste("label:\"API, V2\" is:open assignee:alex");
+        let numbers = app
+            .issues_for_view()
+            .iter()
+            .map(|issue| issue.number)
+            .collect::<Vec<_>>();
+        assert_eq!(numbers, vec![44]);
+        app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        app.on_paste("api,");
+        assert_eq!(app.issues_for_view().len(), 2);
+    }
+}

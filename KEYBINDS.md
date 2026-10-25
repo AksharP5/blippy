@@ -170,7 +170,7 @@ Issue creation and add/edit comment editors stay open while submitting. Text ent
 ## Search Qualifiers
 
 - `is:open`, `is:closed`, `is:merged`
-- `label:<name>` matches a whole label name, ignoring ASCII case
+- `label:<name>` matches a whole label name, ignoring ASCII case; quote names containing spaces, such as `label:"good first issue"`
 - `assignee:<user>`
 - `assignee:none`
 - `#<number>`
