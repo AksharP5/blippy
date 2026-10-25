@@ -730,6 +730,75 @@ mod tests {
     }
 
     #[test]
+    fn panning_reveals_line_endings_with_wide_line_numbers() {
+        for number in [9999, 10000, 1_000_000, i64::MAX - 2] {
+            let next = number + 1;
+            let old = format!("{}END!", "x".repeat(80));
+            let new = format!("{}END!", "y".repeat(80));
+            for (kind, patch, endings) in [
+                (
+                    DiffKind::Added,
+                    format!("@@ -{number},0 +{number} @@\n+{new}"),
+                    1,
+                ),
+                (
+                    DiffKind::Removed,
+                    format!("@@ -{number} +{number},0 @@\n-{old}"),
+                    1,
+                ),
+                (
+                    DiffKind::Changed,
+                    format!("@@ -{number} +{next} @@\n-{old}\n+{new}"),
+                    2,
+                ),
+                (
+                    DiffKind::Context,
+                    format!("@@ -{number} +{next} @@\n {old}"),
+                    2,
+                ),
+            ] {
+                for expanded in [false, true] {
+                    let mut app = App::new(Config::default());
+                    app.set_view(View::PullRequestFiles);
+                    app.set_pull_request_files(
+                        1,
+                        "head".to_string(),
+                        vec![PullRequestFile {
+                            filename: "gutter.txt".to_string(),
+                            status: "modified".to_string(),
+                            additions: i64::from(matches!(
+                                kind,
+                                DiffKind::Added | DiffKind::Changed
+                            )),
+                            deletions: i64::from(matches!(
+                                kind,
+                                DiffKind::Removed | DiffKind::Changed
+                            )),
+                            patch: Some(patch.clone()),
+                        }],
+                    );
+                    app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+                    app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+                    if expanded {
+                        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                    }
+                    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+                    review_screen(&mut terminal, &mut app);
+                    for _ in 0..app.pull_request_diff_horizontal_max() {
+                        app.on_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+                    }
+                    let screen = review_screen(&mut terminal, &mut app);
+                    assert_eq!(
+                        screen.matches("END!").count(),
+                        endings,
+                        "line={number}, kind={kind:?}, expanded={expanded}\n{screen}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn resizing_a_panned_diff_renders_correctly_on_the_first_frame() {
         let mut app = App::new(Config::default());
         app.set_view(View::PullRequestFiles);
