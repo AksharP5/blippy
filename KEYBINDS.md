@@ -46,7 +46,7 @@ Search mode:
 - `Ctrl+a`: Reset assignee filter to all
 - `/`: Start issue/PR search
 - `Shift+N`: Create issue (Issues mode only)
-- `r`: Refresh list
+- `r`: Refresh list and repository permissions
 - `m`: Add comment
 - `l`: Edit labels
 - `Shift+A`: Edit assignees
@@ -81,7 +81,7 @@ Search mode:
 - `y`: Copy issue/PR URL
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
-- `r`: Refresh issue/comments
+- `r`: Refresh issue/comments and repository permissions
 - `b` or `Esc`: Back
 
 ## Issue Comments View
@@ -101,7 +101,7 @@ Search mode:
 - `y`: Copy issue/PR URL
 - `Shift+P`: Open linked PR/issue in TUI
 - `Shift+O`: Open linked PR/issue in browser
-- `r`: Refresh issue/comments
+- `r`: Refresh issue/comments and repository permissions
 - `b` or `Esc`: Back
 
 ## Pull Request Review View (`Files`)
@@ -111,7 +111,7 @@ Search mode:
 - `j` / `k`: Move selected file
 - `Enter`: Expand diff pane to full width
 - `w`: Toggle file viewed/unviewed on GitHub
-- `r`: Refresh PR data
+- `r`: Refresh PR data and repository permissions
 - `v`: Checkout PR locally
 - `Shift+M`: Merge pull request
 - `y`: Copy pull request URL
@@ -133,7 +133,7 @@ Search mode:
 - `x`: Delete selected inline review comment
 - `Shift+R`: Resolve/reopen selected review thread
 - `n` / `p`: Cycle line comments on current diff row, scrolling the selected comment into view
-- `r`: Refresh PR data
+- `r`: Refresh PR data and repository permissions
 - `v`: Checkout PR locally
 - `Shift+M`: Merge pull request
 - `y`: Copy pull request URL
