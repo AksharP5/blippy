@@ -14,12 +14,20 @@ pub(crate) fn start_create_pull_request_review_comment(
     start_side: Option<ReviewSide>,
     token: String,
     body: String,
+    submission: EditorSubmission,
     event_tx: Sender<AppEvent>,
 ) {
+    let setup_submission = submission.clone();
     spawn_with_services(
         token,
         event_tx,
-        move |message| AppEvent::PullRequestReviewCommentCreateFailed { issue_id, message },
+        move |message| {
+            editor_submission_event(
+                setup_submission,
+                false,
+                AppEvent::PullRequestReviewCommentCreateFailed { issue_id, message },
+            )
+        },
         move |services, event_tx| {
             let created = services.runtime.block_on(async {
                 services
@@ -40,19 +48,28 @@ pub(crate) fn start_create_pull_request_review_comment(
             });
             match created {
                 Ok(()) => {
-                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreated { issue_id });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        true,
+                        AppEvent::PullRequestReviewCommentCreated { issue_id },
+                    ));
                 }
                 Err(error) => {
-                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentCreateFailed {
-                        issue_id,
-                        message: error.to_string(),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        false,
+                        AppEvent::PullRequestReviewCommentCreateFailed {
+                            issue_id,
+                            message: error.to_string(),
+                        },
+                    ));
                 }
             }
         },
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn start_update_pull_request_review_comment(
     owner: String,
     repo: String,
@@ -60,12 +77,20 @@ pub(crate) fn start_update_pull_request_review_comment(
     comment_id: i64,
     token: String,
     body: String,
+    submission: EditorSubmission,
     event_tx: Sender<AppEvent>,
 ) {
+    let setup_submission = submission.clone();
     spawn_with_services(
         token,
         event_tx,
-        move |message| AppEvent::PullRequestReviewCommentUpdateFailed { issue_id, message },
+        move |message| {
+            editor_submission_event(
+                setup_submission,
+                false,
+                AppEvent::PullRequestReviewCommentUpdateFailed { issue_id, message },
+            )
+        },
         move |services, event_tx| {
             let result = services.runtime.block_on(async {
                 services
@@ -75,17 +100,25 @@ pub(crate) fn start_update_pull_request_review_comment(
             });
             match result {
                 Ok(()) => {
-                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdated {
-                        issue_id,
-                        comment_id,
-                        body,
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        true,
+                        AppEvent::PullRequestReviewCommentUpdated {
+                            issue_id,
+                            comment_id,
+                            body,
+                        },
+                    ));
                 }
                 Err(error) => {
-                    let _ = event_tx.send(AppEvent::PullRequestReviewCommentUpdateFailed {
-                        issue_id,
-                        message: error.to_string(),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        false,
+                        AppEvent::PullRequestReviewCommentUpdateFailed {
+                            issue_id,
+                            message: error.to_string(),
+                        },
+                    ));
                 }
             }
         },

@@ -70,14 +70,18 @@ pub(crate) fn submit_created_issue(
         }
     };
 
+    let Some(submission) = app.begin_editor_submission() else {
+        return Ok(());
+    };
+
     start_create_issue(
         RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         token.to_string(),
         title,
         body,
+        submission,
         event_tx,
     );
-    app.set_view(app.editor_cancel_view());
     app.set_status("Creating issue".to_string());
     Ok(())
 }
@@ -104,14 +108,18 @@ pub(crate) fn post_issue_comment(
             }
         };
 
+    let Some(submission) = app.begin_editor_submission() else {
+        return Ok(());
+    };
+
     start_add_comment(
         RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         token.to_string(),
         body,
+        submission,
         event_tx,
     );
-    app.set_view(app.editor_cancel_view());
     app.set_status("Posting comment".to_string());
     Ok(())
 }
@@ -127,7 +135,7 @@ pub(crate) fn update_issue_comment(
         return Ok(());
     }
 
-    let comment_id = match app.take_editing_comment_id() {
+    let comment_id = match app.editing_comment_id() {
         Some(comment_id) => comment_id,
         None => {
             app.set_status("No comment selected".to_string());
@@ -151,15 +159,19 @@ pub(crate) fn update_issue_comment(
         }
     };
 
+    let Some(submission) = app.begin_editor_submission() else {
+        return Ok(());
+    };
+
     start_update_comment(
         RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
         comment_id,
         token.to_string(),
         body,
+        submission,
         event_tx,
     );
-    app.set_view(app.editor_cancel_view());
     app.set_status("Updating comment".to_string());
     Ok(())
 }

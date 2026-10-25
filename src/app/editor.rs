@@ -5,6 +5,9 @@ impl App {
         if self.search.help_overlay_visible {
             return;
         }
+        if self.view == View::CommentEditor && self.editor_submission_pending() {
+            return;
+        }
         let (input, multiline) = match self.view {
             View::CommentEditor if self.comment_editor.create_issue_confirm_visible() => return,
             View::CommentEditor if !self.comment_editor.create_issue_title_focused() => {
@@ -65,6 +68,7 @@ impl App {
     }
 
     pub fn open_close_comment_editor(&mut self) {
+        self.start_editor_session();
         self.editor_flow.editing_comment_id = None;
         self.comment_editor.reset_for_close();
         self.editor_flow.cancel_view = View::CommentPresetPicker;
@@ -72,6 +76,7 @@ impl App {
     }
 
     pub fn open_issue_comment_editor(&mut self, return_view: View) {
+        self.start_editor_session();
         self.editor_flow.editing_comment_id = None;
         self.pull_request.editing_pull_request_review_comment_id = None;
         self.pull_request.pending_review_target = None;
@@ -81,6 +86,7 @@ impl App {
     }
 
     pub fn open_create_issue_editor(&mut self, return_view: View) {
+        self.start_editor_session();
         self.editor_flow.editing_comment_id = None;
         self.pull_request.editing_pull_request_review_comment_id = None;
         self.pull_request.pending_review_target = None;
@@ -90,6 +96,7 @@ impl App {
     }
 
     pub fn open_comment_edit_editor(&mut self, return_view: View, comment_id: i64, body: &str) {
+        self.start_editor_session();
         self.editor_flow.editing_comment_id = Some(comment_id);
         self.pull_request.editing_pull_request_review_comment_id = None;
         self.pull_request.pending_review_target = None;
@@ -103,6 +110,7 @@ impl App {
         return_view: View,
         target: PullRequestReviewTarget,
     ) {
+        self.start_editor_session();
         self.pull_request.editing_pull_request_review_comment_id = None;
         self.pull_request.pending_review_target = Some(target);
         self.comment_editor.reset_for_pull_request_review_comment();
@@ -116,6 +124,7 @@ impl App {
         comment_id: i64,
         body: &str,
     ) {
+        self.start_editor_session();
         self.pull_request.editing_pull_request_review_comment_id = Some(comment_id);
         self.pull_request.pending_review_target = None;
         self.comment_editor
@@ -128,21 +137,101 @@ impl App {
         self.editor_flow.cancel_view
     }
 
-    pub fn take_editing_comment_id(&mut self) -> Option<i64> {
-        self.editor_flow.editing_comment_id.take()
+    pub fn editing_comment_id(&self) -> Option<i64> {
+        self.editor_flow.editing_comment_id
     }
 
-    pub fn take_pending_review_target(&mut self) -> Option<PullRequestReviewTarget> {
-        self.pull_request.pending_review_target.take()
+    pub fn pending_review_target(&self) -> Option<&PullRequestReviewTarget> {
+        self.pull_request.pending_review_target.as_ref()
     }
 
-    pub fn take_editing_pull_request_review_comment_id(&mut self) -> Option<i64> {
-        self.pull_request
-            .editing_pull_request_review_comment_id
-            .take()
+    pub fn editing_pull_request_review_comment_id(&self) -> Option<i64> {
+        self.pull_request.editing_pull_request_review_comment_id
+    }
+
+    fn editor_context(&self) -> EditorContext {
+        EditorContext {
+            repo_key: self.context.key.clone(),
+            repo_id: self.context.id,
+            issue_id: self.context.issue_id,
+        }
+    }
+
+    fn start_editor_session(&mut self) {
+        self.editor_flow.context = Some(self.editor_context());
+        self.editor_flow.pending_submission = None;
+    }
+
+    fn editor_context_is_current(&self, context: &EditorContext) -> bool {
+        context.issue_id == self.context.issue_id
+            && context
+                .repo_key
+                .as_ref()
+                .is_some_and(|key| self.repository_request_key_is_current(key, context.repo_id))
+    }
+
+    pub fn editor_submission_pending(&self) -> bool {
+        self.editor_flow.pending_submission.is_some()
+    }
+
+    pub fn begin_editor_submission(&mut self) -> Option<EditorSubmission> {
+        if self.view != View::CommentEditor || self.editor_submission_pending() {
+            return None;
+        }
+        if !self
+            .editor_flow
+            .context
+            .as_ref()
+            .is_some_and(|context| self.editor_context_is_current(context))
+        {
+            self.status = "Editor target changed; cancel and reopen the editor".to_string();
+            return None;
+        }
+        self.editor_flow.next_submission_id += 1;
+        let id = self.editor_flow.next_submission_id;
+        self.editor_flow.pending_submission = Some(id);
+        let context = self.editor_context();
+        self.editor_flow.context = Some(context.clone());
+        Some(EditorSubmission { id, context })
+    }
+
+    pub fn editor_submission_context_is_current(&self, submission: &EditorSubmission) -> bool {
+        self.editor_context_is_current(&submission.context)
+    }
+
+    pub fn finish_editor_submission(
+        &mut self,
+        submission: &EditorSubmission,
+        succeeded: bool,
+    ) -> bool {
+        if self.editor_flow.pending_submission != Some(submission.id) {
+            return false;
+        }
+        self.editor_flow.pending_submission = None;
+        if self.view != View::CommentEditor
+            || !self.editor_submission_context_is_current(submission)
+        {
+            return false;
+        }
+        self.editor_flow.context = Some(self.editor_context());
+        if succeeded {
+            self.editor_flow.editing_comment_id = None;
+            self.pull_request.editing_pull_request_review_comment_id = None;
+            self.pull_request.pending_review_target = None;
+            self.set_view(self.editor_flow.cancel_view);
+        } else {
+            self.comment_editor.hide_create_issue_confirm();
+        }
+        true
     }
 
     pub(super) fn handle_editor_key(&mut self, key: KeyEvent) {
+        if self.view == View::CommentEditor
+            && self.editor_submission_pending()
+            && key.code != KeyCode::Esc
+        {
+            return;
+        }
         match self.view {
             View::CommentPresetName => match key.code {
                 KeyCode::Esc => {
@@ -164,6 +253,7 @@ impl App {
                 KeyCode::Esc => {
                     if self.comment_editor.mode() == EditorMode::CreateIssue
                         && self.comment_editor.create_issue_confirm_visible()
+                        && !self.editor_submission_pending()
                     {
                         self.comment_editor.hide_create_issue_confirm();
                         return;

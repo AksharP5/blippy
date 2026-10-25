@@ -44,8 +44,8 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app::{
-    App, AppAction, IssueFilter, LinkedPickerTarget, PendingIssueAction, PresetSelection,
-    PullRequestFile, PullRequestReviewComment, ReviewSide, View, WorkItemMode,
+    App, AppAction, EditorSubmission, IssueFilter, LinkedPickerTarget, PendingIssueAction,
+    PresetSelection, PullRequestFile, PullRequestReviewComment, ReviewSide, View, WorkItemMode,
 };
 use crate::auth::{SystemAuth, clear_auth_token, resolve_auth_token};
 use crate::cli::{CliCommand, USAGE, parse_args};
@@ -436,6 +436,11 @@ enum ScanMode {
 
 #[derive(Debug, Clone)]
 enum AppEvent {
+    EditorSubmissionFinished {
+        submission: EditorSubmission,
+        succeeded: bool,
+        event: Box<AppEvent>,
+    },
     ReposUpdated,
     ScanFinished {
         failures: Vec<String>,

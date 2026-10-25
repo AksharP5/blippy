@@ -547,6 +547,22 @@ struct InteractionState {
 struct EditorFlowState {
     cancel_view: View,
     editing_comment_id: Option<i64>,
+    context: Option<EditorContext>,
+    next_submission_id: u64,
+    pending_submission: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct EditorContext {
+    repo_key: Option<String>,
+    repo_id: Option<i64>,
+    issue_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EditorSubmission {
+    id: u64,
+    context: EditorContext,
 }
 
 impl Default for EditorFlowState {
@@ -554,6 +570,9 @@ impl Default for EditorFlowState {
         Self {
             cancel_view: View::Issues,
             editing_comment_id: None,
+            context: None,
+            next_submission_id: 0,
+            pending_submission: None,
         }
     }
 }

@@ -836,8 +836,8 @@ mod tests {
                     .unwrap()
                     .contains("120")
             );
-            let pending = app.take_pending_review_target().expect("editor target");
-            assert_eq!(pending, target);
+            let pending = app.pending_review_target().expect("editor target");
+            assert_eq!(pending, &target);
 
             let (client, server) = serve_responses(vec![(
                 "POST /repos/acme/blippy/pulls/7/comments",

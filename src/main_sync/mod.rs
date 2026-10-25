@@ -6,6 +6,18 @@ mod pr_sync;
 mod repo_sync;
 mod review_actions;
 
+fn editor_submission_event(
+    submission: EditorSubmission,
+    succeeded: bool,
+    event: AppEvent,
+) -> AppEvent {
+    AppEvent::EditorSubmissionFinished {
+        submission,
+        succeeded,
+        event: Box::new(event),
+    }
+}
+
 pub(super) use issue_actions::{
     start_add_comment, start_close_issue, start_create_issue, start_delete_comment,
     start_merge_pull_request, start_reopen_issue, start_update_assignees, start_update_comment,
