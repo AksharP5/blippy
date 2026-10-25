@@ -57,6 +57,17 @@ impl App {
         let Some(target) = target else {
             return;
         };
+        let target = match target {
+            MouseTarget::LinkedPullRequestTuiButton
+            | MouseTarget::LinkedPullRequestWebButton
+            | MouseTarget::LinkedIssueTuiButton
+            | MouseTarget::LinkedIssueWebButton => match self.view {
+                View::Issues => MouseTarget::IssuesPreviewPane,
+                View::IssueDetail => MouseTarget::IssueBodyPane,
+                _ => target,
+            },
+            _ => target,
+        };
         if self.view == View::IssueComments
             && matches!(
                 target,
