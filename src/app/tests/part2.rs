@@ -383,6 +383,64 @@ fn custom_quit_keybinding_remaps_and_disables_default() {
 }
 
 #[test]
+fn quit_bindings_work_while_editing_and_searching() {
+    for (binding, quit_key) in [
+        (
+            "ctrl+c",
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ),
+        (
+            "ctrl+q",
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+        ),
+        ("esc", KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+    ] {
+        for view in [
+            View::CommentEditor,
+            View::CommentPresetName,
+            View::RepoPicker,
+            View::Issues,
+            View::LabelPicker,
+            View::AssigneePicker,
+        ] {
+            let mut config = Config::default();
+            config.keybinds.insert("quit".into(), binding.into());
+            let mut app = App::new(config);
+            match view {
+                View::CommentEditor => app.open_issue_comment_editor(View::Issues),
+                View::LabelPicker => app.open_label_picker(View::Issues, vec!["bug".into()], &[]),
+                View::AssigneePicker => {
+                    app.open_assignee_picker(View::Issues, vec!["alex".into()], "")
+                }
+                _ => app.set_view(view),
+            }
+            if matches!(view, View::RepoPicker | View::Issues) {
+                app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+            }
+            if binding != "ctrl+c" {
+                app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+                assert!(!app.should_quit(), "disabled Ctrl+C in {view:?}");
+            }
+
+            app.on_key(quit_key);
+            assert!(app.should_quit(), "{binding} in {view:?}");
+            assert!(app.take_action().is_none());
+        }
+    }
+}
+
+#[test]
+fn plain_quit_bindings_remain_text_in_input_fields() {
+    let mut config = Config::default();
+    config.keybinds.insert("quit".into(), "q".into());
+    let mut app = App::new(config);
+    app.open_issue_comment_editor(View::Issues);
+    app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+    assert!(!app.should_quit());
+    assert_eq!(app.editor().text(), "q");
+}
+
+#[test]
 fn shift_n_triggers_create_issue_action() {
     let mut app = App::new(Config::default());
     app.set_view(View::Issues);

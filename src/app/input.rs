@@ -5,6 +5,16 @@ impl App {
         if key.is_release() {
             return;
         }
+        let text_key = matches!(key.code, KeyCode::Char(_))
+            && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT);
+        if !text_key
+            && let Some(mapped) = self.keybinds.remap_key(key)
+            && mapped.code == KeyCode::Char('c')
+            && mapped.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.should_quit = true;
+            return;
+        }
         if self.search.help_overlay_visible {
             let key = match key.code {
                 KeyCode::Home | KeyCode::End => Some(key),

@@ -4,7 +4,7 @@ blippy is keyboard-first. Mouse/trackpad support exists, but it can be finicky a
 
 ## Global
 
-- `Ctrl+c`: Quit
+- `Ctrl+c`: Quit, including editors and active searches
 - `?`: Toggle help overlay
 - `Ctrl+g`: Open repo picker
 - `Ctrl+h` / `Ctrl+l`: Switch pane focus in split views
@@ -174,6 +174,8 @@ On Unix terminals with bracketed paste support, pasting in a text field inserts 
 ## Configurable Default Bindings
 
 All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or under `[keybinds]` in `~/.config/blippy/config.toml`).
+
+Modified or named quit bindings also work in text fields. Plain characters remain text while editing or searching.
 
 | Action | Default |
 | --- | --- |
