@@ -54,7 +54,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 
 - View changed files and diff, with option for checkout
 - PR checkout uses the selected GitHub remote and local repository
-- Merge pull requests directly from the review/detail flow
+- Merge pull requests directly from the review/detail flow. Once a diff is loaded, merges require the same head commit; refresh the diff if it changes.
 - Split or expanded diff review modes
 - Horizontal diff panning for long lines
 - Inline comment editors preserve the review layout, diff focus, and selected line when returning

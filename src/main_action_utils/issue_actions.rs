@@ -378,6 +378,7 @@ pub(crate) fn merge_pull_request(
     start_merge_pull_request(
         RepoIdentity::new(&owner, &repo, app.current_repo_id()),
         issue_number,
+        app.pull_request_head_sha().map(ToString::to_string),
         token.to_string(),
         event_tx,
     );
