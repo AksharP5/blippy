@@ -86,6 +86,8 @@ See [FEATURES.md](FEATURES.md) for a full feature breakdown.
 
 Bindings in `keybinds.toml` override `[keybinds]` in `config.toml`. Saving comment presets preserves each file's bindings, so removing an override restores the binding from the main config.
 
+Saving a preset also keeps presets, themes, and bindings saved by other sessions since this session started.
+
 Theme example:
 
 ```toml

@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
     pub keymap: Option<String>,
     pub theme: Option<String>,
@@ -30,7 +31,12 @@ impl Config {
         let mut config = if !path.exists() {
             Self::default()
         } else {
-            let contents = fs::read_to_string(&path)
+            let mut file = fs::File::open(&path)
+                .with_context(|| format!("Failed to read config at {}", path.display()))?;
+            file.lock_shared()
+                .with_context(|| format!("Failed to lock config at {}", path.display()))?;
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)
                 .with_context(|| format!("Failed to read config at {}", path.display()))?;
             toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config at {}", path.display()))?
@@ -54,16 +60,39 @@ impl Config {
         keybinds
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save_comment_default(&mut self, preset: CommentDefault) -> Result<()> {
         let path = config_path();
+        let new_file = !path.exists();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create config dir at {}", parent.display()))?;
         }
-        let contents =
-            toml::to_string_pretty(self).with_context(|| "Failed to serialize config")?;
-        fs::write(&path, contents)
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .with_context(|| format!("Failed to open config at {}", path.display()))?;
+        file.lock()
+            .with_context(|| format!("Failed to lock config at {}", path.display()))?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)
+            .with_context(|| format!("Failed to read config at {}", path.display()))?;
+        let mut current: Self = if new_file && contents.trim().is_empty() {
+            self.clone()
+        } else {
+            toml::from_str(&contents)
+                .with_context(|| format!("Failed to parse config at {}", path.display()))?
+        };
+        current.comment_defaults.push(preset);
+        let contents = toml::to_string_pretty(&current).context("Failed to serialize config")?;
+        file.rewind()
+            .with_context(|| format!("Failed to seek config at {}", path.display()))?;
+        file.write_all(contents.as_bytes())
+            .and_then(|()| file.set_len(contents.len() as u64))
             .with_context(|| format!("Failed to write config at {}", path.display()))?;
+        self.comment_defaults = current.comment_defaults;
         Ok(())
     }
 }
@@ -158,11 +187,12 @@ mod tests {
         );
 
         let mut config = Config::load().expect("load config for preset");
-        config.comment_defaults.push(super::CommentDefault {
-            name: "resolved".into(),
-            body: "Closing as resolved.".into(),
-        });
-        config.save().expect("save preset");
+        config
+            .save_comment_default(super::CommentDefault {
+                name: "resolved".into(),
+                body: "Closing as resolved.".into(),
+            })
+            .expect("save preset");
         let saved: Config = toml::from_str(
             &std::fs::read_to_string(dir.join("config.toml")).expect("read saved config"),
         )
@@ -187,6 +217,117 @@ mod tests {
             app.should_quit(),
             "removing the override restores the base binding"
         );
+    }
+
+    #[test]
+    fn preset_saves_preserve_changes_from_other_sessions() {
+        const CONFIG_ENV: &str = "BLIPPY_TEST_SHARED_PRESETS";
+        let Some(config_dir) = std::env::var_os(CONFIG_ENV) else {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!("blippy-shared-presets-{nanos}"));
+            std::fs::create_dir_all(dir.join("blippy")).unwrap();
+            std::fs::write(
+                dir.join("blippy/config.toml"),
+                "[keybinds]\nquit = \"ctrl+q\"\n",
+            )
+            .unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "config::tests::preset_saves_preserve_changes_from_other_sessions",
+                    "--nocapture",
+                ])
+                .env(CONFIG_ENV, &dir)
+                .env("XDG_CONFIG_HOME", &dir)
+                .output()
+                .unwrap();
+            std::fs::remove_dir_all(&dir).unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let mut first = crate::app::App::new(Config::load().unwrap());
+        let mut second = crate::app::App::new(Config::load().unwrap());
+        let path = std::path::PathBuf::from(config_dir).join("blippy/config.toml");
+        // A config edit and both sessions' saves affect the same shared file.
+        std::fs::write(
+            &path,
+            "theme = \"midnight\"\n[keybinds]\nquit = \"ctrl+x\"\n",
+        )
+        .unwrap();
+        for (app, name) in [(&mut first, "first"), (&mut second, "second")] {
+            app.save_comment_default(super::CommentDefault {
+                name: name.into(),
+                body: format!("{name} body"),
+            })
+            .unwrap();
+        }
+        let saved = Config::load().unwrap();
+        let names = saved
+            .comment_defaults
+            .iter()
+            .map(|preset| preset.name.as_str())
+            .collect::<Vec<_>>();
+        eprintln!(
+            "saved presets={names:?}, theme={:?}, quit={:?}",
+            saved.theme,
+            saved.keybinds.get("quit")
+        );
+        assert_eq!(names, ["first", "second"]);
+        assert_eq!(saved.theme.as_deref(), Some("midnight"));
+        assert_eq!(
+            saved.keybinds.get("quit").map(String::as_str),
+            Some("ctrl+x")
+        );
+        assert_eq!(second.comment_defaults(), saved.comment_defaults);
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let writers = (0..2)
+            .map(|index| {
+                let mut app = crate::app::App::new(Config::load().unwrap());
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    app.save_comment_default(super::CommentDefault {
+                        name: format!("writer{index}"),
+                        body: "Parallel save".into(),
+                    })
+                    .unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        barrier.wait();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        let saved = Config::load().unwrap();
+        let mut names = saved
+            .comment_defaults
+            .iter()
+            .map(|preset| preset.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        assert_eq!(names, ["first", "second", "writer0", "writer1"]);
+
+        std::fs::write(&path, "").unwrap();
+        second
+            .save_comment_default(super::CommentDefault {
+                name: "after-reset".into(),
+                body: "Only the new preset".into(),
+            })
+            .unwrap();
+        let saved = Config::load().unwrap();
+        assert_eq!(saved.comment_defaults.len(), 1);
+        assert_eq!(saved.comment_defaults[0].name, "after-reset");
+        assert!(saved.theme.is_none());
+        assert!(saved.keybinds.is_empty());
     }
 
     #[test]

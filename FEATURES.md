@@ -100,4 +100,5 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Scrollable help overlay with keyboard and mouse wheel controls; input stays in help until it is dismissed
 - Configurable keybindings via `~/.config/blippy/keybinds.toml`
 - Configurable close-comment presets in `~/.config/blippy/config.toml`
+- Preset saves retain presets and configuration changes saved by other sessions
 - Failed preset saves keep the editor and draft open so the write can be retried
