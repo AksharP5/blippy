@@ -244,13 +244,18 @@ pub(super) fn styled_patch_line(line: &str, width: usize, theme: &ThemePalette) 
     ))
 }
 
+fn diff_line_number_width(line: Option<i64>) -> usize {
+    line.map_or(4, |line| {
+        let digits = line.unsigned_abs().checked_ilog10().unwrap_or(0) as usize + 1;
+        (digits + usize::from(line.is_negative())).max(4)
+    })
+}
+
 pub(super) fn split_diff_horizontal_limit(
     rows: &[crate::pr_diff::DiffRow],
     left_width: usize,
     right_width: usize,
 ) -> usize {
-    let left_content_width = left_width.saturating_sub(5);
-    let right_content_width = right_width.saturating_sub(5);
     let hunk_width = left_width + right_width + 4;
 
     let mut max_offset = 0usize;
@@ -260,6 +265,10 @@ pub(super) fn split_diff_horizontal_limit(
             max_offset = max_offset.max(raw_width.saturating_sub(hunk_width));
             continue;
         }
+        let left_content_width =
+            left_width.saturating_sub(diff_line_number_width(row.old_line) + 1);
+        let right_content_width =
+            right_width.saturating_sub(diff_line_number_width(row.new_line) + 1);
         let left = Span::raw(row.left.as_str())
             .width()
             .saturating_sub(left_content_width);
@@ -333,17 +342,23 @@ pub(super) fn render_split_diff_row(
         .map(|line| line.to_string())
         .unwrap_or_default();
 
-    let left_prefix = format!("{:>4} ", left_number);
-    let right_prefix = format!("{:>4} ", right_number);
+    let left_prefix = format!(
+        "{left_number:>width$} ",
+        width = diff_line_number_width(row.old_line)
+    );
+    let right_prefix = format!(
+        "{right_number:>width$} ",
+        width = diff_line_number_width(row.new_line)
+    );
     let left_text = clip_horizontal(
         row.left.as_str(),
         ctx.horizontal_offset,
-        ctx.left_width.saturating_sub(5),
+        ctx.left_width.saturating_sub(left_prefix.len()),
     );
     let right_text = clip_horizontal(
         row.right.as_str(),
         ctx.horizontal_offset,
-        ctx.right_width.saturating_sub(5),
+        ctx.right_width.saturating_sub(right_prefix.len()),
     );
 
     let mut left_style = Style::default().fg(theme.text_muted);
