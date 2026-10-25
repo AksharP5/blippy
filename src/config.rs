@@ -56,12 +56,7 @@ impl Config {
     }
 
     pub fn save_comment_default(&mut self, preset: CommentDefault) -> Result<()> {
-        let mut path = config_path();
-        if path.exists() {
-            path = path
-                .canonicalize()
-                .with_context(|| format!("Failed to resolve config at {}", path.display()))?;
-        }
+        let path = resolve_config_path(config_path())?;
         let parent = path
             .parent()
             .context("Config path has no parent directory")?;
@@ -380,6 +375,53 @@ mod tests {
                 std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
                 0o640
             );
+
+            for name in ["recreated", "relative"] {
+                std::fs::remove_file(&target).unwrap();
+                if name == "relative" {
+                    std::fs::remove_file(&path).unwrap();
+                    std::os::unix::fs::symlink("linked-config.toml", &path).unwrap();
+                }
+                second
+                    .save_comment_default(super::CommentDefault {
+                        name: name.into(),
+                        body: "Recreate the target, keeping the link".into(),
+                    })
+                    .unwrap();
+                assert!(path.is_symlink(), "keep the {name} config link");
+                let saved: Config =
+                    toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+                assert_eq!(saved.comment_defaults.len(), 1);
+                assert_eq!(saved.comment_defaults[0].name, name);
+            }
+
+            let destination = path.with_file_name("missing-config.toml");
+            std::fs::remove_file(&target).unwrap();
+            std::os::unix::fs::symlink("missing-config.toml", &target).unwrap();
+            second
+                .save_comment_default(super::CommentDefault {
+                    name: "chain".into(),
+                    body: "Follow the whole link chain".into(),
+                })
+                .unwrap();
+            assert!(path.is_symlink());
+            assert!(target.is_symlink());
+            assert!(destination.is_file());
+
+            std::fs::remove_file(&destination).unwrap();
+            std::os::unix::fs::symlink("config.toml", &destination).unwrap();
+            assert!(
+                second
+                    .save_comment_default(super::CommentDefault {
+                        name: "cycle".into(),
+                        body: "Reject a symlink cycle".into(),
+                    })
+                    .is_err()
+            );
+            assert!(path.is_symlink());
+            assert!(target.is_symlink());
+            assert!(destination.is_symlink());
+            std::fs::remove_file(&destination).unwrap();
         }
 
         std::fs::write(&path, "theme = \"").unwrap();
@@ -514,6 +556,36 @@ mod tests {
 struct KeybindsFile {
     #[serde(default)]
     keybinds: HashMap<String, String>,
+}
+
+fn resolve_config_path(mut path: PathBuf) -> Result<PathBuf> {
+    for _ in 0..40 {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_symlink() => {
+                let target = fs::read_link(&path)
+                    .with_context(|| format!("Failed to resolve config at {}", path.display()))?;
+                path = if target.is_absolute() {
+                    target
+                } else {
+                    path.with_file_name(target)
+                };
+            }
+            Ok(_) => {
+                return path
+                    .canonicalize()
+                    .with_context(|| format!("Failed to resolve config at {}", path.display()));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(path),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to resolve config at {}", path.display()));
+            }
+        }
+    }
+    anyhow::bail!(
+        "Too many symlinks while resolving config at {}",
+        path.display()
+    )
 }
 
 fn config_path() -> PathBuf {
