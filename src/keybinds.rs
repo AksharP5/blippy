@@ -507,14 +507,14 @@ pub fn normalize_event(event: KeyEvent) -> String {
     if event.modifiers.contains(KeyModifiers::ALT) {
         tokens.push("alt".to_string());
     }
-    if event.modifiers.contains(KeyModifiers::SHIFT) {
+    if event.modifiers.contains(KeyModifiers::SHIFT) || event.code == KeyCode::BackTab {
         tokens.push("shift".to_string());
     }
 
     let key = match event.code {
         KeyCode::Esc => "esc".to_string(),
         KeyCode::Enter => "enter".to_string(),
-        KeyCode::Tab => "tab".to_string(),
+        KeyCode::Tab | KeyCode::BackTab => "tab".to_string(),
         KeyCode::Backspace => "backspace".to_string(),
         KeyCode::Up => "up".to_string(),
         KeyCode::Down => "down".to_string(),
@@ -537,7 +537,7 @@ pub fn normalize_event(event: KeyEvent) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Keybinds, normalize_binding, parse_binding, prettify_binding};
+    use super::{Keybinds, normalize_binding, normalize_event, parse_binding, prettify_binding};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::collections::HashMap;
 
@@ -553,6 +553,24 @@ mod tests {
     fn normalize_binding_converts_aliases() {
         let binding = normalize_binding("Control+Return").expect("normalize binding");
         assert_eq!(binding, "ctrl+enter");
+    }
+
+    #[test]
+    fn normalize_event_canonicalizes_backtab_and_preserves_modifiers() {
+        for (code, modifiers, expected) in [
+            (KeyCode::Tab, KeyModifiers::NONE, "tab"),
+            (KeyCode::Tab, KeyModifiers::SHIFT, "shift+tab"),
+            (KeyCode::BackTab, KeyModifiers::NONE, "shift+tab"),
+            (KeyCode::BackTab, KeyModifiers::SHIFT, "shift+tab"),
+            (KeyCode::BackTab, KeyModifiers::CONTROL, "ctrl+shift+tab"),
+            (
+                KeyCode::BackTab,
+                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+                "ctrl+alt+shift+tab",
+            ),
+        ] {
+            assert_eq!(normalize_event(KeyEvent::new(code, modifiers)), expected);
+        }
     }
 
     #[test]

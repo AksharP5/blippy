@@ -181,6 +181,8 @@ All entries below can be overridden in `~/.config/blippy/keybinds.toml` (or unde
 
 Modified or named quit bindings also work in text fields. Plain characters remain text while editing or searching.
 
+Use `shift+tab` for Shift+Tab overrides. Ctrl and Alt modifiers can be combined with it.
+
 | Action | Default |
 | --- | --- |
 | `quit` | `ctrl+c` |
