@@ -1,5 +1,23 @@
 use super::*;
 
+fn query_tokens(mut query: &str) -> impl Iterator<Item = &str> {
+    const QUOTED_LABEL_PREFIX: &str = "label:\"";
+    std::iter::from_fn(move || {
+        query = query.trim_start();
+        if query.is_empty() {
+            return None;
+        }
+        let end = if let Some(value) = query.strip_prefix(QUOTED_LABEL_PREFIX) {
+            QUOTED_LABEL_PREFIX.len() + value.find('"').map_or(value.len(), |end| end + 1)
+        } else {
+            query.find(char::is_whitespace).unwrap_or(query.len())
+        };
+        let (token, rest) = query.split_at(end);
+        query = rest;
+        Some(token)
+    })
+}
+
 impl App {
     pub(super) fn open_repo_picker(&mut self) {
         self.search.repo_query.clear();
@@ -92,7 +110,7 @@ impl App {
         let number = issue.number.to_string();
         let state = issue.state.to_ascii_lowercase();
 
-        query.split_whitespace().all(|token| {
+        query_tokens(query).all(|token| {
             if let Some(value) = token.strip_prefix("is:") {
                 if value == "pr" || value == "pull" || value == "pull-request" {
                     return issue.is_pr;
@@ -109,7 +127,14 @@ impl App {
                 return value == state;
             }
             if let Some(value) = token.strip_prefix("label:") {
-                return labels.contains(value);
+                let value = value
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .unwrap_or(value);
+                return issue
+                    .labels
+                    .iter()
+                    .any(|label| label.eq_ignore_ascii_case(value));
             }
             if let Some(value) = token.strip_prefix("assignee:") {
                 let value = value.strip_prefix('@').unwrap_or(value);
