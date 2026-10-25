@@ -453,6 +453,9 @@ impl App {
             self.clear_linked_picker_state();
         }
         self.view = view;
+        if view != View::CommentEditor {
+            self.editor_flow.pending_submission = None;
+        }
         self.search.help_overlay_visible = false;
         if self.view != View::PullRequestFiles {
             self.pull_request.pull_request_diff_expanded = false;

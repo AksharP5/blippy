@@ -11,7 +11,7 @@ pub(crate) fn submit_pull_request_review_comment(
         return Ok(());
     }
 
-    let target = match app.take_pending_review_target() {
+    let target = match app.pending_review_target().cloned() {
         Some(target) => target,
         None => {
             app.set_status("No review target selected".to_string());
@@ -41,6 +41,10 @@ pub(crate) fn submit_pull_request_review_comment(
         }
     };
 
+    let Some(submission) = app.begin_editor_submission() else {
+        return Ok(());
+    };
+
     start_create_pull_request_review_comment(
         owner,
         repo,
@@ -54,9 +58,9 @@ pub(crate) fn submit_pull_request_review_comment(
         target.start_side,
         token.to_string(),
         body,
+        submission,
         event_tx,
     );
-    app.set_view(app.editor_cancel_view());
     app.set_status("Submitting review comment".to_string());
     Ok(())
 }
@@ -72,7 +76,7 @@ pub(crate) fn update_pull_request_review_comment(
         return Ok(());
     }
 
-    let comment_id = match app.take_editing_pull_request_review_comment_id() {
+    let comment_id = match app.editing_pull_request_review_comment_id() {
         Some(comment_id) => comment_id,
         None => {
             app.set_status("No review comment selected".to_string());
@@ -95,6 +99,10 @@ pub(crate) fn update_pull_request_review_comment(
         }
     };
 
+    let Some(submission) = app.begin_editor_submission() else {
+        return Ok(());
+    };
+
     start_update_pull_request_review_comment(
         owner,
         repo,
@@ -102,9 +110,9 @@ pub(crate) fn update_pull_request_review_comment(
         comment_id,
         token.to_string(),
         body,
+        submission,
         event_tx,
     );
-    app.set_view(app.editor_cancel_view());
     app.set_status("Updating review comment".to_string());
     Ok(())
 }

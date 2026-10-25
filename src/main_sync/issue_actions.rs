@@ -5,18 +5,26 @@ pub(crate) fn start_add_comment(
     issue_number: i64,
     token: String,
     body: String,
+    submission: EditorSubmission,
     event_tx: Sender<AppEvent>,
 ) {
     let owner = event_repo.owner.clone();
     let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
+    let setup_submission = submission.clone();
     spawn_with_services(
         token,
         event_tx,
-        move |message| AppEvent::IssueUpdated {
-            repo: setup_repo,
-            issue_number,
-            message: format!("comment failed: {}", message),
+        move |message| {
+            editor_submission_event(
+                setup_submission,
+                false,
+                AppEvent::IssueUpdated {
+                    repo: setup_repo,
+                    issue_number,
+                    message: format!("comment failed: {}", message),
+                },
+            )
         },
         move |services, event_tx| {
             let result = services.runtime.block_on(async {
@@ -28,18 +36,26 @@ pub(crate) fn start_add_comment(
 
             match result {
                 Ok(()) => {
-                    let _ = event_tx.send(AppEvent::IssueUpdated {
-                        repo: event_repo.clone(),
-                        issue_number,
-                        message: "commented".to_string(),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        true,
+                        AppEvent::IssueUpdated {
+                            repo: event_repo.clone(),
+                            issue_number,
+                            message: "commented".to_string(),
+                        },
+                    ));
                 }
                 Err(error) => {
-                    let _ = event_tx.send(AppEvent::IssueUpdated {
-                        repo: event_repo.clone(),
-                        issue_number,
-                        message: format!("comment failed: {}", error),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        false,
+                        AppEvent::IssueUpdated {
+                            repo: event_repo.clone(),
+                            issue_number,
+                            message: format!("comment failed: {}", error),
+                        },
+                    ));
                 }
             }
         },
@@ -51,17 +67,25 @@ pub(crate) fn start_create_issue(
     token: String,
     title: String,
     body: Option<String>,
+    submission: EditorSubmission,
     event_tx: Sender<AppEvent>,
 ) {
     let owner = event_repo.owner.clone();
     let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
+    let setup_submission = submission.clone();
     spawn_with_db(
         token,
         event_tx,
-        move |message| AppEvent::IssueCreateFailed {
-            repo: setup_repo,
-            message,
+        move |message| {
+            editor_submission_event(
+                setup_submission,
+                false,
+                AppEvent::IssueCreateFailed {
+                    repo: setup_repo,
+                    message,
+                },
+            )
         },
         move |ctx, event_tx| {
             let result = ctx.services.runtime.block_on(async {
@@ -84,16 +108,24 @@ pub(crate) fn start_create_issue(
 
             match result {
                 Ok((repo_row, issue)) => {
-                    let _ = event_tx.send(AppEvent::IssueCreated {
-                        repo: event_repo.clone(),
-                        issue: crate::sync::map_issue_to_row(repo_row.id, &issue),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        true,
+                        AppEvent::IssueCreated {
+                            repo: event_repo.clone(),
+                            issue: crate::sync::map_issue_to_row(repo_row.id, &issue),
+                        },
+                    ));
                 }
                 Err(error) => {
-                    let _ = event_tx.send(AppEvent::IssueCreateFailed {
-                        repo: event_repo.clone(),
-                        message: error.to_string(),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        false,
+                        AppEvent::IssueCreateFailed {
+                            repo: event_repo.clone(),
+                            message: error.to_string(),
+                        },
+                    ));
                 }
             }
         },
@@ -106,18 +138,26 @@ pub(crate) fn start_update_comment(
     comment_id: i64,
     token: String,
     body: String,
+    submission: EditorSubmission,
     event_tx: Sender<AppEvent>,
 ) {
     let owner = event_repo.owner.clone();
     let repo = event_repo.repo.clone();
     let setup_repo = event_repo.clone();
+    let setup_submission = submission.clone();
     spawn_with_services(
         token,
         event_tx,
-        move |message| AppEvent::IssueUpdated {
-            repo: setup_repo,
-            issue_number,
-            message: format!("comment update failed: {}", message),
+        move |message| {
+            editor_submission_event(
+                setup_submission,
+                false,
+                AppEvent::IssueUpdated {
+                    repo: setup_repo,
+                    issue_number,
+                    message: format!("comment update failed: {}", message),
+                },
+            )
         },
         move |services, event_tx| {
             let result = services.runtime.block_on(async {
@@ -129,19 +169,27 @@ pub(crate) fn start_update_comment(
 
             match result {
                 Ok(()) => {
-                    let _ = event_tx.send(AppEvent::IssueCommentUpdated {
-                        repo: event_repo.clone(),
-                        issue_number,
-                        comment_id,
-                        body,
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        true,
+                        AppEvent::IssueCommentUpdated {
+                            repo: event_repo.clone(),
+                            issue_number,
+                            comment_id,
+                            body,
+                        },
+                    ));
                 }
                 Err(error) => {
-                    let _ = event_tx.send(AppEvent::IssueUpdated {
-                        repo: event_repo.clone(),
-                        issue_number,
-                        message: format!("comment update failed: {}", error),
-                    });
+                    let _ = event_tx.send(editor_submission_event(
+                        submission,
+                        false,
+                        AppEvent::IssueUpdated {
+                            repo: event_repo.clone(),
+                            issue_number,
+                            message: format!("comment update failed: {}", error),
+                        },
+                    ));
                 }
             }
         },

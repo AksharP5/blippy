@@ -8,7 +8,22 @@ pub(super) fn handle_events(
     let mut handled_events = false;
     while let Ok(event) = event_rx.try_recv() {
         handled_events = true;
+        let (event, submission_active, submission_context_current) = match event {
+            AppEvent::EditorSubmissionFinished {
+                submission,
+                succeeded,
+                event,
+            } => {
+                let context_current = app.editor_submission_context_is_current(&submission);
+                let active = app.finish_editor_submission(&submission, succeeded);
+                (*event, active, context_current)
+            }
+            event => (event, true, true),
+        };
         match event {
+            AppEvent::EditorSubmissionFinished { .. } => {
+                unreachable!("submission completions wrap action outcomes")
+            }
             AppEvent::ReposUpdated => {
                 if app.view() == View::RepoPicker {
                     app.set_repos(main_data::load_repos(conn)?);
@@ -156,7 +171,9 @@ pub(super) fn handle_events(
                 if message.starts_with("merged") {
                     app.update_issue_state_by_number(issue_number, "merged");
                 }
-                app.set_status(format!("#{} {}", issue_number, message));
+                if submission_active {
+                    app.set_status(format!("#{} {}", issue_number, message));
+                }
                 app.request_sync();
                 if app.current_issue_number() == Some(issue_number) {
                     app.request_comment_sync();
@@ -168,7 +185,9 @@ pub(super) fn handle_events(
                 if !repo.is_current(app)
                     || app.current_repo_id().is_some_and(|id| id != issue.repo_id)
                 {
-                    if let Err(error) = cache_result {
+                    if let Err(error) = cache_result
+                        && submission_active
+                    {
                         app.set_status(format!(
                             "Created issue {}/{} #{}; cache update failed: {}",
                             repo.owner, repo.repo, issue_number, error
@@ -179,10 +198,12 @@ pub(super) fn handle_events(
                 app.request_sync();
                 let cache_result = cache_result.and_then(|()| {
                     refresh_current_repo_issues(app, conn)?;
-                    if !matches!(
-                        app.view(),
-                        View::Issues | View::IssueDetail | View::IssueComments
-                    ) || app.work_item_mode() != WorkItemMode::Issues
+                    if !submission_active
+                        || !matches!(
+                            app.view(),
+                            View::Issues | View::IssueDetail | View::IssueComments
+                        )
+                        || app.work_item_mode() != WorkItemMode::Issues
                         || app.issue_search_mode()
                         || app.help_overlay_visible()
                     {
@@ -201,16 +222,18 @@ pub(super) fn handle_events(
                     }
                     Ok(())
                 });
-                app.set_status(match cache_result {
-                    Ok(()) => format!("Created issue #{}", issue_number),
-                    Err(error) => format!(
-                        "Created issue #{}; cache update failed: {}",
-                        issue_number, error
-                    ),
-                });
+                if submission_active {
+                    app.set_status(match cache_result {
+                        Ok(()) => format!("Created issue #{}", issue_number),
+                        Err(error) => format!(
+                            "Created issue #{}; cache update failed: {}",
+                            issue_number, error
+                        ),
+                    });
+                }
             }
             AppEvent::IssueCreateFailed { repo, message } => {
-                if !repo.is_current(app) {
+                if !repo.is_current(app) || !submission_active {
                     continue;
                 }
                 app.set_status(format!("Issue creation failed: {}", message));
@@ -285,13 +308,15 @@ pub(super) fn handle_events(
                 }
             }
             AppEvent::PullRequestReviewCommentCreated { issue_id } => {
-                if app.current_issue_id() == Some(issue_id) {
+                if submission_context_current && app.current_issue_id() == Some(issue_id) {
                     app.request_pull_request_review_comments_sync();
-                    app.set_status("Review comment submitted".to_string());
+                    if submission_active {
+                        app.set_status("Review comment submitted".to_string());
+                    }
                 }
             }
             AppEvent::PullRequestReviewCommentCreateFailed { issue_id, message } => {
-                if app.current_issue_id() == Some(issue_id) {
+                if submission_active && app.current_issue_id() == Some(issue_id) {
                     app.set_status(format!("Review comment failed: {}", message));
                 }
             }
@@ -300,16 +325,18 @@ pub(super) fn handle_events(
                 comment_id,
                 body,
             } => {
-                if app.current_issue_id() == Some(issue_id) {
+                if submission_context_current && app.current_issue_id() == Some(issue_id) {
                     app.update_pull_request_review_comment_body_by_id(comment_id, body.as_str());
                     if app.pull_request_review_comments_syncing() {
                         app.request_pull_request_review_comments_sync();
                     }
-                    app.set_status("Review comment updated".to_string());
+                    if submission_active {
+                        app.set_status("Review comment updated".to_string());
+                    }
                 }
             }
             AppEvent::PullRequestReviewCommentUpdateFailed { issue_id, message } => {
-                if app.current_issue_id() == Some(issue_id) {
+                if submission_active && app.current_issue_id() == Some(issue_id) {
                     app.set_status(format!("Review comment update failed: {}", message));
                 }
             }
@@ -690,7 +717,9 @@ pub(super) fn handle_events(
             } => {
                 let cache_result = crate::store::update_comment_body_by_id(conn, comment_id, &body);
                 if !repo.is_current(app) {
-                    if let Err(error) = cache_result {
+                    if let Err(error) = cache_result
+                        && submission_active
+                    {
                         app.set_status(format!(
                             "{}/{} #{} comment updated; cache update failed: {}",
                             repo.owner, repo.repo, issue_number, error
@@ -699,13 +728,15 @@ pub(super) fn handle_events(
                     continue;
                 }
                 app.update_comment_body_by_id(comment_id, body.as_str());
-                app.set_status(match cache_result {
-                    Ok(()) => format!("#{} comment updated", issue_number),
-                    Err(error) => format!(
-                        "#{} comment updated; cache update failed: {}",
-                        issue_number, error
-                    ),
-                });
+                if submission_active {
+                    app.set_status(match cache_result {
+                        Ok(()) => format!("#{} comment updated", issue_number),
+                        Err(error) => format!(
+                            "#{} comment updated; cache update failed: {}",
+                            issue_number, error
+                        ),
+                    });
+                }
                 app.request_comment_sync();
                 app.request_sync();
             }

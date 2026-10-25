@@ -4,6 +4,9 @@ use crate::config::Config;
 use crate::store::{IssueRow, LocalRepoRow};
 use std::sync::mpsc::channel;
 
+#[path = "tests/editor_submission.rs"]
+mod editor_submission;
+
 #[test]
 fn worker_events_request_one_redraw_per_batch() {
     let conn = rusqlite::Connection::open_in_memory().expect("conn");

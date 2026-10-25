@@ -163,6 +163,8 @@ Search mode:
 
 On Unix terminals with bracketed paste support, pasting in a text field inserts text without submitting or running shortcuts. Comment and issue bodies keep pasted line breaks; titles and search fields use spaces.
 
+Issue creation and add/edit comment editors stay open while submitting. Text entry and repeat submissions are disabled until the result arrives. Failures keep the draft and its original target for editing and manual retry with `Enter`. `Esc` leaves the editor while the request continues; its result will not close a newer editor. Close-with-comment keeps its existing behavior.
+
 ## Search Qualifiers
 
 - `is:open`, `is:closed`, `is:merged`

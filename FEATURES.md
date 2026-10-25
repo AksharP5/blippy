@@ -66,6 +66,8 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Add, edit, and delete issue comments
 - Read long comments with arrow-key or mouse-wheel scrolling; `j`/`k` still jump between comments
 - Add, edit, and delete inline PR review comments
+- Failed issue creation and add/edit comment submissions keep their drafts and targets for manual retry, including the original commit and line range for inline reviews
+- Pending submissions ignore repeat submits; delayed results preserve newer editors and navigation
 - Resolve or reopen PR review threads
 - Navigate comment threads on selected diff lines
 
