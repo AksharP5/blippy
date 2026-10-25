@@ -289,6 +289,7 @@ fn preset_save_failures_keep_the_draft_and_allow_retry() {
         }],
         ..Config::default()
     };
+    let original_config = toml::to_string(&config).expect("original config");
     let mut app = crate::app::App::new(config);
     app.editor_mut().reset_for_preset_name();
     for ch in "resolved".chars() {
@@ -304,6 +305,7 @@ fn preset_save_failures_keep_the_draft_and_allow_retry() {
     for writable in [false, true] {
         if writable {
             fs::remove_dir(&config_path).expect("allow config writes");
+            fs::write(&config_path, &original_config).expect("restore writable config");
         }
         app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let (event_tx, _) = channel();

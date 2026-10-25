@@ -282,11 +282,7 @@ impl App {
     }
 
     pub fn save_comment_default(&mut self, preset: CommentDefault) -> Result<()> {
-        self.config.comment_defaults.push(preset);
-        if let Err(error) = self.config.save() {
-            self.config.comment_defaults.pop();
-            return Err(error);
-        }
+        self.config.save_comment_default(preset)?;
         self.preset.choice = 0;
         Ok(())
     }
