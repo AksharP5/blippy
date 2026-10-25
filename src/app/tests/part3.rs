@@ -124,6 +124,72 @@ fn gg_keeps_pull_request_diff_expanded_mode() {
 }
 
 #[test]
+fn cancelling_review_comments_restores_diff_layout_and_navigation() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    for expanded in [false, true] {
+        for edit in [false, true] {
+            let mut app = App::new(Config::default());
+            app.set_current_issue(1, 7);
+            app.set_view(View::PullRequestFiles);
+            app.set_pull_request_files(
+                1,
+                "head-a".into(),
+                vec![PullRequestFile {
+                    filename: "src/main.rs".into(),
+                    status: "modified".into(),
+                    additions: 2,
+                    deletions: 0,
+                    patch: Some("@@ -1 +1,3 @@\n context\n+first\n+second".into()),
+                }],
+            );
+            app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            if expanded {
+                app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
+            let line = app.selected_pull_request_diff_line();
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw review");
+            let review_frame = terminal.backend().buffer().clone();
+            if edit {
+                app.open_pull_request_review_comment_edit_editor(
+                    View::PullRequestFiles,
+                    10,
+                    "Review",
+                );
+            } else {
+                let target = app
+                    .selected_pull_request_review_target()
+                    .expect("review target");
+                app.open_pull_request_review_comment_editor(View::PullRequestFiles, target);
+            }
+            assert_eq!(app.view(), View::CommentEditor);
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw editor");
+            app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+            assert_eq!(app.view(), View::PullRequestFiles);
+            assert_eq!(app.pull_request_diff_expanded(), expanded);
+            assert_eq!(
+                app.pull_request_review_focus(),
+                PullRequestReviewFocus::Diff
+            );
+            assert_eq!(app.selected_pull_request_diff_line(), line);
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .expect("draw restored review");
+            assert_eq!(terminal.backend().buffer(), &review_frame);
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            assert_eq!(app.selected_pull_request_diff_line(), line + 1);
+        }
+    }
+}
+
+#[test]
 fn question_mark_toggles_help_overlay() {
     let mut app = App::new(Config::default());
     assert!(!app.help_overlay_visible());

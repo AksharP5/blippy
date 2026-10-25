@@ -446,6 +446,12 @@ impl App {
     }
 
     pub fn set_view(&mut self, view: View) {
+        let review_editor_transition = self.editor_flow.cancel_view == View::PullRequestFiles
+            && matches!(
+                (self.view, view),
+                (View::PullRequestFiles, View::CommentEditor)
+                    | (View::CommentEditor, View::PullRequestFiles)
+            );
         if self.view != view && view == View::IssueComments {
             self.navigation.issue_comment_offsets.clear();
         }
@@ -454,13 +460,13 @@ impl App {
         }
         self.view = view;
         self.search.help_overlay_visible = false;
-        if self.view != View::PullRequestFiles {
+        if self.view != View::PullRequestFiles && !review_editor_transition {
             self.pull_request.pull_request_diff_expanded = false;
         }
         match self.view {
             View::Issues => self.focus = Focus::IssuesList,
             View::IssueDetail => self.focus = Focus::IssueBody,
-            View::PullRequestFiles => {
+            View::PullRequestFiles if !review_editor_transition => {
                 self.pull_request.pull_request_review_focus = PullRequestReviewFocus::Files;
             }
             _ => {
