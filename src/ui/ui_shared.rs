@@ -726,6 +726,143 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     #[test]
+    fn wheel_over_linked_buttons_scrolls_the_containing_pane() {
+        use crate::app::WorkItemMode;
+
+        let theme = resolve_theme(None);
+        for view in [View::Issues, View::IssueDetail] {
+            for is_pr in [false, true] {
+                for width in [80, 120] {
+                    for web in [false, true] {
+                        let mut app = App::new(Config::default());
+                        app.set_issues(
+                            (1..=2)
+                                .map(|id| crate::store::IssueRow {
+                                    id,
+                                    repo_id: 1,
+                                    number: id,
+                                    state: "open".into(),
+                                    title: format!("Item {id}"),
+                                    body: format!(
+                                        "```\ndescription marker\n{}```",
+                                        "description line\n".repeat(60)
+                                    ),
+                                    labels: vec![],
+                                    assignees: String::new(),
+                                    comments_count: 1,
+                                    updated_at: None,
+                                    is_pr,
+                                })
+                                .collect(),
+                        );
+                        for id in 1..=2 {
+                            if is_pr {
+                                app.set_linked_issue_for_pull_request(id, Some(7));
+                            } else {
+                                app.set_linked_pull_request(id, Some(7));
+                            }
+                        }
+                        if is_pr {
+                            app.set_work_item_mode(WorkItemMode::PullRequests);
+                        }
+                        let selected = app.selected_issue_row().unwrap().number;
+                        app.set_current_issue(selected, selected);
+                        app.set_comments(vec![crate::store::CommentRow {
+                            id: 1,
+                            issue_id: selected,
+                            author: "reader".into(),
+                            body: format!("```\n{}```", "comment line\n".repeat(60)),
+                            created_at: None,
+                            last_accessed_at: None,
+                        }]);
+                        app.set_view(view);
+                        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+                        let marker_row = |buffer: &ratatui::buffer::Buffer| {
+                            buffer
+                                .content
+                                .chunks(width as usize)
+                                .position(|cells| {
+                                    cells
+                                        .iter()
+                                        .map(|cell| cell.symbol())
+                                        .collect::<String>()
+                                        .contains("description marker")
+                                })
+                                .expect("description marker is visible")
+                        };
+
+                        for (kind, scroll) in [
+                            (MouseEventKind::ScrollDown, 1),
+                            (MouseEventKind::ScrollUp, 0),
+                        ] {
+                            let (key, focus) = if view == View::Issues {
+                                ('h', Focus::IssuesPreview)
+                            } else {
+                                ('l', Focus::IssueBody)
+                            };
+                            app.on_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL));
+                            assert_ne!(app.focus(), focus);
+                            terminal
+                                .draw(|frame| crate::ui::draw(frame, &mut app))
+                                .unwrap();
+                            let before_row = marker_row(terminal.backend().buffer());
+                            let min_x = if view == View::Issues {
+                                width * 56 / 100
+                            } else {
+                                0
+                            };
+                            let (column, row) = (7..39)
+                                .find_map(|y| {
+                                    (min_x..width).find_map(|x| {
+                                        let cell = &terminal.backend().buffer()[(x, y)];
+                                        let bg = if web {
+                                            theme.accent_primary
+                                        } else {
+                                            theme.accent_success
+                                        };
+                                        (cell.fg == theme.bg_app && cell.bg == bg).then_some((x, y))
+                                    })
+                                })
+                                .expect("linked-item button is visible");
+                            app.on_mouse(MouseEvent {
+                                kind,
+                                column,
+                                row,
+                                modifiers: KeyModifiers::NONE,
+                            });
+                            assert_eq!(app.take_action(), None);
+                            assert_eq!(app.selected_issue_row().unwrap().number, selected);
+                            assert_eq!(app.view(), view);
+                            assert_eq!(
+                                app.focus(),
+                                focus,
+                                "{view:?} is_pr={is_pr} web={web} width={width} {kind:?}"
+                            );
+                            assert_eq!(
+                                app.issues_preview_scroll(),
+                                if view == View::Issues { scroll } else { 0 }
+                            );
+                            assert_eq!(
+                                app.issue_detail_scroll(),
+                                if view == View::IssueDetail { scroll } else { 0 }
+                            );
+                            assert_eq!(app.issue_recent_comments_scroll(), 0);
+                            terminal
+                                .draw(|frame| crate::ui::draw(frame, &mut app))
+                                .unwrap();
+                            let after_row = marker_row(terminal.backend().buffer());
+                            assert_eq!(
+                                after_row as isize - before_row as isize,
+                                if scroll == 1 { -1 } else { 1 }
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wrapped_link_buttons_click_their_rendered_cells() {
         use crate::app::{AppAction, WorkItemMode};
         for view in [View::Issues, View::IssueDetail] {
