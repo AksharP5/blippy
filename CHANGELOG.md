@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15](https://github.com/AksharP5/blippy/compare/v0.1.14...v0.1.15) - 2026-10-25
+
+### Fixed
+
+- *(config)* preserve preset saves from other sessions ([#133](https://github.com/AksharP5/blippy/pull/133))
+- *(ui)* scroll the pane under linked-item buttons ([#131](https://github.com/AksharP5/blippy/pull/131))
+- *(review)* keep stale threads off refreshed diffs ([#129](https://github.com/AksharP5/blippy/pull/129))
+- *(search)* match whole label names in filters ([#121](https://github.com/AksharP5/blippy/pull/121))
+- *(review)* reveal full lines past four-digit line numbers ([#127](https://github.com/AksharP5/blippy/pull/127))
+- recheck repository permissions on refresh ([#125](https://github.com/AksharP5/blippy/pull/125))
+- *(keybinds)* honor Shift+Tab overrides ([#123](https://github.com/AksharP5/blippy/pull/123))
+- *(editor)* preserve drafts after failed submissions ([#116](https://github.com/AksharP5/blippy/pull/116))
+- keep metadata pickers closed during pending actions ([#114](https://github.com/AksharP5/blippy/pull/114))
+- *(review)* keep selected inline comments visible ([#112](https://github.com/AksharP5/blippy/pull/112))
+- *(review)* reveal files when leaving expanded diff ([#110](https://github.com/AksharP5/blippy/pull/110))
+- *(config)* preserve base bindings when saving presets ([#108](https://github.com/AksharP5/blippy/pull/108))
+- *(input)* let quit shortcuts work in text fields ([#106](https://github.com/AksharP5/blippy/pull/106))
+- *(review)* prevent merging unseen PR updates ([#104](https://github.com/AksharP5/blippy/pull/104))
+- *(review)* keep diff focus and layout after comments ([#102](https://github.com/AksharP5/blippy/pull/102))
+- *(review)* reveal changed hunks after refreshing ([#100](https://github.com/AksharP5/blippy/pull/100))
+- keep preset drafts when saving fails ([#98](https://github.com/AksharP5/blippy/pull/98))
+
+### Other
+
+- *(ci)* stop uploading unused release tools on PRs ([#119](https://github.com/AksharP5/blippy/pull/119))
+- *(ci)* expire temporary release artifacts after one day ([#118](https://github.com/AksharP5/blippy/pull/118))
+- include certificate fixes in v0.1.14 notes ([#96](https://github.com/AksharP5/blippy/pull/96))
+
 ## [0.1.14](https://github.com/AksharP5/blippy/compare/v0.1.13...v0.1.14) - 2026-10-23
 
 ### Fixed
