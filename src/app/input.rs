@@ -150,6 +150,7 @@ impl App {
             KeyCode::Char('r') if key.modifiers.is_empty() && self.view == View::Issues => {
                 self.retry_incomplete_linked_lookups();
                 self.request_sync();
+                self.request_repo_permissions_sync();
                 self.status = "Syncing".to_string();
             }
             KeyCode::Char('r')
@@ -162,6 +163,7 @@ impl App {
                 self.retry_incomplete_linked_lookups();
                 self.request_comment_sync();
                 self.request_sync();
+                self.request_repo_permissions_sync();
                 if self.current_view_issue_is_pull_request() {
                     self.request_pull_request_files_sync();
                     self.request_pull_request_review_comments_sync();

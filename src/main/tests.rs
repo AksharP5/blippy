@@ -2819,3 +2819,6 @@ fn file_view_updates_survive_navigation_and_clear_on_completion() {
     assert!(!app.begin_pull_request_file_view_update(1, "src/lib.rs"));
     assert!(!app.begin_pull_request_file_view_update(2, "src/main.rs"));
 }
+
+#[path = "tests/permissions_refresh.rs"]
+mod permissions_refresh;
