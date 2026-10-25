@@ -132,7 +132,7 @@ Search mode:
 - `e`: Edit selected inline review comment
 - `x`: Delete selected inline review comment
 - `Shift+R`: Resolve/reopen selected review thread
-- `n` / `p`: Cycle line comments on current diff row
+- `n` / `p`: Cycle line comments on current diff row, scrolling the selected comment into view
 - `r`: Refresh PR data
 - `v`: Checkout PR locally
 - `Shift+M`: Merge pull request

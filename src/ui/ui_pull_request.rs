@@ -263,6 +263,7 @@ pub(super) fn draw_pull_request_files(
     let diff_focused = app.pull_request_review_focus() == PullRequestReviewFocus::Diff;
     let mut lines = Vec::new();
     let mut row_offsets = Vec::new();
+    let mut selected_comment_offset = None;
 
     if app.pull_request_files_syncing() {
         lines.push(Line::from("Loading pull request changes"));
@@ -355,6 +356,9 @@ pub(super) fn draw_pull_request_files(
                         right_width,
                         selected: app.selected_pull_request_review_comment_id() == Some(comment.id),
                     };
+                    if ctx.selected {
+                        selected_comment_offset = Some(lines.len());
+                    }
                     lines.push(render_inline_review_comment(
                         comment.author.as_str(),
                         comment.body.as_str(),
@@ -382,6 +386,9 @@ pub(super) fn draw_pull_request_files(
                         right_width,
                         selected: app.selected_pull_request_review_comment_id() == Some(comment.id),
                     };
+                    if ctx.selected {
+                        selected_comment_offset = Some(lines.len());
+                    }
                     lines.push(render_inline_review_comment(
                         comment.author.as_str(),
                         comment.body.as_str(),
@@ -407,24 +414,36 @@ pub(super) fn draw_pull_request_files(
     let max_scroll = total_lines.saturating_sub(viewport_height) as u16;
     app.set_pull_request_diff_max_scroll(max_scroll);
 
-    let selected_row_offset = row_offsets
-        .get(app.selected_pull_request_diff_line())
-        .and_then(|offset| *offset)
+    let selected_offset = selected_comment_offset
+        .map(|offset| {
+            if wrap {
+                wrapped_line_count(&lines[..offset], content_width) as u16
+            } else {
+                offset as u16
+            }
+        })
+        .or_else(|| {
+            row_offsets
+                .get(app.selected_pull_request_diff_line())
+                .and_then(|offset| *offset)
+        })
         .unwrap_or(0);
     let mut scroll = app.pull_request_diff_scroll();
-    if selected_row_offset < scroll {
-        scroll = selected_row_offset;
+    if selected_offset < scroll {
+        scroll = selected_offset;
     }
     let viewport = viewport_height as u16;
-    if viewport > 0 && selected_row_offset >= scroll.saturating_add(viewport) {
-        scroll = selected_row_offset.saturating_sub(viewport.saturating_sub(1));
+    if viewport > 0 && selected_offset >= scroll.saturating_add(viewport) {
+        scroll = selected_offset.saturating_sub(viewport.saturating_sub(1));
     }
     let last_visible_index = row_offsets
         .iter()
         .enumerate()
         .rev()
         .find_map(|(index, offset)| offset.map(|_| index));
-    if last_visible_index.is_some_and(|index| app.selected_pull_request_diff_line() >= index) {
+    if selected_comment_offset.is_none()
+        && last_visible_index.is_some_and(|index| app.selected_pull_request_diff_line() >= index)
+    {
         scroll = max_scroll;
     }
     app.set_pull_request_diff_scroll(scroll);
@@ -508,9 +527,154 @@ fn pull_request_header_hint(app: &App) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{app::PullRequestFile, config::Config};
+    use crate::{
+        app::{PullRequestFile, PullRequestReviewComment},
+        config::Config,
+    };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
+
+    fn inline_comment_app(line: usize, side: ReviewSide) -> App {
+        let mut app = App::new(Config::default());
+        app.set_view(View::PullRequestFiles);
+        let patch = std::iter::once("@@ -1,20 +1,20 @@".to_string())
+            .chain((1..=20).map(|line| format!(" row{line:02}")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.set_pull_request_files(
+            1,
+            "head".to_string(),
+            vec![PullRequestFile {
+                filename: "example.rs".to_string(),
+                status: "modified".to_string(),
+                additions: 0,
+                deletions: 0,
+                patch: Some(patch),
+            }],
+        );
+        app.set_pull_request_review_comments(
+            (1..=12)
+                .map(|id| PullRequestReviewComment {
+                    id,
+                    thread_id: None,
+                    resolved: false,
+                    anchored: true,
+                    path: "example.rs".to_string(),
+                    line: line as i64,
+                    side,
+                    body: format!("c{id:02}"),
+                    author: "r".to_string(),
+                    created_at: None,
+                })
+                .collect(),
+        );
+        app.set_pull_request_review_focus(PullRequestReviewFocus::Diff);
+        if side == ReviewSide::Left {
+            app.on_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        }
+        for _ in 0..line {
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        }
+        app
+    }
+
+    fn review_screen(terminal: &mut Terminal<TestBackend>, app: &mut App) -> String {
+        terminal.draw(|frame| crate::ui::draw(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        buffer
+            .content
+            .chunks(buffer.area.width as usize)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn cycling_inline_comments_keeps_selected_comment_visible() {
+        for (width, height) in [(80, 16), (120, 24)] {
+            for expanded in [false, true] {
+                for side in [ReviewSide::Right, ReviewSide::Left] {
+                    for line in [3, 10, 20] {
+                        let mut app = inline_comment_app(line, side);
+                        if expanded {
+                            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                        }
+                        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                        let initial = review_screen(&mut terminal, &mut app);
+                        for (key, count, id) in [
+                            ('n', 5, 6),
+                            ('n', 6, 12),
+                            ('n', 1, 1),
+                            ('p', 1, 12),
+                            ('p', 6, 6),
+                            ('p', 5, 1),
+                        ] {
+                            for _ in 0..count {
+                                app.on_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+                            }
+                            let screen = review_screen(&mut terminal, &mut app);
+                            assert_eq!(app.selected_pull_request_review_comment_id(), Some(id));
+                            assert_eq!(app.selected_pull_request_diff_line(), line);
+                            assert_eq!(app.pull_request_review_side(), side);
+                            assert_eq!(
+                                app.pull_request_review_focus(),
+                                PullRequestReviewFocus::Diff
+                            );
+                            assert_eq!(app.pull_request_diff_expanded(), expanded);
+                            let side_label = if side == ReviewSide::Right {
+                                "new"
+                            } else {
+                                "old"
+                            };
+                            assert!(
+                                screen.contains(&format!("> [{side_label} open @r] c{id:02}")),
+                                "{width}x{height}, expanded={expanded}, side={side:?}, line={line}, selected={id}\nInitial:\n{initial}\nAfter {count} {key} keys:\n{screen}"
+                            );
+                            assert_eq!(screen, review_screen(&mut terminal, &mut app));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn diff_row_navigation_and_clicks_work_after_cycling_inline_comments() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = inline_comment_app(3, ReviewSide::Right);
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        review_screen(&mut terminal, &mut app);
+        for _ in 0..5 {
+            app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        }
+        review_screen(&mut terminal, &mut app);
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let screen = review_screen(&mut terminal, &mut app);
+        assert_eq!(app.selected_pull_request_diff_line(), 4);
+        assert_eq!(app.selected_pull_request_review_comment_id(), None);
+        assert!(screen.contains("R    4 row04"), "{screen}");
+        let (y, row) = screen
+            .lines()
+            .enumerate()
+            .find(|(_, row)| row.contains("row04"))
+            .unwrap();
+        let x = row[..row.find("row04").unwrap()].chars().count() as u16;
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y as u16,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.selected_pull_request_diff_line(), 4);
+        assert_eq!(app.pull_request_review_side(), ReviewSide::Left);
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        let screen = review_screen(&mut terminal, &mut app);
+        assert_eq!(app.selected_pull_request_diff_line(), 3);
+        assert_eq!(app.selected_pull_request_review_comment_id(), Some(1));
+        assert!(screen.contains("> [new open @r] c01"), "{screen}");
+    }
 
     #[test]
     fn review_toolbar_buttons_match_their_visible_cells() {
