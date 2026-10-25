@@ -1127,6 +1127,272 @@ fn offscreen_completion_clears_only_its_repository_action() {
     assert_eq!(app.pending_issue_badge(7), None);
 }
 
+fn metadata_picker_app(view: View) -> crate::app::App {
+    let mut app = crate::app::App::new(Config::default());
+    app.set_current_repo_with_path("acme", "blippy", None);
+    app.set_repo_issue_metadata_editable(Some(true));
+    let is_pr = view == View::PullRequestFiles;
+    if is_pr {
+        app.set_work_item_mode(WorkItemMode::PullRequests);
+    }
+    app.set_issues(
+        [
+            (7, vec!["bug".into()], "alex"),
+            (8, vec!["docs".into(), "urgent".into()], "sam,taylor"),
+        ]
+        .into_iter()
+        .map(|(number, labels, assignees)| IssueRow {
+            id: number,
+            repo_id: 1,
+            number,
+            state: "open".into(),
+            title: format!("Issue {number}"),
+            body: String::new(),
+            labels,
+            assignees: assignees.into(),
+            comments_count: 0,
+            updated_at: None,
+            is_pr,
+        })
+        .collect(),
+    );
+    assert!(app.select_issue_by_number(7));
+    app.set_current_issue(7, 7);
+    app.set_view(view);
+    app
+}
+
+#[test]
+fn pending_issue_actions_keep_metadata_pickers_closed() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    for view in [
+        View::Issues,
+        View::IssueDetail,
+        View::IssueComments,
+        View::PullRequestFiles,
+    ] {
+        for pending in [
+            PendingIssueAction::Closing,
+            PendingIssueAction::UpdatingLabels,
+            PendingIssueAction::UpdatingAssignees,
+        ] {
+            for key in [
+                KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT),
+            ] {
+                if view == View::PullRequestFiles && key.code == KeyCode::Char('l') {
+                    continue;
+                }
+                for (width, height) in [(80, 24), (120, 36)] {
+                    let mut app = metadata_picker_app(view);
+                    if view == View::Issues {
+                        app.set_current_issue(8, 8);
+                    }
+                    let current_issue = app.current_issue_id();
+                    app.set_pending_issue_action(7, pending);
+                    let status = format!("#7 is already {}", app.pending_issue_badge(7).unwrap());
+                    app.set_status(&status);
+                    app.take_repo_labels_sync_request();
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal
+                        .draw(|frame| crate::ui::draw(frame, &mut app))
+                        .unwrap();
+                    let before = terminal.backend().buffer().clone();
+
+                    app.on_key(key);
+                    let (event_tx, _event_rx) = channel();
+                    super::main_actions::handle_actions(
+                        &mut app,
+                        &mut crate::clipboard::SystemClipboard::default(),
+                        &conn,
+                        "\n",
+                        event_tx,
+                    )
+                    .expect("reject picker entry during pending action");
+
+                    assert_eq!(app.view(), view, "{key:?}, {pending:?}");
+                    assert_eq!(app.current_issue_id(), current_issue);
+                    assert_eq!(app.status(), status);
+                    assert!(!app.take_repo_labels_sync_request());
+                    terminal
+                        .draw(|frame| crate::ui::draw(frame, &mut app))
+                        .unwrap();
+                    assert_eq!(terminal.backend().buffer(), &before);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn label_picker_preserves_completed_updates() {
+    assert_metadata_picker_preserves_completed_updates(false);
+}
+
+#[test]
+fn assignee_picker_preserves_completed_updates() {
+    assert_metadata_picker_preserves_completed_updates(true);
+}
+
+fn assert_metadata_picker_preserves_completed_updates(assignees: bool) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let conn = rusqlite::Connection::open_in_memory().expect("conn");
+    let edit_key = if assignees {
+        KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)
+    } else {
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE)
+    };
+    let (first_addition, second_addition) = if assignees {
+        ("sam", "taylor")
+    } else {
+        ("urgent", "docs")
+    };
+    for view in [
+        View::Issues,
+        View::IssueDetail,
+        View::IssueComments,
+        View::PullRequestFiles,
+    ] {
+        // Review uses l to select the right diff side.
+        if view == View::PullRequestFiles && !assignees {
+            continue;
+        }
+        let mut app = metadata_picker_app(view);
+        app.set_pending_issue_action(8, PendingIssueAction::UpdatingLabels);
+        let (worker_tx, _worker_rx) = channel();
+        let mut clipboard = crate::clipboard::SystemClipboard::default();
+        let mut handle_action = |app: &mut crate::app::App| {
+            // Invalid authorization prevents network I/O; completions are queued below.
+            super::main_actions::handle_actions(
+                app,
+                &mut clipboard,
+                &conn,
+                "\n",
+                worker_tx.clone(),
+            )
+            .expect("handle metadata action");
+        };
+        app.on_key(edit_key);
+        handle_action(&mut app);
+        assert_eq!(
+            app.view(),
+            if assignees {
+                View::AssigneePicker
+            } else {
+                View::LabelPicker
+            }
+        );
+        for ch in first_addition.chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(
+            if assignees {
+                app.selected_assignees()
+            } else {
+                app.selected_labels()
+            },
+            if assignees {
+                vec!["alex", "sam"]
+            } else {
+                vec!["bug", "urgent"]
+            },
+        );
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_action(&mut app);
+        assert_eq!(app.view(), view);
+        assert_eq!(
+            app.pending_issue_badge(7),
+            Some(if assignees {
+                "updating assignees"
+            } else {
+                "updating labels"
+            })
+        );
+
+        app.on_key(edit_key);
+        handle_action(&mut app);
+        let pending_view = app.view();
+        let repo = super::RepoIdentity::new("acme", "blippy", None);
+        let completion = if assignees {
+            super::AppEvent::IssueAssigneesUpdated {
+                repo,
+                issue_number: 7,
+                assignees: "alex,sam".into(),
+            }
+        } else {
+            super::AppEvent::IssueLabelsUpdated {
+                repo,
+                issue_number: 7,
+                labels: vec!["bug".into(), "urgent".into()],
+            }
+        };
+        let (event_tx, event_rx) = channel();
+        event_tx.send(completion).expect("first save completed");
+        super::main_events::handle_events(&mut app, &conn, &event_rx).expect("handle completion");
+        assert_eq!(app.pending_issue_badge(7), None);
+        assert_eq!(app.pending_issue_badge(8), Some("updating labels"));
+        if app.view() == view {
+            app.on_key(edit_key);
+            handle_action(&mut app);
+        }
+        for ch in second_addition.chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        let selected = if assignees {
+            app.selected_assignees()
+        } else {
+            app.selected_labels()
+        };
+        assert_eq!(
+            selected,
+            if assignees {
+                vec!["alex", "sam", "taylor"]
+            } else {
+                vec!["bug", "docs", "urgent"]
+            },
+            "source={view:?}, pending view={pending_view:?}"
+        );
+        for (width, height) in [(80, 24), (120, 36)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(
+                rendered.contains(&format!("[x] {first_addition}")),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains(&format!("[x] {second_addition}")),
+                "{rendered}"
+            );
+        }
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            app.take_action(),
+            Some(if assignees {
+                crate::app::AppAction::SubmitAssignees
+            } else {
+                crate::app::AppAction::SubmitLabels
+            })
+        );
+    }
+}
+
 fn parse_csv_values(input: &str, strip_at: bool) -> Vec<String> {
     let mut values = Vec::new();
     for raw in input.split(',') {

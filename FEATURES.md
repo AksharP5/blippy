@@ -74,6 +74,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Edit labels and assignees for issues/PRs from the TUI
 - Merge actions are permission-aware and only enabled for authorized repos
 - Label and assignee pickers with inline filtering; background suggestions preserve the highlighted option and checked selections
+- Metadata pickers stay closed while an action on the same item is pending, so reopening uses its saved labels and assignees
 - Open metadata pickers keep mouse input inside the picker, leaving background issues and repository navigation inactive
 - Editing is permission-aware and checks repo capabilities
 
