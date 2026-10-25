@@ -67,7 +67,7 @@ See the [feature demo](DEMO.md) for a visual walkthrough of these capabilities i
 - Read long comments with arrow-key or mouse-wheel scrolling; `j`/`k` still jump between comments
 - Add, edit, and delete inline PR review comments
 - Resolve or reopen PR review threads
-- Navigate comment threads on selected diff lines
+- Navigate comment threads on selected diff lines, keeping the selected comment visible
 
 ## Metadata Editing and Permission Awareness
 
