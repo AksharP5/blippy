@@ -12,6 +12,8 @@ pub struct Config {
     pub theme: Option<String>,
     #[serde(default)]
     pub keybinds: HashMap<String, String>,
+    #[serde(skip)]
+    pub file_keybinds: HashMap<String, String>,
     #[serde(default)]
     pub comment_defaults: Vec<CommentDefault>,
 }
@@ -41,9 +43,15 @@ impl Config {
             let keybinds_file: KeybindsFile = toml::from_str(&contents).with_context(|| {
                 format!("Failed to parse config at {}", keybinds_path.display())
             })?;
-            config.keybinds.extend(keybinds_file.keybinds);
+            config.file_keybinds = keybinds_file.keybinds;
         }
         Ok(config)
+    }
+
+    pub fn effective_keybinds(&self) -> HashMap<String, String> {
+        let mut keybinds = self.keybinds.clone();
+        keybinds.extend(self.file_keybinds.clone());
+        keybinds
     }
 
     pub fn save(&self) -> Result<()> {
@@ -98,6 +106,87 @@ mod tests {
 
         let config: Config = toml::from_str(input).expect("parse config");
         assert_eq!(config.theme.as_deref(), Some("midnight"));
+    }
+
+    #[test]
+    fn saving_presets_keeps_keybinding_file_overrides_out_of_the_main_config() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        const CONFIG_ENV: &str = "BLIPPY_TEST_BINDING_CONFIG";
+        let Some(config_dir) = std::env::var_os(CONFIG_ENV) else {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("timestamp")
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!("blippy-config-overrides-{nanos}"));
+            std::fs::create_dir_all(dir.join("blippy")).expect("config directory");
+            std::fs::write(
+                dir.join("blippy/config.toml"),
+                "theme = \"midnight\"\n[keybinds]\nquit = \"ctrl+q\"\nrefresh = \"ctrl+s\"\n",
+            )
+            .expect("base config");
+            std::fs::write(
+                dir.join("blippy/keybinds.toml"),
+                "[keybinds]\nquit = \"ctrl+x\"\n",
+            )
+            .expect("keybinding override");
+            let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "config::tests::saving_presets_keeps_keybinding_file_overrides_out_of_the_main_config",
+                ])
+                .env(CONFIG_ENV, &dir)
+                .env("XDG_CONFIG_HOME", &dir)
+                .output()
+                .expect("isolated config test");
+            std::fs::remove_dir_all(&dir).expect("remove test config");
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+
+        let dir = std::path::PathBuf::from(config_dir).join("blippy");
+        let mut app = crate::app::App::new(Config::load().expect("load effective config"));
+        app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+        assert!(
+            app.should_quit(),
+            "keybinds.toml takes precedence at runtime"
+        );
+
+        let mut config = Config::load().expect("load config for preset");
+        config.comment_defaults.push(super::CommentDefault {
+            name: "resolved".into(),
+            body: "Closing as resolved.".into(),
+        });
+        config.save().expect("save preset");
+        let saved: Config = toml::from_str(
+            &std::fs::read_to_string(dir.join("config.toml")).expect("read saved config"),
+        )
+        .expect("parse saved config");
+        assert_eq!(
+            saved.keybinds.get("quit").map(String::as_str),
+            Some("ctrl+q")
+        );
+        assert_eq!(
+            saved.keybinds.get("refresh").map(String::as_str),
+            Some("ctrl+s")
+        );
+        assert_eq!(saved.theme.as_deref(), Some("midnight"));
+        assert_eq!(saved.comment_defaults, config.comment_defaults);
+
+        std::fs::write(dir.join("keybinds.toml"), "[keybinds]\n").expect("remove override");
+        let mut app = crate::app::App::new(Config::load().expect("load without override"));
+        app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+        assert!(!app.should_quit());
+        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+        assert!(
+            app.should_quit(),
+            "removing the override restores the base binding"
+        );
     }
 
     #[test]
